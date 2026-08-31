@@ -97,16 +97,12 @@ def handle_wake_detected(pa: pyaudio.PyAudio):
     # load time would create a circular import. Safe to import here since this
     # function only runs after main.py has fully finished loading.
     from main import (
-        transcribe_with_groq, transcribe_with_whisper_cpp, has_internet,
+        transcribe_smart, has_internet,
         load_history, save_history, call_local_model, call_cloud_model,
         needs_cloud, load_settings
     )
 
-    text = None
-    if has_internet():
-        text, _ = transcribe_with_groq(audio_path)
-    if text is None:
-        text, _ = transcribe_with_whisper_cpp(audio_path)
+    text, _engine_used, _err = transcribe_smart(audio_path)
 
     if not text or not text.strip():
         log("[wakeword] No speech detected in command window, ignoring.")

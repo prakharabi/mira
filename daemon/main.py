@@ -203,7 +203,7 @@ def call_cloud_model(history: list):
         "https://api.groq.com/openai/v1/chat/completions",
         headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
         json={
-            "model": "llama-3.3-70b-versatile",
+            "model": "openai/gpt-oss-120b",
             "messages": history
         }
     )
@@ -248,29 +248,6 @@ def chat(session_id: str = Body(...), message: str = Body(...), model: str = Bod
     save_history(session_id, history)
 
     return {"response": reply, "model_used": used_model}
-
-
-# ---------- Short-clip transcription (used by predictive typing, unrelated to meetings) ----------
-@app.post("/transcribe")
-async def transcribe(audio: UploadFile = File(...)):
-    audio_bytes = await audio.read()
-
-    response = requests.post(
-        "https://api.groq.com/openai/v1/audio/translations",
-        headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-        files={
-            "file": (audio.filename, audio_bytes, audio.content_type)
-        },
-        data={
-            "model": "whisper-large-v3"
-        }
-    )
-    result = response.json()
-
-    if "text" not in result:
-        return {"error": result}
-
-    return {"text": result["text"]}
 
 
 # ---------- NEW: long-file transcription with local fallback ----------
@@ -318,31 +295,59 @@ def transcribe_with_whisper_cpp(filepath: Path):
 
     return None, {"error": "no transcription output found"}
 
+
+def transcribe_smart(filepath: Path):
+    """
+    Local whisper.cpp is tried first: it's proven to translate non-English speech
+    (e.g. Hindi) to English correctly, whereas Groq's cloud /translations endpoint
+    has been observed to only transliterate (romanize) Hindi instead of actually
+    translating it. Groq is used as a fallback only if the local engine fails outright.
+    Returns (text, engine_used, error_info).
+    """
+    text, local_error = transcribe_with_whisper_cpp(filepath)
+    if text is not None:
+        return text, "whisper.cpp", None
+
+    if has_internet():
+        text, groq_error = transcribe_with_groq(filepath)
+        if text is not None:
+            return text, "groq", None
+        return None, None, {"local_error": local_error, "groq_error": groq_error}
+
+    return None, None, {"local_error": local_error}
+
+
+# ---------- Short-clip transcription (used by chat mic / push-to-talk) ----------
+@app.post("/transcribe")
+async def transcribe(audio: UploadFile = File(...)):
+    temp_path = MEETINGS_DIR / f"clip_{uuid.uuid4().hex}.webm"
+    audio_bytes = await audio.read()
+    temp_path.write_bytes(audio_bytes)
+
+    text, engine_used, error_info = transcribe_smart(temp_path)
+
+    for f in [temp_path, temp_path.with_suffix(".converted.wav"), temp_path.with_suffix(".converted.wav.txt")]:
+        f.unlink(missing_ok=True)
+
+    if text is None:
+        return {"error": error_info}
+
+    return {"text": text, "engine_used": engine_used}
+
+
 @app.post("/transcribe-file")
 async def transcribe_file(audio: UploadFile = File(...)):
     """
     Accepts any audio/video file (meeting recordings, voice memos, etc).
-    Tries Groq Whisper first (if internet available), falls back to local whisper.cpp.
     """
     temp_path = MEETINGS_DIR / f"upload_{uuid.uuid4().hex}_{audio.filename}"
     audio_bytes = await audio.read()
     temp_path.write_bytes(audio_bytes)
 
-    text = None
-    engine_used = None
-    error_info = None
-
-    if has_internet():
-        text, error_info = transcribe_with_groq(temp_path)
-        if text is not None:
-            engine_used = "groq"
+    text, engine_used, error_info = transcribe_smart(temp_path)
 
     if text is None:
-        text, fallback_error = transcribe_with_whisper_cpp(temp_path)
-        if text is not None:
-            engine_used = "whisper.cpp"
-        else:
-            return {"error": {"groq_error": error_info, "local_error": fallback_error}}
+        return {"error": error_info}
 
     return {"text": text, "engine_used": engine_used}
 
@@ -357,21 +362,9 @@ def transcribe_local_meeting(filepath: str = Body(..., embed=True)):
     if not path.exists():
         return {"error": f"file not found: {filepath}"}
 
-    text = None
-    engine_used = None
-    error_info = None
-
-    if has_internet():
-        text, error_info = transcribe_with_groq(path)
-        if text is not None:
-            engine_used = "groq"
-
+    text, engine_used, error_info = transcribe_smart(path)
     if text is None:
-        text, fallback_error = transcribe_with_whisper_cpp(path)
-        if text is not None:
-            engine_used = "whisper.cpp"
-        else:
-            return {"error": {"groq_error": error_info, "local_error": fallback_error}}
+        return {"error": error_info}
 
     return {"text": text, "engine_used": engine_used}
 
