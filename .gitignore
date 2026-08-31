@@ -19,6 +19,7 @@ daemon/tts_output/
 daemon/mira.log
 daemon/mira_error.log
 daemon/out.aiff
+electron/electron.log
 
 # macOS
 .DS_Store

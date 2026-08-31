@@ -283,7 +283,7 @@
     <div id="messages"></div>
 
     <div id="input-bar">
-      <button class="icon-btn" id="mic-btn" onclick="toggleRecording()">🎤</button>
+      <button class="icon-btn" id="mic-btn" title="Hold to talk">🎤</button>
       <input id="text-input" type="text" placeholder="Message Mira..." />
       <button class="icon-btn" id="send-btn" onclick="sendTextMessage()">➤</button>
     </div>
@@ -352,6 +352,8 @@
     let isRecording = false;
     let mediaRecorder = null;
     let audioChunks = [];
+    let micStream = null;
+    let micHeld = false;
 
     function addMessage(role, text) {
       const div = document.createElement('div');
@@ -419,34 +421,56 @@
       }
     }
 
-    async function toggleRecording() {
-      if (!isRecording) {
-        // start recording
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-          mediaRecorder = new MediaRecorder(stream);
-          audioChunks = [];
+    async function startRecording(e) {
+      e.preventDefault();
+      if (isRecording || micHeld) return;
+      micHeld = true;
+      micBtn.classList.add('recording');
 
-          mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data);
-          mediaRecorder.onstop = async () => {
-            const blob = new Blob(audioChunks, { type: 'audio/webm' });
-            stream.getTracks().forEach(t => t.stop());
-            await transcribeAndSend(blob);
-          };
-
-          mediaRecorder.start();
-          isRecording = true;
-          micBtn.classList.add('recording');
-        } catch (e) {
-          addMessage('system', 'Microphone access denied or unavailable.');
-        }
-      } else {
-        // stop recording
-        mediaRecorder.stop();
-        isRecording = false;
+      let stream;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (e) {
+        micHeld = false;
         micBtn.classList.remove('recording');
+        addMessage('system', 'Microphone access denied or unavailable.');
+        return;
       }
+
+      if (!micHeld) {
+        // button was released before mic access resolved — discard
+        stream.getTracks().forEach(t => t.stop());
+        return;
+      }
+
+      micStream = stream;
+      audioChunks = [];
+      mediaRecorder = new MediaRecorder(micStream);
+      mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data);
+      mediaRecorder.onstop = async () => {
+        micStream.getTracks().forEach(t => t.stop());
+        micStream = null;
+        const blob = new Blob(audioChunks, { type: 'audio/webm' });
+        if (blob.size > 0) await transcribeAndSend(blob);
+      };
+      mediaRecorder.start();
+      isRecording = true;
     }
+
+    function stopRecording(e) {
+      if (e) e.preventDefault();
+      micHeld = false;
+      micBtn.classList.remove('recording');
+      if (!isRecording || !mediaRecorder) return;
+      isRecording = false;
+      if (mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+    }
+
+    micBtn.addEventListener('mousedown', startRecording);
+    micBtn.addEventListener('mouseup', stopRecording);
+    micBtn.addEventListener('mouseleave', stopRecording);
+    micBtn.addEventListener('touchstart', startRecording);
+    micBtn.addEventListener('touchend', stopRecording);
 
     async function transcribeAndSend(blob) {
       addMessage('system', 'Transcribing...');
