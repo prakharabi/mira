@@ -1,0 +1,1651 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  :root {
+    --bg: #08080c;
+    --bg-elevated: rgba(255,255,255,0.035);
+    --bg-elevated-2: rgba(255,255,255,0.065);
+    --bg-elevated-3: rgba(255,255,255,0.09);
+    --border: rgba(255,255,255,0.08);
+    --border-soft: rgba(255,255,255,0.05);
+    --text-primary: #f3f3f6;
+    --text-secondary: #9a9aa6;
+    --text-tertiary: #64646e;
+    --accent-1: #8b5cf6;
+    --accent-2: #06b6d4;
+    --accent-gradient: linear-gradient(135deg, #8b5cf6 0%, #6366f1 45%, #06b6d4 100%);
+    --danger: #f04438;
+    --success: #22c55e;
+    --radius-lg: 18px;
+    --radius-md: 12px;
+    --radius-sm: 8px;
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    background: transparent;
+  }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    color: var(--text-primary);
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection { background: rgba(139, 92, 246, 0.35); }
+
+  /* custom scrollbar */
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.12);
+    border-radius: 8px;
+  }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+
+  #shell {
+    position: relative;
+    width: 100vw;
+    height: 100vh;
+    background: var(--bg);
+    border-radius: 16px;
+    overflow: hidden;
+    display: flex;
+    border: 1px solid var(--border-soft);
+  }
+
+  /* ---------- ambient background ---------- */
+  #ambient {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    overflow: hidden;
+  }
+  #ambient .blob {
+    position: absolute;
+    width: 60vw;
+    height: 60vw;
+    border-radius: 50%;
+    filter: blur(90px);
+    opacity: 0.16;
+    will-change: transform;
+  }
+  #ambient .blob.a { background: #8b5cf6; top: -20%; left: -10%; }
+  #ambient .blob.b { background: #06b6d4; bottom: -25%; right: -15%; opacity: 0.12; }
+
+  /* ---------- titlebar (drag region spans full top) ---------- */
+  #titlebar {
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 40px;
+    -webkit-app-region: drag;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding: 0 14px;
+    gap: 6px;
+  }
+  .win-btn {
+    -webkit-app-region: no-drag;
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    transition: background 150ms var(--ease-standard), color 150ms var(--ease-standard);
+  }
+  .win-btn:hover { background: var(--bg-elevated-2); color: var(--text-primary); }
+  .win-btn:active { transform: scale(0.92); }
+  .win-btn.close:hover { background: rgba(240, 68, 56, 0.15); color: #f04438; }
+
+  /* ---------- sidebar ---------- */
+  #sidebar {
+    position: relative;
+    z-index: 10;
+    width: 216px;
+    flex-shrink: 0;
+    padding: 52px 12px 16px;
+    background: rgba(255,255,255,0.015);
+    border-right: 1px solid var(--border-soft);
+    display: flex;
+    flex-direction: column;
+    -webkit-app-region: drag;
+  }
+
+  #brand {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 0 10px 22px;
+  }
+  #brand .mark {
+    width: 26px;
+    height: 26px;
+    flex-shrink: 0;
+    filter: drop-shadow(0 0 10px rgba(139, 92, 246, 0.45));
+  }
+  #brand .mark svg { width: 100%; height: 100%; display: block; }
+  #brand .name {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
+
+  #nav {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    -webkit-app-region: no-drag;
+  }
+
+  #nav-indicator {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    height: 38px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-elevated-2);
+    border: 1px solid var(--border);
+    z-index: 0;
+    pointer-events: none;
+  }
+
+  .nav-item {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 38px;
+    padding: 0 10px;
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    user-select: none;
+    transition: color 150ms var(--ease-standard);
+  }
+  .nav-item svg { width: 17px; height: 17px; flex-shrink: 0; opacity: 0.85; }
+  .nav-item:hover { color: var(--text-primary); }
+  .nav-item.active { color: var(--text-primary); }
+  .nav-item.active svg { opacity: 1; }
+  .nav-item:active { transform: scale(0.98); }
+
+  #sidebar-footer {
+    margin-top: auto;
+    padding: 10px;
+    -webkit-app-region: no-drag;
+  }
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    padding: 4px 0;
+  }
+  .status-dot {
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: var(--text-tertiary);
+    flex-shrink: 0;
+    transition: background 300ms var(--ease-standard), box-shadow 300ms var(--ease-standard);
+  }
+  .status-dot.online { background: var(--success); box-shadow: 0 0 8px rgba(34,197,94,0.6); }
+  .status-dot.offline { background: var(--danger); box-shadow: 0 0 8px rgba(240,68,56,0.5); }
+
+  /* ---------- main area ---------- */
+  #main {
+    position: relative;
+    z-index: 5;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .view {
+    display: none;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    padding: 52px 32px 28px;
+    overflow-y: auto;
+    animation: view-in 320ms var(--ease-out);
+  }
+  .view.active { display: flex; }
+  @keyframes view-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .view-header { margin-bottom: 22px; }
+  .view-title {
+    font-size: 22px;
+    font-weight: 650;
+    letter-spacing: -0.02em;
+    margin: 0 0 3px;
+  }
+  .view-subtitle {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin: 0;
+  }
+
+  /* ---------- glass card ---------- */
+  .card {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    backdrop-filter: blur(20px);
+  }
+
+  /* ---------- Home view ---------- */
+  #home-view { gap: 22px; }
+  .stat-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+  }
+  .stat-card {
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    transition: border-color 200ms var(--ease-standard), transform 200ms var(--ease-standard);
+  }
+  .stat-card:hover { border-color: rgba(255,255,255,0.16); transform: translateY(-1px); }
+  .stat-card .stat-top { display: flex; align-items: center; justify-content: space-between; }
+  .stat-card .stat-label { font-size: 11.5px; color: var(--text-tertiary); font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; }
+  .stat-card .stat-value { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+
+  .quick-ask {
+    padding: 18px 18px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .quick-ask-label { font-size: 12.5px; color: var(--text-secondary); font-weight: 500; }
+  .quick-ask-row { display: flex; gap: 8px; }
+
+  .action-row { display: flex; gap: 10px; }
+  .action-btn {
+    flex: 1;
+    padding: 14px 16px;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    cursor: pointer;
+    transition: transform 100ms var(--ease-standard), border-color 200ms var(--ease-standard), background 200ms var(--ease-standard);
+  }
+  .action-btn:hover { border-color: rgba(255,255,255,0.18); background: var(--bg-elevated-2); }
+  .action-btn:active { transform: scale(0.98); }
+  .action-btn .icon-wrap {
+    width: 32px; height: 32px;
+    border-radius: 9px;
+    background: var(--accent-gradient);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .action-btn .icon-wrap svg { width: 16px; height: 16px; color: white; }
+  .action-btn .label { font-size: 13px; font-weight: 550; }
+  .action-btn .sub { font-size: 11px; color: var(--text-tertiary); }
+
+  /* ---------- generic inputs / buttons ---------- */
+  .text-field {
+    flex: 1;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 10px 16px;
+    color: var(--text-primary);
+    font-size: 13px;
+    outline: none;
+    transition: border-color 150ms var(--ease-standard), background 150ms var(--ease-standard);
+  }
+  .text-field:focus { border-color: rgba(139,92,246,0.5); background: rgba(255,255,255,0.06); }
+  .text-field::placeholder { color: var(--text-tertiary); }
+
+  .btn-primary {
+    background: var(--accent-gradient);
+    color: white;
+    border: none;
+    border-radius: 999px;
+    width: 38px; height: 38px;
+    flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    transition: transform 100ms var(--ease-standard), filter 150ms var(--ease-standard);
+  }
+  .btn-primary:hover { filter: brightness(1.12); }
+  .btn-primary:active { transform: scale(0.94); }
+  .btn-primary svg { width: 15px; height: 15px; }
+
+  .icon-btn {
+    width: 38px; height: 38px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: transform 100ms var(--ease-standard), background 150ms var(--ease-standard), border-color 150ms var(--ease-standard);
+  }
+  .icon-btn svg { width: 16px; height: 16px; }
+  .icon-btn:hover { background: rgba(255,255,255,0.09); }
+  .icon-btn:active { transform: scale(0.94); }
+  .icon-btn.recording {
+    background: rgba(240, 68, 56, 0.18);
+    border-color: rgba(240, 68, 56, 0.4);
+    color: #ff6b5e;
+    animation: rec-pulse 1.1s infinite;
+  }
+  @keyframes rec-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(240,68,56,0.35); }
+    50% { box-shadow: 0 0 0 6px rgba(240,68,56,0); }
+  }
+
+  /* ---------- segmented control ---------- */
+  .segmented {
+    position: relative;
+    display: inline-flex;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 3px;
+    gap: 2px;
+  }
+  .segmented .seg-indicator {
+    position: absolute;
+    top: 3px; bottom: 3px;
+    left: 3px;
+    border-radius: 999px;
+    background: var(--accent-gradient);
+    z-index: 0;
+  }
+  .segmented button {
+    position: relative;
+    z-index: 1;
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-weight: 550;
+    padding: 6px 14px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: color 150ms var(--ease-standard);
+  }
+  .segmented button.active { color: white; }
+
+  /* ---------- Chat view ---------- */
+  #chat-view { padding-bottom: 0; }
+  #chat-view .view-header { display: flex; align-items: flex-start; justify-content: space-between; }
+  #messages {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 4px 2px 16px;
+  }
+  .msg {
+    max-width: 68%;
+    padding: 10px 14px;
+    border-radius: 16px;
+    font-size: 13.5px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    animation: msg-in 260ms var(--ease-out);
+  }
+  @keyframes msg-in {
+    from { opacity: 0; transform: translateY(8px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+  .msg.user {
+    align-self: flex-end;
+    background: var(--accent-gradient);
+    color: white;
+    border-bottom-right-radius: 6px;
+  }
+  .msg.assistant {
+    align-self: flex-start;
+    background: var(--bg-elevated-2);
+    border: 1px solid var(--border);
+    color: #ececf1;
+    border-bottom-left-radius: 6px;
+  }
+  .msg.system {
+    align-self: center;
+    background: transparent;
+    color: var(--text-tertiary);
+    font-size: 11px;
+    padding: 2px 8px;
+  }
+
+  #chat-input-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 2px 4px;
+    border-top: 1px solid var(--border-soft);
+    margin-top: 8px;
+  }
+
+  /* ---------- Meetings view ---------- */
+  .section-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .meeting-card { padding: 18px; display: flex; flex-direction: column; gap: 10px; }
+  .meeting-card h3 { margin: 0; font-size: 12.5px; color: var(--text-secondary); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; }
+  .full-btn {
+    background: var(--accent-gradient);
+    color: white;
+    border: none;
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 100ms var(--ease-standard), filter 150ms var(--ease-standard);
+  }
+  .full-btn:hover { filter: brightness(1.1); }
+  .full-btn:active { transform: scale(0.98); }
+  .full-btn.danger { background: linear-gradient(135deg, #f04438, #dc2626); }
+  .full-btn:disabled { opacity: 0.5; cursor: default; }
+  .ghost-btn {
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 150ms var(--ease-standard), transform 100ms var(--ease-standard);
+  }
+  .ghost-btn:hover { background: var(--bg-elevated-2); }
+  .ghost-btn:active { transform: scale(0.98); }
+
+  .output-box {
+    background: rgba(0,0,0,0.25);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    font-size: 12.5px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    max-height: 220px;
+    overflow-y: auto;
+    color: #d4d4dc;
+  }
+  .output-box.empty { color: var(--text-tertiary); font-style: italic; }
+  .meta-line { font-size: 11px; color: var(--text-tertiary); }
+
+  /* ---------- Settings view ---------- */
+  .setting-row {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 15px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .setting-row .label { font-size: 13px; font-weight: 550; }
+  .setting-row .sublabel { font-size: 11.5px; color: var(--text-tertiary); margin-top: 2px; }
+
+  .toggle-switch { position: relative; width: 40px; height: 23px; flex-shrink: 0; }
+  .toggle-switch input { opacity: 0; width: 0; height: 0; }
+  .toggle-slider {
+    position: absolute; cursor: pointer; inset: 0;
+    background: rgba(255,255,255,0.12);
+    border-radius: 24px;
+    transition: background 200ms var(--ease-standard);
+  }
+  .toggle-slider:before {
+    position: absolute; content: "";
+    height: 17px; width: 17px; left: 3px; bottom: 3px;
+    background: white; border-radius: 50%;
+    transition: transform 250ms var(--ease-out);
+  }
+  .toggle-switch input:checked + .toggle-slider { background: var(--accent-gradient); }
+  .toggle-switch input:checked + .toggle-slider:before { transform: translateX(17px); }
+
+  /* ---------- Settings: section groups ---------- */
+  .settings-section { margin-bottom: 26px; }
+  .settings-section-title {
+    font-size: 11.5px;
+    font-weight: 650;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: 0 0 10px 2px;
+  }
+
+  .setting-block {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 15px 16px;
+    margin-bottom: 10px;
+  }
+  .setting-block .label { font-size: 13px; font-weight: 550; }
+  .setting-block .sublabel { font-size: 11.5px; color: var(--text-tertiary); margin-top: 2px; }
+  .setting-block-row {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  }
+  .setting-block-body { margin-top: 12px; display: flex; flex-direction: column; gap: 10px; }
+
+  .field-label {
+    font-size: 11.5px;
+    color: var(--text-secondary);
+    font-weight: 550;
+    margin-bottom: 5px;
+    display: block;
+  }
+  .field-row { display: flex; gap: 8px; align-items: center; }
+
+  select.text-field, .dropdown-select {
+    flex: 1;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 9px 12px;
+    color: var(--text-primary);
+    font-size: 12.5px;
+    outline: none;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='none'%3E%3Cpath d='M5 8l5 5 5-5' stroke='%239a9aa6' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    padding-right: 30px;
+    cursor: pointer;
+    transition: border-color 150ms var(--ease-standard);
+  }
+  select.text-field:focus, .dropdown-select:focus { border-color: rgba(139,92,246,0.5); }
+
+  .rect-field {
+    flex: 1;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 9px 12px;
+    color: var(--text-primary);
+    font-size: 12.5px;
+    outline: none;
+    font-family: inherit;
+    transition: border-color 150ms var(--ease-standard);
+  }
+  .rect-field:focus { border-color: rgba(139,92,246,0.5); }
+  .rect-field::placeholder { color: var(--text-tertiary); }
+
+  .model-list { display: flex; flex-direction: column; gap: 6px; }
+  .model-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 10px;
+    border-radius: var(--radius-sm);
+    background: rgba(255,255,255,0.025);
+    border: 1px solid var(--border-soft);
+  }
+  .model-row.selected { border-color: rgba(139,92,246,0.45); background: rgba(139,92,246,0.08); }
+  .model-row .model-name { font-size: 12.5px; font-weight: 550; }
+  .model-row .model-meta { font-size: 10.5px; color: var(--text-tertiary); margin-top: 1px; }
+  .model-row .model-actions { display: flex; gap: 6px; align-items: center; }
+  .mini-btn {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    border-radius: 999px;
+    padding: 4px 10px;
+    font-size: 10.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 150ms var(--ease-standard), color 150ms var(--ease-standard), transform 100ms var(--ease-standard);
+  }
+  .mini-btn:hover { background: rgba(255,255,255,0.12); color: var(--text-primary); }
+  .mini-btn:active { transform: scale(0.95); }
+  .mini-btn.danger:hover { background: rgba(240,68,56,0.18); color: #ff6b5e; border-color: rgba(240,68,56,0.35); }
+  .mini-btn.accent { background: var(--accent-gradient); color: white; border: none; }
+
+  .progress-track {
+    height: 5px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.08);
+    overflow: hidden;
+    margin-top: 4px;
+  }
+  .progress-fill {
+    height: 100%;
+    background: var(--accent-gradient);
+    border-radius: 999px;
+    width: 0%;
+    transition: width 200ms var(--ease-standard);
+  }
+  .pull-status { font-size: 10.5px; color: var(--text-tertiary); margin-top: 4px; }
+
+  .inline-status { font-size: 11px; margin-top: 6px; }
+  .inline-status.ok { color: var(--success); }
+  .inline-status.error { color: var(--danger); }
+
+  @media (prefers-reduced-motion: reduce) {
+    .view { animation: none; }
+    .msg { animation: none; }
+    #nav-indicator, .toggle-slider:before, .seg-indicator { transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+  <div id="shell">
+    <div id="ambient"><div class="blob a"></div><div class="blob b"></div></div>
+
+    <div id="titlebar">
+      <div class="win-btn" id="minimize-btn" title="Minimize">
+        <svg viewBox="0 0 16 16" fill="none"><path d="M4 8h8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      </div>
+      <div class="win-btn close" id="close-btn" title="Close">
+        <svg viewBox="0 0 16 16" fill="none"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+      </div>
+    </div>
+
+    <div id="sidebar">
+      <div id="brand">
+        <div class="mark">
+          <svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+            <defs>
+              <linearGradient id="mira-bg" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+                <stop offset="0%" stop-color="#8b5cf6"/>
+                <stop offset="45%" stop-color="#6366f1"/>
+                <stop offset="100%" stop-color="#06b6d4"/>
+              </linearGradient>
+            </defs>
+            <rect width="128" height="128" rx="30" fill="url(#mira-bg)"/>
+            <circle cx="64" cy="30" r="6.5" fill="#ffffff"/>
+            <path d="M36 90 V46 L64 76 L92 46 V90" fill="none" stroke="#ffffff" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </div>
+        <div class="name">Mira</div>
+      </div>
+
+      <div id="nav">
+        <div id="nav-indicator"></div>
+        <div class="nav-item active" data-view="home">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M3 9.5L10 3l7 6.5M5 8.5V17h10V8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>Home</span>
+        </div>
+        <div class="nav-item" data-view="chat">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M3 4.5h14v9H8l-3.5 3v-3H3v-9z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+          <span>Chat</span>
+        </div>
+        <div class="nav-item" data-view="meetings">
+          <svg viewBox="0 0 20 20" fill="none"><rect x="3" y="5" width="10" height="10" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M13 8.5l4-2.2v7.4l-4-2.2" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+          <span>Meetings</span>
+        </div>
+        <div class="nav-item" data-view="settings">
+          <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="2.6" stroke="currentColor" stroke-width="1.5"/><path d="M10 3v2M10 15v2M17 10h-2M5 10H3M14.9 5.1l-1.4 1.4M6.5 13.5l-1.4 1.4M14.9 14.9l-1.4-1.4M6.5 6.5L5.1 5.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <span>Settings</span>
+        </div>
+      </div>
+
+      <div id="sidebar-footer">
+        <div class="status-row"><div class="status-dot" id="daemon-dot"></div><span id="daemon-status-text">Connecting…</span></div>
+        <div class="status-row"><div class="status-dot" id="wake-dot"></div><span id="wake-status-text">Wake word</span></div>
+      </div>
+    </div>
+
+    <div id="main">
+
+      <!-- ---------- HOME ---------- -->
+      <div class="view active" id="home-view">
+        <div class="view-header">
+          <h1 class="view-title" id="greeting">Hello, Prakhar</h1>
+          <p class="view-subtitle">Here's how Mira is doing right now.</p>
+        </div>
+
+        <div class="stat-grid">
+          <div class="card stat-card">
+            <div class="stat-top"><span class="stat-label">Daemon</span><div class="status-dot" id="home-daemon-dot"></div></div>
+            <div class="stat-value" id="home-daemon-value">Checking…</div>
+          </div>
+          <div class="card stat-card">
+            <div class="stat-top"><span class="stat-label">Wake Word</span><div class="status-dot" id="home-wake-dot"></div></div>
+            <div class="stat-value" id="home-wake-value">—</div>
+          </div>
+          <div class="card stat-card">
+            <div class="stat-top"><span class="stat-label">Voice Reply</span><div class="status-dot" id="home-voice-dot"></div></div>
+            <div class="stat-value" id="home-voice-value">—</div>
+          </div>
+          <div class="card stat-card">
+            <div class="stat-top"><span class="stat-label">Routing</span></div>
+            <div class="stat-value">Auto · Local / Cloud</div>
+          </div>
+        </div>
+
+        <div class="card quick-ask">
+          <div class="quick-ask-label">Ask Mira anything</div>
+          <div class="quick-ask-row">
+            <input class="text-field" id="quick-ask-input" type="text" placeholder="Type a question and press Enter…" />
+            <button class="btn-primary" id="quick-ask-send" title="Send">
+              <svg viewBox="0 0 20 20" fill="none"><path d="M3 10h14M11 4l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
+        </div>
+
+        <div class="action-row">
+          <div class="action-btn card" id="action-open-chat">
+            <div class="icon-wrap"><svg viewBox="0 0 20 20" fill="none"><path d="M3 4.5h14v9H8l-3.5 3v-3H3v-9z" stroke="white" stroke-width="1.6" stroke-linejoin="round"/></svg></div>
+            <div><div class="label">Open Chat</div><div class="sub">Full conversation</div></div>
+          </div>
+          <div class="action-btn card" id="action-start-meeting">
+            <div class="icon-wrap"><svg viewBox="0 0 20 20" fill="none"><rect x="3" y="5" width="10" height="10" rx="2" stroke="white" stroke-width="1.6"/><path d="M13 8.5l4-2.2v7.4l-4-2.2" stroke="white" stroke-width="1.6" stroke-linejoin="round"/></svg></div>
+            <div><div class="label">Record Meeting</div><div class="sub">Mic + system audio</div></div>
+          </div>
+          <div class="action-btn card" id="action-talk-now" title="Also works system-wide via ⌘⇧L">
+            <div class="icon-wrap"><svg viewBox="0 0 20 20" fill="none"><rect x="7" y="2.5" width="6" height="10" rx="3" stroke="white" stroke-width="1.6"/><path d="M4.5 9.5a5.5 5.5 0 0011 0M10 15v2.5" stroke="white" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+            <div><div class="label">Talk to Mira</div><div class="sub">⌘⇧L, from anywhere</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ---------- CHAT ---------- -->
+      <div class="view" id="chat-view">
+        <div class="view-header">
+          <div>
+            <h1 class="view-title">Chat</h1>
+            <p class="view-subtitle">Talk to Mira by text or voice.</p>
+          </div>
+          <div class="segmented" id="model-segmented">
+            <div class="seg-indicator" id="model-seg-indicator"></div>
+            <button data-model="auto" class="active">Auto</button>
+            <button data-model="local">Local</button>
+            <button data-model="cloud">Cloud</button>
+          </div>
+        </div>
+
+        <div id="messages"></div>
+
+        <div id="chat-input-bar">
+          <button class="icon-btn" id="mic-btn" title="Hold to talk">
+            <svg viewBox="0 0 20 20" fill="none"><rect x="7" y="2.5" width="6" height="10" rx="3" stroke="currentColor" stroke-width="1.5"/><path d="M4.5 9.5a5.5 5.5 0 0011 0M10 15v2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          </button>
+          <input class="text-field" id="text-input" type="text" placeholder="Message Mira…" />
+          <button class="btn-primary" id="send-btn" title="Send">
+            <svg viewBox="0 0 20 20" fill="none"><path d="M3 10h14M11 4l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- ---------- MEETINGS ---------- -->
+      <div class="view" id="meetings-view">
+        <div class="view-header">
+          <h1 class="view-title">Meetings</h1>
+          <p class="view-subtitle">Record, transcribe, and summarize.</p>
+        </div>
+
+        <div class="section-grid" style="margin-bottom:14px;">
+          <div class="card meeting-card">
+            <h3>Upload a recording</h3>
+            <input type="file" id="file-input" accept="audio/*,video/*" style="display:none">
+            <button class="ghost-btn" id="file-upload-btn">Choose Audio / Video File</button>
+          </div>
+          <div class="card meeting-card">
+            <h3>Live recording</h3>
+            <button class="full-btn" id="record-btn">Start Recording</button>
+            <div class="meta-line" id="meeting-status"></div>
+          </div>
+        </div>
+
+        <div class="section-grid">
+          <div class="card meeting-card">
+            <h3>Transcript</h3>
+            <div class="output-box empty" id="transcript-box">No transcript yet.</div>
+            <button class="ghost-btn" id="generate-minutes-btn">Generate Minutes</button>
+          </div>
+          <div class="card meeting-card">
+            <h3>Minutes of Meeting</h3>
+            <div class="output-box empty" id="minutes-box">No minutes generated yet.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ---------- SETTINGS ---------- -->
+      <div class="view" id="settings-view">
+        <div class="view-header">
+          <h1 class="view-title">Settings</h1>
+          <p class="view-subtitle">Control what Mira listens to, which models it uses, and how it responds.</p>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Assistant</div>
+          <div class="setting-row">
+            <div>
+              <div class="label">Wake word listening</div>
+              <div class="sublabel">Listen for "Hey Mira" in the background</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="wakeword-toggle">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="setting-row">
+            <div>
+              <div class="label">Speak responses aloud</div>
+              <div class="sublabel">Applies to wake-word replies</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="voice-response-toggle">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Language Models</div>
+
+          <div class="setting-block">
+            <div class="setting-block-row">
+              <div>
+                <div class="label">Local model</div>
+                <div class="sublabel">Runs on-device via Ollama · used for chat &amp; meeting minutes</div>
+              </div>
+            </div>
+            <div class="setting-block-body">
+              <div class="model-list" id="local-model-list"></div>
+              <div class="field-row">
+                <input class="rect-field" id="pull-model-input" type="text" placeholder="e.g. llama3.2 or mistral — model name from ollama.com/library" />
+                <button class="mini-btn accent" id="pull-model-btn">Pull</button>
+              </div>
+              <div id="pull-progress-area"></div>
+            </div>
+          </div>
+
+          <div class="setting-block">
+            <div class="setting-block-row">
+              <div>
+                <div class="label">Cloud model</div>
+                <div class="sublabel">Used when a query needs the internet or you pick Cloud mode</div>
+              </div>
+            </div>
+            <div class="setting-block-body">
+              <div>
+                <span class="field-label">Provider</span>
+                <select class="dropdown-select" id="cloud-provider-select">
+                  <option value="groq">Groq (bundled preset)</option>
+                  <option value="custom">Custom OpenAI-compatible endpoint</option>
+                </select>
+              </div>
+              <div>
+                <span class="field-label">Base URL</span>
+                <input class="rect-field" id="cloud-base-url" type="text" placeholder="https://api.groq.com/openai/v1" style="width:100%;" />
+              </div>
+              <div>
+                <span class="field-label">Model name</span>
+                <input class="rect-field" id="cloud-model-name" type="text" placeholder="e.g. openai/gpt-oss-120b" style="width:100%;" />
+              </div>
+              <div>
+                <span class="field-label">API key</span>
+                <input class="rect-field" id="cloud-api-key" type="password" placeholder="Leave blank to keep the one already saved" style="width:100%;" />
+                <div class="sublabel" id="cloud-key-status" style="margin-top:5px;"></div>
+              </div>
+              <div class="field-row">
+                <button class="mini-btn accent" id="save-cloud-btn">Save</button>
+                <button class="mini-btn" id="test-cloud-btn">Test connection</button>
+              </div>
+              <div class="inline-status" id="cloud-test-status"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Voice &amp; Language</div>
+
+          <div class="setting-block">
+            <div class="setting-block-row">
+              <div>
+                <div class="label">Speech recognition engine</div>
+                <div class="sublabel">Which engine is tried first (the other is used as a fallback)</div>
+              </div>
+              <div class="segmented" id="stt-prefer-segmented">
+                <div class="seg-indicator" id="stt-seg-indicator"></div>
+                <button data-value="local">Local</button>
+                <button data-value="cloud">Cloud</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="setting-block">
+            <div class="setting-block-row">
+              <div>
+                <div class="label">Transcription mode</div>
+                <div class="sublabel">Translate speech to English, or keep the original language</div>
+              </div>
+              <div class="segmented" id="transcription-mode-segmented">
+                <div class="seg-indicator" id="mode-seg-indicator"></div>
+                <button data-value="translate">Translate</button>
+                <button data-value="native">Native</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="setting-block">
+            <div class="setting-block-row">
+              <div>
+                <div class="label">Voice reply</div>
+                <div class="sublabel">macOS voice used for spoken responses</div>
+              </div>
+            </div>
+            <div class="setting-block-body">
+              <div class="field-row">
+                <select class="dropdown-select" id="tts-voice-select" style="flex:1;"></select>
+                <button class="mini-btn" id="preview-voice-btn">Preview</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+<script>
+  const { ipcRenderer } = require('electron');
+  const DAEMON_URL = 'http://localhost:11200';
+  const SESSION_ID = 'main_chat';
+
+  // ---------- tiny spring engine (critically damped by default) ----------
+  function makeSpring(damping = 1, response = 0.32) {
+    const stiffness = Math.pow(2 * Math.PI / response, 2);
+    const dampingCoef = 4 * Math.PI * damping / response;
+    let pos = 0, vel = 0, target = 0, raf = null, onUpdate = null;
+
+    function step() {
+      const dt = 1 / 60;
+      const accel = -stiffness * (pos - target) - dampingCoef * vel;
+      vel += accel * dt;
+      pos += vel * dt;
+      onUpdate && onUpdate(pos);
+      if (Math.abs(target - pos) < 0.5 && Math.abs(vel) < 0.5) {
+        pos = target;
+        onUpdate && onUpdate(pos);
+        raf = null;
+        return;
+      }
+      raf = requestAnimationFrame(step);
+    }
+
+    return {
+      set(value, cb) { pos = value; vel = 0; target = value; onUpdate = cb; onUpdate(pos); },
+      to(value, cb) {
+        target = value;
+        if (cb) onUpdate = cb;
+        if (!raf) raf = requestAnimationFrame(step);
+      }
+    };
+  }
+
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  // ---------- window controls ----------
+  document.getElementById('close-btn').onclick = () => ipcRenderer.send('close-chat');
+  document.getElementById('minimize-btn').onclick = () => ipcRenderer.send('minimize-window');
+
+  // ---------- nav ----------
+  const navItems = Array.from(document.querySelectorAll('.nav-item'));
+  const navIndicator = document.getElementById('nav-indicator');
+  const navSpringY = makeSpring(1, 0.32);
+
+  function positionIndicator(el, animate) {
+    const y = el.offsetTop;
+    if (reduceMotion || !animate) {
+      navIndicator.style.transform = `translateY(${y}px)`;
+      navSpringY.set(y, (v) => { navIndicator.style.transform = `translateY(${v}px)`; });
+    } else {
+      navSpringY.to(y, (v) => { navIndicator.style.transform = `translateY(${v}px)`; });
+    }
+  }
+
+  function switchView(name, animateNav = true) {
+    navItems.forEach(i => i.classList.toggle('active', i.dataset.view === name));
+    document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === name + '-view'));
+    const activeItem = navItems.find(i => i.dataset.view === name);
+    if (activeItem) positionIndicator(activeItem, animateNav);
+    if (name === 'settings') loadSettings();
+    if (name === 'chat') document.getElementById('text-input').focus();
+  }
+
+  navItems.forEach(item => item.addEventListener('click', () => switchView(item.dataset.view)));
+  window.addEventListener('resize', () => {
+    const active = navItems.find(i => i.classList.contains('active'));
+    if (active) positionIndicator(active, false);
+  });
+
+  // initial indicator position (no animation on load)
+  requestAnimationFrame(() => positionIndicator(navItems[0], false));
+
+  // ---------- ambient parallax ----------
+  if (!reduceMotion) {
+    const blobA = document.querySelector('#ambient .blob.a');
+    const blobB = document.querySelector('#ambient .blob.b');
+    let targetX = 0, targetY = 0, curX = 0, curY = 0;
+    document.addEventListener('mousemove', (e) => {
+      targetX = (e.clientX / window.innerWidth - 0.5) * 40;
+      targetY = (e.clientY / window.innerHeight - 0.5) * 40;
+    });
+    function ambientLoop() {
+      curX += (targetX - curX) * 0.04;
+      curY += (targetY - curY) * 0.04;
+      blobA.style.transform = `translate(${curX}px, ${curY}px)`;
+      blobB.style.transform = `translate(${-curX}px, ${-curY}px)`;
+      requestAnimationFrame(ambientLoop);
+    }
+    ambientLoop();
+  }
+
+  // ---------- greeting ----------
+  (function setGreeting() {
+    const h = new Date().getHours();
+    const part = h < 5 ? 'up late' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : h < 21 ? 'Good evening' : 'Good evening';
+    document.getElementById('greeting').textContent = `${part}, Prakhar`;
+  })();
+
+  // ---------- status polling ----------
+  async function pollStatus() {
+    let online = false;
+    try {
+      const res = await fetch(`${DAEMON_URL}/health`);
+      online = res.ok;
+    } catch (e) { online = false; }
+
+    document.getElementById('daemon-dot').className = 'status-dot ' + (online ? 'online' : 'offline');
+    document.getElementById('daemon-status-text').textContent = online ? 'Daemon online' : 'Daemon offline';
+    document.getElementById('home-daemon-dot').className = 'status-dot ' + (online ? 'online' : 'offline');
+    document.getElementById('home-daemon-value').textContent = online ? 'Online' : 'Offline';
+
+    if (online) {
+      try {
+        const res = await fetch(`${DAEMON_URL}/settings`);
+        const data = await res.json();
+        const wakeOn = data.wakeword_enabled !== false;
+        const voiceOn = data.voice_response_enabled !== false;
+        document.getElementById('wake-dot').className = 'status-dot ' + (wakeOn ? 'online' : '');
+        document.getElementById('wake-status-text').textContent = wakeOn ? 'Wake word on' : 'Wake word off';
+        document.getElementById('home-wake-dot').className = 'status-dot ' + (wakeOn ? 'online' : '');
+        document.getElementById('home-wake-value').textContent = wakeOn ? 'Listening' : 'Off';
+        document.getElementById('home-voice-dot').className = 'status-dot ' + (voiceOn ? 'online' : '');
+        document.getElementById('home-voice-value').textContent = voiceOn ? 'Enabled' : 'Muted';
+      } catch (e) {}
+    }
+  }
+  pollStatus();
+  setInterval(pollStatus, 8000);
+
+  // ---------- quick actions ----------
+  document.getElementById('action-open-chat').onclick = () => switchView('chat');
+  document.getElementById('action-start-meeting').onclick = () => {
+    switchView('meetings');
+    if (!isMeetingRecording) toggleMeetingRecording();
+  };
+  document.getElementById('action-talk-now').onclick = async () => {
+    const btn = document.getElementById('action-talk-now');
+    const label = btn.querySelector('.label');
+    const original = label.textContent;
+    try {
+      const res = await fetch(`${DAEMON_URL}/wakeword/trigger`, { method: 'POST' });
+      const data = await res.json();
+      if (data.error) { label.textContent = 'Not available'; }
+      else { label.textContent = 'Listening…'; }
+    } catch (e) {
+      label.textContent = 'Daemon unreachable';
+    }
+    setTimeout(() => { label.textContent = original; }, 5000);
+  };
+
+  document.getElementById('quick-ask-send').onclick = sendQuickAsk;
+  document.getElementById('quick-ask-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendQuickAsk(); });
+  function sendQuickAsk() {
+    const input = document.getElementById('quick-ask-input');
+    const text = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    switchView('chat');
+    addMessage('user', text);
+    sendToChat(text);
+  }
+
+  // ================= CHAT =================
+  const messagesEl = document.getElementById('messages');
+  const inputEl = document.getElementById('text-input');
+  const micBtn = document.getElementById('mic-btn');
+
+  let currentModel = 'auto';
+  let isRecording = false, mediaRecorder = null, audioChunks = [], micStream = null, micHeld = false;
+
+  function addMessage(role, text) {
+    const div = document.createElement('div');
+    div.className = 'msg ' + role;
+    div.textContent = text;
+    messagesEl.appendChild(div);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    return div;
+  }
+
+  async function sendTextMessage() {
+    const text = inputEl.value.trim();
+    if (!text) return;
+    inputEl.value = '';
+    addMessage('user', text);
+    await sendToChat(text);
+  }
+
+  async function sendToChat(text) {
+    const thinking = addMessage('system', 'Thinking…');
+    try {
+      const res = await fetch(`${DAEMON_URL}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: SESSION_ID, message: text, model: currentModel })
+      });
+      const data = await res.json();
+      thinking.remove();
+
+      if (data.error) { addMessage('system', 'Error: ' + JSON.stringify(data.error)); return; }
+
+      addMessage('assistant', data.response);
+      if (data.model_used) addMessage('system', `(${data.model_used})`);
+      speakText(data.response);
+    } catch (e) {
+      thinking.remove();
+      addMessage('system', 'Error: could not reach Mira daemon');
+    }
+  }
+
+  async function speakText(text) {
+    try {
+      const res = await fetch(`${DAEMON_URL}/speak`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+      if (!res.ok) return;
+      const blob = await res.blob();
+      const audio = new Audio(URL.createObjectURL(blob));
+      audio.play();
+    } catch (e) { console.error('speak failed', e); }
+  }
+
+  async function transcribeAndSend(blob) {
+    const thinking = addMessage('system', 'Transcribing…');
+    const formData = new FormData();
+    formData.append('audio', blob, 'recording.webm');
+    try {
+      const res = await fetch(`${DAEMON_URL}/transcribe`, { method: 'POST', body: formData });
+      const data = await res.json();
+      thinking.remove();
+      if (data.error) { addMessage('system', 'Transcription error: ' + JSON.stringify(data.error)); return; }
+      addMessage('user', data.text);
+      await sendToChat(data.text);
+    } catch (e) {
+      thinking.remove();
+      addMessage('system', 'Error: could not reach Mira daemon');
+    }
+  }
+
+  async function startRecording(e) {
+    e.preventDefault();
+    if (isRecording || micHeld) return;
+    micHeld = true;
+    micBtn.classList.add('recording');
+    let stream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+      micHeld = false;
+      micBtn.classList.remove('recording');
+      addMessage('system', 'Microphone access denied or unavailable.');
+      return;
+    }
+    if (!micHeld) { stream.getTracks().forEach(t => t.stop()); return; }
+    micStream = stream;
+    audioChunks = [];
+    mediaRecorder = new MediaRecorder(micStream);
+    mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data);
+    mediaRecorder.onstop = async () => {
+      micStream.getTracks().forEach(t => t.stop());
+      micStream = null;
+      const blob = new Blob(audioChunks, { type: 'audio/webm' });
+      if (blob.size > 0) await transcribeAndSend(blob);
+    };
+    mediaRecorder.start();
+    isRecording = true;
+  }
+
+  function stopRecording(e) {
+    if (e) e.preventDefault();
+    micHeld = false;
+    micBtn.classList.remove('recording');
+    if (!isRecording || !mediaRecorder) return;
+    isRecording = false;
+    if (mediaRecorder.state !== 'inactive') mediaRecorder.stop();
+  }
+
+  micBtn.addEventListener('mousedown', startRecording);
+  micBtn.addEventListener('mouseup', stopRecording);
+  micBtn.addEventListener('mouseleave', stopRecording);
+  micBtn.addEventListener('touchstart', startRecording);
+  micBtn.addEventListener('touchend', stopRecording);
+
+  document.getElementById('send-btn').onclick = sendTextMessage;
+  inputEl.addEventListener('keydown', (e) => { if (e.key === 'Enter') sendTextMessage(); });
+
+  // model segmented control
+  const segButtons = Array.from(document.querySelectorAll('#model-segmented button'));
+  const segIndicator = document.getElementById('model-seg-indicator');
+  const segSpring = makeSpring(1, 0.3);
+  function positionSeg(btn, animate) {
+    const x = btn.offsetLeft, w = btn.offsetWidth;
+    segIndicator.style.width = w + 'px';
+    if (reduceMotion || !animate) {
+      segSpring.set(x, (v) => { segIndicator.style.transform = `translateX(${v}px)`; });
+    } else {
+      segSpring.to(x, (v) => { segIndicator.style.transform = `translateX(${v}px)`; });
+    }
+  }
+  segButtons.forEach(btn => btn.addEventListener('click', () => {
+    segButtons.forEach(b => b.classList.toggle('active', b === btn));
+    currentModel = btn.dataset.model;
+    positionSeg(btn, true);
+  }));
+  requestAnimationFrame(() => positionSeg(segButtons[0], false));
+
+  // ================= SETTINGS =================
+
+  // generic segmented-control helper, reused for STT preference + transcription mode
+  function initSegmented(containerId, indicatorId, onChange) {
+    const container = document.getElementById(containerId);
+    const indicator = document.getElementById(indicatorId);
+    const buttons = Array.from(container.querySelectorAll('button'));
+    const spring = makeSpring(1, 0.3);
+
+    function position(btn, animate) {
+      const x = btn.offsetLeft, w = btn.offsetWidth;
+      indicator.style.width = w + 'px';
+      if (reduceMotion || !animate) {
+        spring.set(x, (v) => { indicator.style.transform = `translateX(${v}px)`; });
+      } else {
+        spring.to(x, (v) => { indicator.style.transform = `translateX(${v}px)`; });
+      }
+    }
+
+    buttons.forEach(btn => btn.addEventListener('click', () => {
+      buttons.forEach(b => b.classList.toggle('active', b === btn));
+      position(btn, true);
+      onChange(btn.dataset.value);
+    }));
+
+    return {
+      setActive(value, animate) {
+        const btn = buttons.find(b => b.dataset.value === value) || buttons[0];
+        buttons.forEach(b => b.classList.toggle('active', b === btn));
+        position(btn, animate);
+      }
+    };
+  }
+
+  const sttSeg = initSegmented('stt-prefer-segmented', 'stt-seg-indicator', (v) => updateSetting('stt_prefer', v));
+  const modeSeg = initSegmented('transcription-mode-segmented', 'mode-seg-indicator', (v) => updateSetting('transcription_mode', v));
+
+  async function loadSettings() {
+    try {
+      const res = await fetch(`${DAEMON_URL}/settings`);
+      const data = await res.json();
+      document.getElementById('wakeword-toggle').checked = data.wakeword_enabled !== false;
+      document.getElementById('voice-response-toggle').checked = data.voice_response_enabled !== false;
+
+      document.getElementById('cloud-provider-select').value = data.cloud_provider || 'groq';
+      document.getElementById('cloud-base-url').value = data.cloud_base_url || '';
+      document.getElementById('cloud-model-name').value = data.cloud_model || '';
+      document.getElementById('cloud-key-status').textContent = data.cloud_api_key_set
+        ? 'An API key is currently saved.' : 'No API key saved yet — using .env fallback if present.';
+
+      sttSeg.setActive(data.stt_prefer || 'local', false);
+      modeSeg.setActive(data.transcription_mode || 'translate', false);
+
+      await loadLocalModels(data.local_chat_model);
+      await loadVoices(data.tts_voice);
+    } catch (e) { console.error('Could not load settings', e); }
+  }
+
+  async function updateSetting(key, value) {
+    try {
+      await fetch(`${DAEMON_URL}/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ [key]: value })
+      });
+      pollStatus();
+    } catch (e) { console.error('Could not update setting', e); }
+  }
+  document.getElementById('wakeword-toggle').addEventListener('change', (e) => updateSetting('wakeword_enabled', e.target.checked));
+  document.getElementById('voice-response-toggle').addEventListener('change', (e) => updateSetting('voice_response_enabled', e.target.checked));
+
+  // ---------- local models (Ollama) ----------
+  async function loadLocalModels(selectedName) {
+    const listEl = document.getElementById('local-model-list');
+    listEl.innerHTML = '<div class="sublabel">Loading…</div>';
+    try {
+      const res = await fetch(`${DAEMON_URL}/models/local`);
+      const data = await res.json();
+      if (data.error) { listEl.innerHTML = `<div class="sublabel">${data.error}</div>`; return; }
+
+      listEl.innerHTML = '';
+      (data.models || []).forEach(m => {
+        const row = document.createElement('div');
+        row.className = 'model-row' + (m.name === selectedName ? ' selected' : '');
+        const sizeGb = m.size ? (m.size / 1e9).toFixed(1) + ' GB' : '';
+        row.innerHTML = `
+          <div>
+            <div class="model-name">${m.name}</div>
+            <div class="model-meta">${(m.details && m.details.parameter_size) || ''} ${sizeGb ? '· ' + sizeGb : ''}</div>
+          </div>
+          <div class="model-actions">
+            <button class="mini-btn use-btn">${m.name === selectedName ? 'In use' : 'Use'}</button>
+            <button class="mini-btn danger remove-btn">Remove</button>
+          </div>`;
+        row.querySelector('.use-btn').onclick = () => {
+          updateSetting('local_chat_model', m.name);
+          loadLocalModels(m.name);
+        };
+        row.querySelector('.remove-btn').onclick = async () => {
+          if (!confirm(`Remove local model "${m.name}"? This deletes it from Ollama.`)) return;
+          await fetch(`${DAEMON_URL}/models/local`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: m.name })
+          });
+          loadLocalModels(selectedName);
+        };
+        listEl.appendChild(row);
+      });
+      if (!(data.models || []).length) {
+        listEl.innerHTML = '<div class="sublabel">No local models installed yet — pull one below.</div>';
+      }
+    } catch (e) {
+      listEl.innerHTML = '<div class="sublabel">Could not reach Ollama. Is it running?</div>';
+    }
+  }
+
+  document.getElementById('pull-model-btn').onclick = async () => {
+    const input = document.getElementById('pull-model-input');
+    const name = input.value.trim();
+    if (!name) return;
+    const progressArea = document.getElementById('pull-progress-area');
+    const pullBtn = document.getElementById('pull-model-btn');
+    pullBtn.disabled = true;
+
+    progressArea.innerHTML = `
+      <div class="pull-status" id="pull-status-text">Starting pull of ${name}…</div>
+      <div class="progress-track"><div class="progress-fill" id="pull-progress-fill"></div></div>`;
+    const statusText = document.getElementById('pull-status-text');
+    const fill = document.getElementById('pull-progress-fill');
+
+    try {
+      const res = await fetch(`${DAEMON_URL}/models/local/pull`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+      });
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          try {
+            const evt = JSON.parse(line);
+            if (evt.error) { statusText.textContent = 'Error: ' + evt.error; continue; }
+            if (evt.total && evt.completed) {
+              const pct = Math.round((evt.completed / evt.total) * 100);
+              fill.style.width = pct + '%';
+              statusText.textContent = `${evt.status} — ${pct}%`;
+            } else if (evt.status) {
+              statusText.textContent = evt.status;
+            }
+          } catch (e) {}
+        }
+      }
+      statusText.textContent = 'Done.';
+      fill.style.width = '100%';
+      input.value = '';
+      loadLocalModels();
+    } catch (e) {
+      statusText.textContent = 'Error: could not reach Mira daemon';
+    } finally {
+      pullBtn.disabled = false;
+    }
+  };
+
+  // ---------- cloud model config ----------
+  const GROQ_DEFAULTS = { base_url: 'https://api.groq.com/openai/v1', model: 'openai/gpt-oss-120b' };
+  document.getElementById('cloud-provider-select').addEventListener('change', (e) => {
+    if (e.target.value === 'groq') {
+      document.getElementById('cloud-base-url').value = GROQ_DEFAULTS.base_url;
+      document.getElementById('cloud-model-name').value = GROQ_DEFAULTS.model;
+    }
+  });
+
+  document.getElementById('save-cloud-btn').onclick = async () => {
+    const provider = document.getElementById('cloud-provider-select').value;
+    const baseUrl = document.getElementById('cloud-base-url').value.trim();
+    const model = document.getElementById('cloud-model-name').value.trim();
+    const apiKey = document.getElementById('cloud-api-key').value;
+
+    const body = { cloud_provider: provider, cloud_base_url: baseUrl, cloud_model: model };
+    if (apiKey) body.cloud_api_key = apiKey;
+
+    try {
+      await fetch(`${DAEMON_URL}/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      document.getElementById('cloud-api-key').value = '';
+      document.getElementById('cloud-key-status').textContent = apiKey
+        ? 'An API key is currently saved.' : document.getElementById('cloud-key-status').textContent;
+      const status = document.getElementById('cloud-test-status');
+      status.className = 'inline-status ok';
+      status.textContent = 'Saved.';
+    } catch (e) {
+      const status = document.getElementById('cloud-test-status');
+      status.className = 'inline-status error';
+      status.textContent = 'Could not save settings.';
+    }
+  };
+
+  document.getElementById('test-cloud-btn').onclick = async () => {
+    const baseUrl = document.getElementById('cloud-base-url').value.trim();
+    const model = document.getElementById('cloud-model-name').value.trim();
+    const typedKey = document.getElementById('cloud-api-key').value;
+    const status = document.getElementById('cloud-test-status');
+    status.className = 'inline-status';
+    status.textContent = 'Testing…';
+
+    try {
+      // an empty api_key tells the daemon to use whatever's already saved (or .env fallback)
+      const res = await fetch(`${DAEMON_URL}/settings/test-cloud`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ base_url: baseUrl, api_key: typedKey, model })
+      });
+      const data = await res.json();
+      if (data.ok) {
+        status.className = 'inline-status ok';
+        status.textContent = 'Connection works.';
+      } else {
+        status.className = 'inline-status error';
+        status.textContent = 'Failed: ' + JSON.stringify(data.error);
+      }
+    } catch (e) {
+      status.className = 'inline-status error';
+      status.textContent = 'Could not reach Mira daemon.';
+    }
+  };
+
+  // ---------- TTS voices ----------
+  async function loadVoices(selectedVoice) {
+    const select = document.getElementById('tts-voice-select');
+    select.innerHTML = '<option value="">System default</option>';
+    try {
+      const res = await fetch(`${DAEMON_URL}/voices`);
+      const data = await res.json();
+      (data.voices || []).forEach(v => {
+        const opt = document.createElement('option');
+        opt.value = v.name;
+        opt.textContent = `${v.name} (${v.locale})`;
+        select.appendChild(opt);
+      });
+      select.value = selectedVoice || '';
+    } catch (e) {}
+  }
+
+  document.getElementById('tts-voice-select').addEventListener('change', (e) => {
+    updateSetting('tts_voice', e.target.value);
+  });
+
+  document.getElementById('preview-voice-btn').onclick = async () => {
+    const voice = document.getElementById('tts-voice-select').value;
+    try {
+      const res = await fetch(`${DAEMON_URL}/speak`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: "Hi, I'm Mira.", voice: voice || undefined })
+      });
+      if (!res.ok) return;
+      const blob = await res.blob();
+      new Audio(URL.createObjectURL(blob)).play();
+    } catch (e) { console.error('preview failed', e); }
+  };
+
+  // ================= MEETINGS =================
+  let isMeetingRecording = false;
+  let currentTranscript = '';
+  const transcriptBox = document.getElementById('transcript-box');
+  const minutesBox = document.getElementById('minutes-box');
+  const meetingStatus = document.getElementById('meeting-status');
+  const recordBtn = document.getElementById('record-btn');
+
+  document.getElementById('file-upload-btn').onclick = () => document.getElementById('file-input').click();
+  document.getElementById('file-input').addEventListener('change', handleFileUpload);
+
+  async function handleFileUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    transcriptBox.classList.remove('empty');
+    transcriptBox.textContent = 'Transcribing… this may take a while for long files.';
+    meetingStatus.textContent = '';
+    const formData = new FormData();
+    formData.append('audio', file);
+    try {
+      const res = await fetch(`${DAEMON_URL}/transcribe-file`, { method: 'POST', body: formData });
+      const data = await res.json();
+      if (data.error) { transcriptBox.textContent = 'Error: ' + JSON.stringify(data.error); return; }
+      currentTranscript = data.text;
+      transcriptBox.textContent = data.text;
+      meetingStatus.textContent = `Transcribed using: ${data.engine_used}`;
+    } catch (e) { transcriptBox.textContent = 'Error: could not reach Mira daemon'; }
+  }
+
+  function toggleMeetingRecording() {
+    if (!isMeetingRecording) {
+      ipcRenderer.send('meeting-start');
+      recordBtn.textContent = 'Starting…';
+      recordBtn.disabled = true;
+    } else {
+      ipcRenderer.send('meeting-stop');
+      recordBtn.textContent = 'Stopping…';
+      recordBtn.disabled = true;
+    }
+  }
+  recordBtn.onclick = toggleMeetingRecording;
+
+  ipcRenderer.on('meeting-start-result', (event, { result, err }) => {
+    recordBtn.disabled = false;
+    if (err || !result || result.error) {
+      meetingStatus.textContent = 'Error starting recording: ' + (err || result.error);
+      recordBtn.textContent = 'Start Recording';
+      return;
+    }
+    isMeetingRecording = true;
+    recordBtn.textContent = 'Stop Recording';
+    recordBtn.classList.add('danger');
+    meetingStatus.textContent = 'Recording in progress…';
+  });
+
+  ipcRenderer.on('meeting-stop-result', async (event, { result, err }) => {
+    recordBtn.disabled = false;
+    isMeetingRecording = false;
+    recordBtn.textContent = 'Start Recording';
+    recordBtn.classList.remove('danger');
+
+    if (err || !result || result.error) {
+      meetingStatus.textContent = 'Error stopping recording: ' + (err || result.error);
+      return;
+    }
+
+    meetingStatus.textContent = 'Recording saved. Transcribing…';
+    transcriptBox.classList.remove('empty');
+    transcriptBox.textContent = 'Transcribing… this may take a while for long recordings.';
+
+    try {
+      const res = await fetch(`${DAEMON_URL}/transcribe-local-meeting`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filepath: result.file })
+      });
+      const data = await res.json();
+      if (data.error) { transcriptBox.textContent = 'Error: ' + JSON.stringify(data.error); return; }
+      currentTranscript = data.text;
+      transcriptBox.textContent = data.text;
+      meetingStatus.textContent = `Transcribed using: ${data.engine_used}`;
+    } catch (e) { transcriptBox.textContent = 'Error: could not reach Mira daemon'; }
+  });
+
+  document.getElementById('generate-minutes-btn').onclick = async () => {
+    if (!currentTranscript) { minutesBox.textContent = 'No transcript available yet.'; return; }
+    minutesBox.classList.remove('empty');
+    minutesBox.textContent = 'Generating minutes…';
+    try {
+      const res = await fetch(`${DAEMON_URL}/generate-minutes`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transcript: currentTranscript, model: currentModel })
+      });
+      const data = await res.json();
+      if (data.error) { minutesBox.textContent = 'Error: ' + JSON.stringify(data.error); return; }
+      minutesBox.textContent = data.minutes;
+    } catch (e) { minutesBox.textContent = 'Error: could not reach Mira daemon'; }
+  };
+</script>
+</body>
+</html>

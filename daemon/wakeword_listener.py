@@ -83,8 +83,17 @@ def record_command_audio(pa: pyaudio.PyAudio, seconds: int) -> Path:
     return TEMP_RECORDING_PATH, has_meaningful_audio
 
 
-def handle_wake_detected(pa: pyaudio.PyAudio):
+def play_chime():
+    """Short acknowledgment sound so the user knows Mira is now listening --
+    matters most for the manual trigger, where there's no spoken wake word to confirm."""
+    subprocess.run(["afplay", "/System/Library/Sounds/Tink.aiff"], capture_output=True)
+
+
+def handle_wake_detected(pa: pyaudio.PyAudio, chime: bool = False):
     log("[wakeword] 'Hey Mira' detected, recording command...")
+
+    if chime:
+        play_chime()
 
     audio_path, has_meaningful_audio = record_command_audio(pa, COMMAND_RECORD_SECONDS)
 
@@ -133,11 +142,19 @@ def speak_reply(text: str):
     """Uses the same macOS `say` mechanism as the /speak endpoint, but plays directly
     since this runs inside the daemon process (no HTTP round-trip needed)."""
     import uuid
+    from main import load_settings
+
     TTS_DIR = Path.home() / "Mira" / "daemon" / "tts_output"
     TTS_DIR.mkdir(parents=True, exist_ok=True)
     filepath = TTS_DIR / f"{uuid.uuid4().hex}.aiff"
 
-    subprocess.run(["say", "-o", str(filepath), text], capture_output=True)
+    voice = load_settings().get("tts_voice")
+    cmd = ["say", "-o", str(filepath)]
+    if voice:
+        cmd += ["-v", voice]
+    cmd.append(text)
+
+    subprocess.run(cmd, capture_output=True)
     subprocess.run(["afplay", str(filepath)])
 
 
@@ -150,6 +167,7 @@ class WakewordController:
         self._thread = None
         self._running = threading.Event()  # set = should be actively listening
         self._stop_requested = threading.Event()
+        self._manual_trigger = threading.Event()  # set = a manual (button/shortcut) trigger is pending
 
     def start(self):
         if self._thread is not None and self._thread.is_alive():
@@ -168,6 +186,30 @@ class WakewordController:
 
     def is_running(self):
         return self._running.is_set()
+
+    def trigger_manual(self):
+        """Skips the 'Hey Mira' phrase and goes straight to recording a command --
+        used by the global keyboard shortcut / UI button. If the continuous listener
+        loop is already running, this just flags it to handle the next iteration
+        (reusing that loop's own mic stream, exactly like a real wake-word detection
+        would). If the listener is currently paused, spins up a one-off mic session
+        instead so the manual trigger still works even with wake-word listening off."""
+        if self.is_running():
+            self._manual_trigger.set()
+        else:
+            threading.Thread(target=self._manual_one_shot, daemon=True).start()
+
+    def _manual_one_shot(self):
+        log("[wakeword] Manual trigger (listener currently paused) -- starting one-off session.")
+        pa = pyaudio.PyAudio()
+        try:
+            handle_wake_detected(pa, chime=True)
+        except Exception:
+            import traceback
+            log("[wakeword] Error handling manual trigger:")
+            log(traceback.format_exc())
+        finally:
+            pa.terminate()
 
     def _loop(self):
         if not WAKEWORD_MODEL_PATH.exists():
@@ -198,6 +240,21 @@ class WakewordController:
 
         try:
             while not self._stop_requested.is_set():
+                if self._manual_trigger.is_set():
+                    self._manual_trigger.clear()
+                    log("[wakeword] Manual trigger received, recording command...")
+                    last_trigger_time = time.time()
+
+                    stream.stop_stream()
+                    try:
+                        handle_wake_detected(pa, chime=True)
+                    except Exception:
+                        import traceback
+                        log("[wakeword] Error handling manual trigger (listener continues):")
+                        log(traceback.format_exc())
+                    stream.start_stream()
+                    continue
+
                 audio_chunk = np.frombuffer(
                     stream.read(CHUNK_SIZE, exception_on_overflow=False),
                     dtype=np.int16
@@ -264,3 +321,14 @@ def set_wakeword_enabled(enabled: bool):
         _controller.start()
     else:
         _controller.stop()
+
+
+def trigger_manual_command():
+    """Called by main.py's /wakeword/trigger endpoint (keyboard shortcut / UI button).
+    Skips the 'Hey Mira' phrase and records+answers a command immediately."""
+    global _controller
+    if _controller is None:
+        log("[wakeword] Controller not initialized yet, cannot trigger.")
+        return False
+    _controller.trigger_manual()
+    return True

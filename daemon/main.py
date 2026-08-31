@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Body, UploadFile, File
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 import requests
@@ -33,26 +33,64 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# ---------- Settings (voice_response_enabled toggle, etc) ----------
+# ---------- Settings (voice_response_enabled toggle, model config, etc) ----------
 SETTINGS_PATH = Path.home() / "Mira" / "daemon" / "settings.json"
 
+DEFAULT_SETTINGS = {
+    "voice_response_enabled": True,
+    "wakeword_enabled": True,
+    # local model used for /chat and /generate-minutes (Ollama model name).
+    # /ask and /complete (predictive typing) intentionally stay on their own
+    # fixed fast models -- they're latency-sensitive and not exposed here.
+    "local_chat_model": "batiai/gemma4-e2b:q4",
+    # cloud LLM: "groq" uses the bundled Groq preset (falls back to GROQ_API_KEY
+    # from .env if cloud_api_key is blank); "custom" hits any OpenAI-compatible
+    # /chat/completions endpoint with the given base URL, key, and model name.
+    "cloud_provider": "groq",
+    "cloud_api_key": "",
+    "cloud_base_url": "https://api.groq.com/openai/v1",
+    "cloud_model": "openai/gpt-oss-120b",
+    # STT: which engine to try first; the other is always used as a fallback.
+    "stt_prefer": "local",           # "local" | "cloud"
+    "transcription_mode": "translate",  # "translate" (-> English) | "native" (original language)
+    # TTS: macOS `say` voice name (e.g. "Samantha", "Lekha"). Empty = system default.
+    "tts_voice": ""
+}
+
 def load_settings():
+    settings = dict(DEFAULT_SETTINGS)
     if SETTINGS_PATH.exists():
         try:
-            return json.loads(SETTINGS_PATH.read_text())
+            settings.update(json.loads(SETTINGS_PATH.read_text()))
         except (json.JSONDecodeError, OSError):
             pass
-    return {"voice_response_enabled": True, "wakeword_enabled": True}
+    return settings
 
 def save_settings(settings: dict):
     SETTINGS_PATH.write_text(json.dumps(settings, indent=2))
 
 @app.get("/settings")
 def get_settings():
-    return load_settings()
+    settings = load_settings()
+    # never echo the raw API key back to the frontend; expose only whether one is set
+    masked = dict(settings)
+    masked["cloud_api_key_set"] = bool(settings.get("cloud_api_key"))
+    masked.pop("cloud_api_key", None)
+    return masked
 
 @app.post("/settings")
-def update_settings(voice_response_enabled: bool = Body(None), wakeword_enabled: bool = Body(None)):
+def update_settings(
+    voice_response_enabled: bool = Body(None),
+    wakeword_enabled: bool = Body(None),
+    local_chat_model: str = Body(None),
+    cloud_provider: str = Body(None),
+    cloud_api_key: str = Body(None),
+    cloud_base_url: str = Body(None),
+    cloud_model: str = Body(None),
+    stt_prefer: str = Body(None),
+    transcription_mode: str = Body(None),
+    tts_voice: str = Body(None),
+):
     settings = load_settings()
 
     if voice_response_enabled is not None:
@@ -66,8 +104,28 @@ def update_settings(voice_response_enabled: bool = Body(None), wakeword_enabled:
         except Exception as e:
             print(f"[main] Could not toggle wakeword listener: {e}", flush=True)
 
+    if local_chat_model is not None:
+        settings["local_chat_model"] = local_chat_model
+    if cloud_provider is not None:
+        settings["cloud_provider"] = cloud_provider
+    if cloud_api_key is not None:
+        settings["cloud_api_key"] = cloud_api_key
+    if cloud_base_url is not None:
+        settings["cloud_base_url"] = cloud_base_url
+    if cloud_model is not None:
+        settings["cloud_model"] = cloud_model
+    if stt_prefer is not None:
+        settings["stt_prefer"] = stt_prefer
+    if transcription_mode is not None:
+        settings["transcription_mode"] = transcription_mode
+    if tts_voice is not None:
+        settings["tts_voice"] = tts_voice
+
     save_settings(settings)
-    return settings
+    result = dict(settings)
+    result["cloud_api_key_set"] = bool(settings.get("cloud_api_key"))
+    result.pop("cloud_api_key", None)
+    return result
 
 
 # ---------- Wake-word listener ("Hey Mira") ----------
@@ -132,6 +190,19 @@ def health_check():
     return {"status": "Mira daemon is running"}
 
 
+# ---------- manual "Hey Mira" trigger (keyboard shortcut / button, skips the wake word) ----------
+@app.post("/wakeword/trigger")
+def wakeword_trigger():
+    try:
+        from wakeword_listener import trigger_manual_command
+        ok = trigger_manual_command()
+        if not ok:
+            return {"error": "wake-word listener is not initialized"}
+        return {"status": "listening"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 @app.get("/ask")
 def ask_mira(prompt: str):
     response = requests.post(
@@ -186,10 +257,11 @@ def has_internet() -> bool:
         return False
 
 def call_local_model(history: list) -> str:
+    settings = load_settings()
     response = requests.post(
         "http://localhost:11434/api/chat",
         json={
-            "model": "batiai/gemma4-e2b:q4",
+            "model": settings.get("local_chat_model") or DEFAULT_SETTINGS["local_chat_model"],
             "messages": history,
             "stream": False,
             "think": False
@@ -199,11 +271,21 @@ def call_local_model(history: list) -> str:
     return result["message"]["content"]
 
 def call_cloud_model(history: list):
+    settings = load_settings()
+    # a custom key in settings always wins; otherwise fall back to the bundled
+    # Groq preset using GROQ_API_KEY from .env, so this keeps working with zero config
+    api_key = settings.get("cloud_api_key") or GROQ_API_KEY
+    base_url = settings.get("cloud_base_url") or DEFAULT_SETTINGS["cloud_base_url"]
+    model = settings.get("cloud_model") or DEFAULT_SETTINGS["cloud_model"]
+
+    if not api_key:
+        return None, {"error": "no cloud API key configured"}
+
     response = requests.post(
-        "https://api.groq.com/openai/v1/chat/completions",
-        headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+        f"{base_url.rstrip('/')}/chat/completions",
+        headers={"Authorization": f"Bearer {api_key}"},
         json={
-            "model": "openai/gpt-oss-120b",
+            "model": model,
             "messages": history
         }
     )
@@ -251,11 +333,13 @@ def chat(session_id: str = Body(...), message: str = Body(...), model: str = Bod
 
 
 # ---------- NEW: long-file transcription with local fallback ----------
-def transcribe_with_groq(filepath: Path):
+def transcribe_with_groq(filepath: Path, mode: str = "translate"):
+    # "translate" -> always English output; "native" -> transcribed in the spoken language
+    endpoint = "translations" if mode == "translate" else "transcriptions"
     try:
         with open(filepath, "rb") as f:
             response = requests.post(
-                "https://api.groq.com/openai/v1/audio/translations",
+                f"https://api.groq.com/openai/v1/audio/{endpoint}",
                 headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
                 files={"file": (filepath.name, f, "application/octet-stream")},
                 data={"model": "whisper-large-v3"},
@@ -268,7 +352,7 @@ def transcribe_with_groq(filepath: Path):
     except requests.RequestException as e:
         return None, {"error": str(e)}
 
-def transcribe_with_whisper_cpp(filepath: Path):
+def transcribe_with_whisper_cpp(filepath: Path, mode: str = "translate"):
     # whisper.cpp requires 16kHz mono WAV input; convert with ffmpeg first
     converted_path = filepath.with_suffix(".converted.wav")
     convert_result = subprocess.run(
@@ -278,10 +362,12 @@ def transcribe_with_whisper_cpp(filepath: Path):
     if convert_result.returncode != 0:
         return None, {"error": "ffmpeg conversion failed", "details": convert_result.stderr}
 
-    result = subprocess.run(
-        [str(WHISPER_CLI), "-m", str(WHISPER_MODEL), "-f", str(converted_path), "-l", "auto", "-tr", "-nt", "-otxt"],
-        capture_output=True, text=True
-    )
+    cmd = [str(WHISPER_CLI), "-m", str(WHISPER_MODEL), "-f", str(converted_path), "-l", "auto"]
+    if mode == "translate":
+        cmd.append("-tr")
+    cmd += ["-nt", "-otxt"]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         return None, {"error": "whisper.cpp failed", "details": result.stderr}
 
@@ -298,23 +384,37 @@ def transcribe_with_whisper_cpp(filepath: Path):
 
 def transcribe_smart(filepath: Path):
     """
-    Local whisper.cpp is tried first: it's proven to translate non-English speech
-    (e.g. Hindi) to English correctly, whereas Groq's cloud /translations endpoint
-    has been observed to only transliterate (romanize) Hindi instead of actually
-    translating it. Groq is used as a fallback only if the local engine fails outright.
+    Tries the engine set in Settings ("stt_prefer") first, falling back to the
+    other one on failure (cloud fallback also requires internet). Local whisper.cpp
+    is the default preference: it's proven to translate non-English speech (e.g.
+    Hindi) correctly, whereas Groq's cloud /translations endpoint has been observed
+    to only transliterate (romanize) it instead of actually translating.
     Returns (text, engine_used, error_info).
     """
-    text, local_error = transcribe_with_whisper_cpp(filepath)
-    if text is not None:
-        return text, "whisper.cpp", None
+    settings = load_settings()
+    prefer = settings.get("stt_prefer", "local")
+    mode = settings.get("transcription_mode", "translate")
 
-    if has_internet():
-        text, groq_error = transcribe_with_groq(filepath)
+    def try_local():
+        return transcribe_with_whisper_cpp(filepath, mode)
+
+    def try_cloud():
+        if not has_internet():
+            return None, {"error": "no internet connection"}
+        return transcribe_with_groq(filepath, mode)
+
+    order = [("whisper.cpp", try_local), ("groq", try_cloud)]
+    if prefer == "cloud":
+        order = list(reversed(order))
+
+    errors = {}
+    for engine_name, fn in order:
+        text, err = fn()
         if text is not None:
-            return text, "groq", None
-        return None, None, {"local_error": local_error, "groq_error": groq_error}
+            return text, engine_name, None
+        errors[f"{engine_name}_error"] = err
 
-    return None, None, {"local_error": local_error}
+    return None, None, errors
 
 
 # ---------- Short-clip transcription (used by chat mic / push-to-talk) ----------
@@ -505,17 +605,108 @@ def meeting_stop():
 
 # ---------- macOS `say`-based text-to-speech endpoint ----------
 @app.post("/speak")
-def speak(text: str = Body(..., embed=True)):
+def speak(text: str = Body(..., embed=True), voice: str = Body(None)):
+    settings = load_settings()
+    chosen_voice = voice or settings.get("tts_voice")
+
     filename = f"{uuid.uuid4().hex}.aiff"
     filepath = TTS_DIR / filename
 
-    result = subprocess.run(
-        ["say", "-o", str(filepath), text],
-        capture_output=True,
-        text=True
-    )
+    cmd = ["say", "-o", str(filepath)]
+    if chosen_voice:
+        cmd += ["-v", chosen_voice]
+    cmd.append(text)
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
 
     if result.returncode != 0:
         return {"error": result.stderr}
 
     return FileResponse(path=str(filepath), media_type="audio/aiff", filename=filename)
+
+
+# ---------- available macOS TTS voices ----------
+@app.get("/voices")
+def list_voices():
+    result = subprocess.run(["say", "-v", "?"], capture_output=True, text=True)
+    if result.returncode != 0:
+        return {"error": result.stderr}
+
+    voices = []
+    for line in result.stdout.splitlines():
+        # format: "Name                locale    # sample text"
+        if "#" not in line:
+            continue
+        left, _, _sample = line.partition("#")
+        parts = left.split()
+        if len(parts) < 2:
+            continue
+        locale = parts[-1]
+        name = " ".join(parts[:-1]).strip()
+        voices.append({"name": name, "locale": locale})
+
+    return {"voices": voices}
+
+
+# ---------- Ollama local model management ----------
+OLLAMA_URL = "http://localhost:11434"
+
+@app.get("/models/local")
+def list_local_models():
+    try:
+        response = requests.get(f"{OLLAMA_URL}/api/tags", timeout=5)
+        data = response.json()
+        return {"models": data.get("models", [])}
+    except requests.RequestException as e:
+        return {"error": f"could not reach Ollama: {e}"}
+
+
+@app.post("/models/local/pull")
+def pull_local_model(name: str = Body(..., embed=True)):
+    def stream():
+        try:
+            with requests.post(f"{OLLAMA_URL}/api/pull", json={"name": name}, stream=True, timeout=None) as r:
+                for line in r.iter_lines():
+                    if line:
+                        yield line + b"\n"
+        except requests.RequestException as e:
+            yield (json.dumps({"error": str(e)}) + "\n").encode()
+
+    return StreamingResponse(stream(), media_type="application/x-ndjson")
+
+
+@app.delete("/models/local")
+def delete_local_model(name: str = Body(..., embed=True)):
+    try:
+        response = requests.delete(f"{OLLAMA_URL}/api/delete", json={"name": name}, timeout=10)
+        if response.status_code == 200:
+            return {"status": "deleted", "name": name}
+        return {"error": response.text}
+    except requests.RequestException as e:
+        return {"error": f"could not reach Ollama: {e}"}
+
+
+# ---------- test a cloud LLM connection before saving it ----------
+@app.post("/settings/test-cloud")
+def test_cloud_connection(base_url: str = Body(...), api_key: str = Body(""), model: str = Body(...)):
+    # an empty api_key means "use whatever's already saved" (or the .env fallback),
+    # so testing works without re-typing a key that's already stored
+    if not api_key:
+        settings = load_settings()
+        api_key = settings.get("cloud_api_key") or GROQ_API_KEY
+        if not api_key:
+            return {"ok": False, "error": "no API key saved and none provided"}
+
+    try:
+        response = requests.post(
+            f"{base_url.rstrip('/')}/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={"model": model, "messages": [{"role": "user", "content": "Say OK"}], "max_tokens": 50},
+            timeout=15
+        )
+        result = response.json()
+        if "choices" in result:
+            return {"ok": True, "reply": result["choices"][0]["message"]["content"]}
+        return {"ok": False, "error": result}
+    except requests.RequestException as e:
+        return {"ok": False, "error": str(e)}
