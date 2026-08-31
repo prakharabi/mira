@@ -19,6 +19,10 @@ daemon/tts_output/
 daemon/mira.log
 daemon/mira_error.log
 daemon/out.aiff
+daemon/settings.json
+daemon/wakeword/command_recording.wav
+daemon/wakeword/command_recording.converted.wav
+daemon/wakeword/command_recording.converted.wav.txt
 electron/electron.log
 
 # macOS

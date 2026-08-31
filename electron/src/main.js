@@ -52,6 +52,18 @@ function callDaemon(prompt, callback) {
   });
 }
 
+// triggers a "Hey Mira"-style voice command without needing the wake word --
+// fire-and-forget, the daemon records/answers/speaks on its own
+function triggerWakewordManually() {
+  const req = http.request(
+    'http://localhost:11200/wakeword/trigger',
+    { method: 'POST', headers: { 'Content-Type': 'application/json' } },
+    (res) => { res.on('data', () => {}); }
+  );
+  req.on('error', (e) => console.error('Could not trigger wake word:', e.message));
+  req.end();
+}
+
 let resultWindow = null;
 
 function showResultWindow(text, x, y) {
@@ -106,8 +118,10 @@ function toggleChatWindow() {
   }
 
   chatWindow = new BrowserWindow({
-    width: 380,
-    height: 520,
+    width: 1100,
+    height: 720,
+    minWidth: 860,
+    minHeight: 560,
     frame: false,
     transparent: true,
     alwaysOnTop: false,
@@ -121,7 +135,7 @@ function toggleChatWindow() {
     }
   });
 
-  chatWindow.loadFile('src/chat.html');
+  chatWindow.loadFile('src/workspace.html');
 
   chatWindow.once('ready-to-show', () => {
     chatWindow.show();
@@ -165,6 +179,12 @@ ipcMain.on('close-chat', () => {
 
 ipcMain.on('open-chat', () => {
   toggleChatWindow();
+});
+
+ipcMain.on('minimize-window', () => {
+  if (chatWindow && !chatWindow.isDestroyed()) {
+    chatWindow.minimize();
+  }
 });
 
 // ---------- NEW: meeting recording IPC handlers ----------
@@ -319,6 +339,12 @@ app.whenReady().then(() => {
   // NEW: Control+Space opens/toggles the chat window
   globalShortcut.register('Control+Space', () => {
     toggleChatWindow();
+  });
+
+  // NEW: Command+Shift+L triggers a "Hey Mira" voice command instantly, without
+  // needing to say the wake word -- works system-wide, from any app
+  globalShortcut.register('Command+Shift+L', () => {
+    triggerWakewordManually();
   });
 
   setInterval(() => {
