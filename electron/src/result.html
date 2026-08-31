@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body {
+    margin:0; background:#1e1e1e; color:white; font-family:sans-serif;
+    border-radius:14px; padding:14px; box-sizing:border-box;
+    width:320px; height:180px; overflow:hidden;
+    display:flex; flex-direction:column;
+  }
+  #content {
+    flex:1; font-size:13px; line-height:1.5; overflow-y:auto;
+  }
+  #closeBtn {
+    align-self:flex-end; background:#333; color:white; border:none;
+    border-radius:10px; padding:4px 10px; font-size:11px; cursor:pointer;
+    margin-top:8px;
+  }
+  #closeBtn:hover { background:#7c3aed; }
+</style>
+</head>
+<body>
+  <div id="content">Loading...</div>
+  <button id="closeBtn" onclick="closeWindow()">Close</button>
+  <script>
+    const { ipcRenderer } = require('electron');
+    ipcRenderer.on('result-text', (event, text) => {
+      document.getElementById('content').innerText = text;
+    });
+    function closeWindow() {
+      ipcRenderer.send('close-result');
+    }
+  </script>
+</body>
+</html>
