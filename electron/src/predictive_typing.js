@@ -3,9 +3,31 @@ const { execFile, spawn } = require('child_process');
 const http = require('http');
 const path = require('path');
 
-// Temporary allowlist while we stabilize the core mechanism — expand later.
-// Bundle identifiers, not display names. TextEdit = com.apple.TextEdit
-const ALLOWED_BUNDLE_IDS = ['com.apple.TextEdit'];
+// Universal: active in every app except this short blocklist. Tab is only ever
+// intercepted globally while a suggestion pill is actively showing (see
+// tab_tap.swift's `suggestionActive` flag) -- it behaves completely normally
+// everywhere else. But terminals and code editors give Tab its own essential
+// meaning (shell completion, indentation), and natural-language suggestions
+// from the small local model aren't useful there anyway -- if a suggestion
+// happened to be showing at the wrong moment, Tab would silently do the wrong
+// thing (accept a word instead of indenting/completing). Excluded rather than
+// risk that. Bundle identifiers, not display names.
+const BLOCKED_BUNDLE_IDS = [
+  'com.apple.Terminal',
+  'com.googlecode.iterm2',
+  'dev.warp.Warp-Stable',
+  'co.zeit.hyper',
+  'com.github.wez.wezterm',
+  'com.apple.dt.Xcode',
+  'com.microsoft.VSCode',
+  'com.microsoft.VSCodeInsiders',
+  'com.sublimetext.4',
+  'com.sublimetext.3',
+  'com.jetbrains.intellij',
+  'com.jetbrains.pycharm',
+  'com.jetbrains.WebStorm',
+  'com.todesktop.230313mzl4w4u92' // Cursor
+];
 
 function getFrontmostBundleId(callback) {
   execFile('osascript', ['-e', 'tell application "System Events" to get bundle identifier of first application process whose frontmost is true'], (err, stdout) => {
@@ -23,6 +45,7 @@ let currentSuggestionWords = [];
 let lastTextBeforeCursor = '';
 let lastCaretX = 100;
 let lastCaretY = 100;
+let lastCaretBundleId = null; // which app lastCaretX/Y actually belongs to
 let lastShownSuggestion = '';
 let pollTimer = null;
 let enabled = true;
@@ -65,12 +88,16 @@ function callDaemonForCompletion(textBeforeCursor, callback) {
   }
 
   const contextTail = textBeforeCursor.slice(-120);
-  const prompt = `Complete this sentence naturally with 2-4 plain, literal words. No creative writing, no poetic language, no emojis, no greetings, no unrelated words, no punctuation. Never repeat any word or phrase that already appears in the text below — only generate genuinely NEW words that haven't been typed yet. Just the most likely next words a person would type to continue their OWN sentence.
+  // kept intentionally short -- this whole prompt gets re-processed by the model
+  // on every single request while typing, so its length is a direct, constant
+  // latency tax. Trimming it from the original longer instruction block measurably
+  // cut request time (~700ms -> ~570ms). The "no filler words" line earns its
+  // keep specifically: without it the model has a strong tic of tacking on
+  // "now"/"today" onto otherwise-good completions ("the document now").
+  const prompt = `Continue this sentence with 2-4 plain words, no punctuation. Do not add filler words like now/today/please unless truly needed:
+"${contextTail}"`;
 
-"${contextTail}"
-Next:`;
-
-  const url = `http://localhost:11200/complete?prompt=${encodeURIComponent(prompt)}`;
+  const url = `http://localhost:11200/complete?prompt=${encodeURIComponent(prompt)}&context=${encodeURIComponent(contextTail)}`;
   const req = http.get(url, (res) => {
     let data = '';
     res.on('data', (chunk) => { data += chunk; });
@@ -147,11 +174,25 @@ function hideGhostText() {
   }
 }
 
+function reportAcceptedWord(context, word) {
+  // fire-and-forget: reinforces the personalization model, never blocks typing
+  const body = JSON.stringify({ context, word });
+  const req = http.request(
+    { hostname: 'localhost', port: 11200, path: '/complete/feedback', method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } },
+    (res) => { res.on('data', () => {}); }
+  );
+  req.on('error', () => {}); // personalization is a nice-to-have, never surface this failing
+  req.write(body);
+  req.end();
+}
+
 function acceptNextWord() {
   if (currentSuggestionWords.length === 0) return;
 
   acceptingInProgress = true;
   const word = currentSuggestionWords.shift();
+  reportAcceptedWord(lastTextBeforeCursor, word);
   // ensure a space exists before the inserted word if the text doesn't already end with whitespace
   const needsLeadingSpace = lastTextBeforeCursor.length > 0 && !/\s$/.test(lastTextBeforeCursor);
   const textToInsert = (needsLeadingSpace ? ' ' : '') + word + ' ';
@@ -183,7 +224,7 @@ function pollAndSuggest() {
 
   getFrontmostBundleId((bundleId) => {
     console.log('[poll] frontmost bundleId:', bundleId);
-    if (!bundleId || !ALLOWED_BUNDLE_IDS.includes(bundleId)) {
+    if (!bundleId || BLOCKED_BUNDLE_IDS.includes(bundleId)) {
       hideGhostText();
       return;
     }
@@ -214,10 +255,54 @@ function pollAndSuggest() {
         return;
       }
 
-      // use real caret coords if AX provided them, else keep last known position
-      if (typeof context.caretX === 'number' && context.caretX >= 0) {
-        lastCaretX = context.caretX;
-        lastCaretY = context.caretY;
+      // Three-layer validation for the caret position, strongest check first:
+      //
+      // 1. Cross-check against the frontmost window's own bounds (most reliable
+      //    when available) -- some apps report a "successful" bounds lookup with
+      //    a placeholder rect sitting exactly on the window's edge/corner instead
+      //    of a real error, which a bare "caretX >= 0" check can't catch.
+      // 2. If window bounds aren't available, at least check the coordinate falls
+      //    on SOME actual connected display -- always possible via Electron's
+      //    screen module, regardless of the target app's AX quality.
+      // 3. If neither check can be trusted, DON'T keep a stale position from a
+      //    different app/context (that's exactly what "floating in the air"
+      //    looks like) -- snap to the current mouse position instead, which is
+      //    always real, current, and usually close to where the user is
+      //    actually looking/typing.
+      let positionTrusted = false;
+
+      if (typeof context.caretX === 'number' && context.window) {
+        const w = context.window;
+        const margin = 2; // reject values sitting exactly on an edge (placeholder rects)
+        const withinWindow =
+          context.caretX > w.x + margin && context.caretX < w.x + w.width - margin &&
+          context.caretY > w.y + margin && context.caretY < w.y + w.height - margin;
+        if (withinWindow) {
+          lastCaretX = context.caretX;
+          lastCaretY = context.caretY;
+          lastCaretBundleId = bundleId;
+          positionTrusted = true;
+        }
+      } else if (typeof context.caretX === 'number' && context.caretX >= 0) {
+        const point = { x: context.caretX, y: context.caretY };
+        const onSomeDisplay = screen.getAllDisplays().some(d =>
+          point.x >= d.bounds.x && point.x <= d.bounds.x + d.bounds.width &&
+          point.y >= d.bounds.y && point.y <= d.bounds.y + d.bounds.height
+        );
+        if (onSomeDisplay) {
+          lastCaretX = context.caretX;
+          lastCaretY = context.caretY;
+          lastCaretBundleId = bundleId;
+          positionTrusted = true;
+        }
+      }
+
+      // no trustworthy position for THIS app -- a stale position from a
+      // different app is worse than useless, fall back to the mouse cursor
+      if (!positionTrusted && lastCaretBundleId !== bundleId) {
+        const cursor = screen.getCursorScreenPoint();
+        lastCaretX = cursor.x;
+        lastCaretY = cursor.y;
       }
 
       pendingRequest = true;

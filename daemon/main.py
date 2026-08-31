@@ -9,6 +9,7 @@ import subprocess
 import uuid
 import time
 import datetime
+import re
 from pathlib import Path
 
 # Load variables from the .env file (like GROQ_API_KEY) into the environment
@@ -28,6 +29,14 @@ async def lifespan(app: FastAPI):
         import traceback
         print(f"[main] Could not start wake-word listener: {e}", flush=True)
         print(traceback.format_exc(), flush=True)
+
+    try:
+        from personalization import bootstrap_from_chat_history
+        bootstrap_from_chat_history()
+        print("[main] predictive typing personalization bootstrapped", flush=True)
+    except Exception as e:
+        print(f"[main] Could not bootstrap personalization: {e}", flush=True)
+
     yield
     # shutdown (nothing needed here currently)
 
@@ -58,7 +67,10 @@ DEFAULT_SETTINGS = {
     "tts_voice": "",
     # optional: Tavily API key for live web search on queries that need current info.
     # blank = web search disabled, models just answer from their own knowledge.
-    "tavily_api_key": ""
+    "tavily_api_key": "",
+    # predictive typing: rerank the LLM's first suggested word using a local
+    # word-frequency model learned from the user's own writing, when confident.
+    "predictive_personalization_enabled": True
 }
 
 def load_settings():
@@ -97,6 +109,7 @@ def update_settings(
     transcription_mode: str = Body(None),
     tts_voice: str = Body(None),
     tavily_api_key: str = Body(None),
+    predictive_personalization_enabled: bool = Body(None),
 ):
     settings = load_settings()
 
@@ -129,6 +142,8 @@ def update_settings(
         settings["tts_voice"] = tts_voice
     if tavily_api_key is not None:
         settings["tavily_api_key"] = tavily_api_key
+    if predictive_personalization_enabled is not None:
+        settings["predictive_personalization_enabled"] = predictive_personalization_enabled
 
     save_settings(settings)
     result = dict(settings)
@@ -228,8 +243,43 @@ def ask_mira(prompt: str):
     return {"response": result["response"]}
 
 
+def _normalize_word(w: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", w.lower())
+
+
+def clean_completion(completion: str, context: str) -> str:
+    """Mirrors predictive_typing.js's client-side cleanup (first line only, strip
+    leading ellipsis/punctuation and markdown emphasis markers, strip an echoed
+    prefix of the context) so the server-side personalization swap below operates
+    on the actual first suggested word, not raw/noisy model output.
+
+    The echo check compares words after stripping punctuation/apostrophes rather
+    than a raw substring match -- the model frequently echoes context back with
+    different apostrophe/casing (e.g. "lets" typed -> "let's" echoed), which broke
+    a naive string-prefix comparison."""
+    cleaned = completion.split("\n")[0].strip()
+    cleaned = re.sub(r"^[.…\s]+", "", cleaned)
+    cleaned = re.sub(r"\*\*|\*", "", cleaned)
+
+    if context:
+        context_words = context.strip().split()
+        completion_words = cleaned.split()
+        max_check = min(6, len(context_words), len(completion_words))
+        strip_n = 0
+        for n in range(max_check, 0, -1):
+            ctx_tail = [_normalize_word(w) for w in context_words[-n:]]
+            comp_head = [_normalize_word(w) for w in completion_words[:n]]
+            if all(ctx_tail) and ctx_tail == comp_head:
+                strip_n = n
+                break
+        if strip_n:
+            cleaned = " ".join(completion_words[strip_n:])
+
+    return cleaned
+
+
 @app.get("/complete")
-def complete_mira(prompt: str):
+def complete_mira(prompt: str, context: str = ""):
     response = requests.post(
         "http://localhost:11434/api/generate",
         json={
@@ -238,14 +288,47 @@ def complete_mira(prompt: str):
             "stream": False,
             "think": False,
             "options": {
-                "num_predict": 10,
-                "temperature": 0.15,
-                "repeat_penalty": 1.3
+                # client only ever shows the first 4 words -- generating more than
+                # ~8 tokens is pure wasted latency. Lower temperature + higher
+                # repeat_penalty were tuned together with the shorter prompt to
+                # cut the "now"/"today" filler-word tic the model otherwise has.
+                "num_predict": 8,
+                "temperature": 0.1,
+                "repeat_penalty": 1.5
             }
         }
     )
     result = response.json()
-    return {"response": result["response"]}
+    completion = clean_completion(result["response"], context)
+
+    # personalization: if the user's own writing history strongly prefers a
+    # different first word in this exact context, swap it in. The LLM still
+    # generates the rest of the phrase -- this only corrects the first word.
+    if context and load_settings().get("predictive_personalization_enabled", True):
+        try:
+            from personalization import predict_next_word
+            personal_word, confidence = predict_next_word(context)
+            if personal_word:
+                words = completion.strip().split()
+                if words and words[0].lower() != personal_word.lower():
+                    words[0] = personal_word
+                    completion = " ".join(words)
+        except Exception as e:
+            print(f"[main] personalization lookup failed: {e}", flush=True)
+
+    return {"response": completion}
+
+
+@app.post("/complete/feedback")
+def complete_feedback(context: str = Body(...), word: str = Body(...)):
+    """Called when the user actually Tab-accepts a suggested word -- reinforces
+    the personalization model with a real, directly-relevant training signal."""
+    try:
+        from personalization import record_accepted_word
+        record_accepted_word(context, word)
+        return {"status": "recorded"}
+    except Exception as e:
+        return {"error": str(e)}
 
 
 # ---------- Model routing helpers ----------
