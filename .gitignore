@@ -1,0 +1,24 @@
+# Secrets
+.env
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Node
+node_modules/
+
+# Third-party (re-fetch via setup steps, not tracked)
+whisper.cpp/
+
+# Runtime / personal data
+daemon/meetings/
+daemon/chat_history/
+daemon/tts_output/
+daemon/mira.log
+daemon/mira_error.log
+daemon/out.aiff
+
+# macOS
+.DS_Store

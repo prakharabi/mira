@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { margin:0; background:transparent; overflow:hidden; font-family:sans-serif; }
+  #pet { width:100px; cursor:pointer; display:block; }
+  #menu {
+    display:none;
+    position:absolute;
+    bottom:110px;
+    left:0;
+    width:130px;
+    background:#1e1e1e;
+    border-radius:10px;
+    padding:6px;
+    color:white;
+    font-size:12px;
+    box-sizing:border-box;
+  }
+  #menu div {
+    padding:6px 8px;
+    cursor:pointer;
+    border-radius:6px;
+    white-space:nowrap;
+  }
+  #menu div:hover { background:#7c3aed; }
+</style>
+</head>
+<body>
+  <div id="menu">
+    <div onclick="alert('Search clicked')">Search</div>
+    <div onclick="alert('Summarize clicked')">Summarize</div>
+    <div onclick="alert('Remind Me clicked')">Remind Me</div>
+    <div onclick="alert('Translate clicked')">Translate to Hindi</div>
+  </div>
+  <img id="pet" src="pet.gif" onclick="openChat()">
+
+  <script>
+    const { ipcRenderer } = require('electron');
+
+    function openChat() {
+      ipcRenderer.send('open-chat');
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  body { margin:0; background:transparent; font-family:sans-serif; }
+  #bar {
+    display:flex; gap:5px; background:#1e1e1e; padding:8px;
+    border-radius:20px; align-items:center; flex-wrap:wrap; width:280px;
+    box-sizing:border-box;
+  }
+  button {
+    background:#333; color:white; border:none; border-radius:14px;
+    padding:6px 9px; font-size:11px; cursor:pointer; white-space:nowrap;
+  }
+  button:hover { background:#7c3aed; }
+</style>
+</head>
+<body>
+  <div id="bar">
+    <button onclick="doAction('search')">Search</button>
+    <button onclick="doAction('summarize')">Summarize</button>
+    <button onclick="doAction('remind')">Remind</button>
+    <button onclick="doAction('translate')">Hindi</button>
+    <button onclick="doAction('call')">Call</button>
+  </div>
+  <script>
+    const { ipcRenderer } = require('electron');
+    window.selectedText = '';
+
+    ipcRenderer.on('selected-text', (event, text) => {
+      window.selectedText = text;
+    });
+
+    function doAction(action) {
+      ipcRenderer.send('pill-action', { action: action, text: window.selectedText });
+      ipcRenderer.send('close-pill');
+    }
+  </script>
+</body>
+</html>

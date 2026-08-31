@@ -1,0 +1,650 @@
+<!DOCTYPE html>
+<html>
+<head>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: #1a1a1a;
+    font-family: -apple-system, sans-serif;
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    color: white;
+  }
+
+  #titlebar {
+    height: 32px;
+    -webkit-app-region: drag;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 10px;
+    background: #111;
+    font-size: 12px;
+    color: #888;
+  }
+  #close-btn {
+    -webkit-app-region: no-drag;
+    cursor: pointer;
+    color: #888;
+    padding: 2px 8px;
+  }
+  #close-btn:hover { color: white; }
+
+  #model-select {
+    -webkit-app-region: no-drag;
+    background: #2a2a2a;
+    color: #ccc;
+    border: none;
+    border-radius: 6px;
+    font-size: 11px;
+    padding: 3px 6px;
+    outline: none;
+    cursor: pointer;
+  }
+
+  #messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .msg {
+    max-width: 80%;
+    padding: 8px 12px;
+    border-radius: 14px;
+    font-size: 13px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+  }
+  .msg.user {
+    align-self: flex-end;
+    background: #7c3aed;
+    color: white;
+  }
+  .msg.assistant {
+    align-self: flex-start;
+    background: #2a2a2a;
+    color: #eee;
+  }
+  .msg.system {
+    align-self: center;
+    background: transparent;
+    color: #666;
+    font-size: 11px;
+  }
+
+  #input-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px;
+    background: #111;
+    border-top: 1px solid #2a2a2a;
+  }
+
+  #text-input {
+    flex: 1;
+    background: #2a2a2a;
+    border: none;
+    border-radius: 18px;
+    padding: 10px 14px;
+    color: white;
+    font-size: 13px;
+    outline: none;
+  }
+
+  button.icon-btn {
+    background: #2a2a2a;
+    border: none;
+    border-radius: 50%;
+    width: 36px;
+    height: 36px;
+    color: white;
+    font-size: 16px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+  button.icon-btn:hover { background: #3a3a3a; }
+  button.icon-btn.recording {
+    background: #dc2626;
+    animation: pulse 1s infinite;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+
+  #send-btn {
+    background: #7c3aed;
+  }
+  #send-btn:hover { background: #6d28d9; }
+
+  /* ---------- Tabs ---------- */
+  #tab-bar {
+    display: flex;
+    background: #111;
+    border-bottom: 1px solid #2a2a2a;
+  }
+  .tab-btn {
+    flex: 1;
+    background: transparent;
+    border: none;
+    color: #888;
+    padding: 8px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .tab-btn.active {
+    color: white;
+    border-bottom: 2px solid #7c3aed;
+  }
+  .tab-panel { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+  .tab-panel.active { display: flex; }
+
+  /* ---------- Meetings tab ---------- */
+  #meetings-panel {
+    padding: 14px;
+    gap: 12px;
+    overflow-y: auto;
+  }
+  .meeting-section {
+    background: #222;
+    border-radius: 10px;
+    padding: 12px;
+  }
+  .meeting-section h3 {
+    margin: 0 0 8px 0;
+    font-size: 12px;
+    color: #aaa;
+    font-weight: 600;
+  }
+  #file-upload-btn, #record-btn, #generate-minutes-btn {
+    background: #7c3aed;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    cursor: pointer;
+    width: 100%;
+  }
+  #file-upload-btn:hover, #generate-minutes-btn:hover { background: #6d28d9; }
+  #record-btn.recording {
+    background: #dc2626;
+    animation: pulse 1s infinite;
+  }
+  #transcript-box, #minutes-box {
+    background: #1a1a1a;
+    border-radius: 8px;
+    padding: 10px;
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    max-height: 200px;
+    overflow-y: auto;
+    margin-top: 8px;
+    color: #ddd;
+  }
+  #meeting-status {
+    font-size: 11px;
+    color: #888;
+    margin-top: 6px;
+  }
+
+  /* ---------- Settings tab ---------- */
+  #settings-panel {
+    padding: 14px;
+    gap: 12px;
+    overflow-y: auto;
+  }
+  .setting-row {
+    background: #222;
+    border-radius: 10px;
+    padding: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .setting-row .label {
+    font-size: 13px;
+    color: #eee;
+  }
+  .setting-row .sublabel {
+    font-size: 11px;
+    color: #888;
+    margin-top: 2px;
+  }
+  .toggle-switch {
+    position: relative;
+    width: 42px;
+    height: 24px;
+    flex-shrink: 0;
+  }
+  .toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+  .toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: #444;
+    border-radius: 24px;
+    transition: 0.2s;
+  }
+  .toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background: white;
+    border-radius: 50%;
+    transition: 0.2s;
+  }
+  .toggle-switch input:checked + .toggle-slider {
+    background: #7c3aed;
+  }
+  .toggle-switch input:checked + .toggle-slider:before {
+    transform: translateX(18px);
+  }
+</style>
+</head>
+<body>
+
+  <div id="titlebar">
+    <span>Mira</span>
+    <select id="model-select">
+      <option value="auto">Auto</option>
+      <option value="local">Local</option>
+      <option value="cloud">Cloud</option>
+    </select>
+    <span id="close-btn" onclick="closeWindow()">✕</span>
+  </div>
+
+  <div id="tab-bar">
+    <button class="tab-btn active" id="tab-chat-btn" onclick="switchTab('chat')">Chat</button>
+    <button class="tab-btn" id="tab-meetings-btn" onclick="switchTab('meetings')">Meetings</button>
+    <button class="tab-btn" id="tab-settings-btn" onclick="switchTab('settings')">Settings</button>
+  </div>
+
+  <div id="chat-panel" class="tab-panel active">
+    <div id="messages"></div>
+
+    <div id="input-bar">
+      <button class="icon-btn" id="mic-btn" onclick="toggleRecording()">🎤</button>
+      <input id="text-input" type="text" placeholder="Message Mira..." />
+      <button class="icon-btn" id="send-btn" onclick="sendTextMessage()">➤</button>
+    </div>
+  </div>
+
+  <div id="meetings-panel" class="tab-panel">
+    <div class="meeting-section">
+      <h3>Upload a recording</h3>
+      <input type="file" id="file-input" accept="audio/*,video/*" style="display:none" onchange="handleFileUpload(event)">
+      <button id="file-upload-btn" onclick="document.getElementById('file-input').click()">Choose Audio/Video File</button>
+    </div>
+
+    <div class="meeting-section">
+      <h3>Live meeting recording</h3>
+      <button id="record-btn" onclick="toggleMeetingRecording()">Start Recording</button>
+      <div id="meeting-status"></div>
+    </div>
+
+    <div class="meeting-section">
+      <h3>Transcript</h3>
+      <div id="transcript-box">No transcript yet.</div>
+      <button id="generate-minutes-btn" style="margin-top:8px;" onclick="generateMinutes()">Generate Minutes</button>
+    </div>
+
+    <div class="meeting-section">
+      <h3>Minutes of Meeting</h3>
+      <div id="minutes-box">No minutes generated yet.</div>
+    </div>
+  </div>
+
+  <div id="settings-panel" class="tab-panel">
+    <div class="setting-row">
+      <div>
+        <div class="label">Wake word listening</div>
+        <div class="sublabel">Listen for "Hey Mira" in the background</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" id="wakeword-toggle" onchange="updateSetting('wakeword_enabled', this.checked)">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+
+    <div class="setting-row">
+      <div>
+        <div class="label">Speak responses aloud</div>
+        <div class="sublabel">Applies to wake-word replies</div>
+      </div>
+      <label class="toggle-switch">
+        <input type="checkbox" id="voice-response-toggle" onchange="updateSetting('voice_response_enabled', this.checked)">
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+  </div>
+
+  <script>
+    const { ipcRenderer } = require('electron');
+
+    const DAEMON_URL = 'http://localhost:11200';
+    const SESSION_ID = 'main_chat'; // single persistent session for now
+
+    const messagesEl = document.getElementById('messages');
+    const inputEl = document.getElementById('text-input');
+    const micBtn = document.getElementById('mic-btn');
+    const modelSelect = document.getElementById('model-select');
+
+    let isRecording = false;
+    let mediaRecorder = null;
+    let audioChunks = [];
+
+    function addMessage(role, text) {
+      const div = document.createElement('div');
+      div.className = 'msg ' + role;
+      div.textContent = text;
+      messagesEl.appendChild(div);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function closeWindow() {
+      ipcRenderer.send('close-chat');
+    }
+
+    async function sendTextMessage() {
+      const text = inputEl.value.trim();
+      if (!text) return;
+      inputEl.value = '';
+      addMessage('user', text);
+      await sendToChat(text);
+    }
+
+    async function sendToChat(text) {
+      addMessage('system', 'Thinking...');
+      try {
+        const res = await fetch(`${DAEMON_URL}/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: SESSION_ID, message: text, model: modelSelect.value })
+        });
+        const data = await res.json();
+
+        // remove the "Thinking..." placeholder
+        const lastSystem = messagesEl.querySelector('.msg.system:last-child');
+        if (lastSystem) lastSystem.remove();
+
+        if (data.error) {
+          addMessage('system', 'Error: ' + JSON.stringify(data.error));
+          return;
+        }
+
+        addMessage('assistant', data.response);
+        if (data.model_used) addMessage('system', `(${data.model_used})`);
+        speakText(data.response);
+      } catch (e) {
+        const lastSystem = messagesEl.querySelector('.msg.system:last-child');
+        if (lastSystem) lastSystem.remove();
+        addMessage('system', 'Error: could not reach Mira daemon');
+      }
+    }
+
+    async function speakText(text) {
+      try {
+        const res = await fetch(`${DAEMON_URL}/speak`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text })
+        });
+        if (!res.ok) return;
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audio.play();
+      } catch (e) {
+        console.error('speak failed', e);
+      }
+    }
+
+    async function toggleRecording() {
+      if (!isRecording) {
+        // start recording
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+          mediaRecorder = new MediaRecorder(stream);
+          audioChunks = [];
+
+          mediaRecorder.ondataavailable = (e) => audioChunks.push(e.data);
+          mediaRecorder.onstop = async () => {
+            const blob = new Blob(audioChunks, { type: 'audio/webm' });
+            stream.getTracks().forEach(t => t.stop());
+            await transcribeAndSend(blob);
+          };
+
+          mediaRecorder.start();
+          isRecording = true;
+          micBtn.classList.add('recording');
+        } catch (e) {
+          addMessage('system', 'Microphone access denied or unavailable.');
+        }
+      } else {
+        // stop recording
+        mediaRecorder.stop();
+        isRecording = false;
+        micBtn.classList.remove('recording');
+      }
+    }
+
+    async function transcribeAndSend(blob) {
+      addMessage('system', 'Transcribing...');
+      const formData = new FormData();
+      formData.append('audio', blob, 'recording.webm');
+
+      try {
+        const res = await fetch(`${DAEMON_URL}/transcribe`, {
+          method: 'POST',
+          body: formData
+        });
+        const data = await res.json();
+
+        const lastSystem = messagesEl.querySelector('.msg.system:last-child');
+        if (lastSystem) lastSystem.remove();
+
+        if (data.error) {
+          addMessage('system', 'Transcription error: ' + JSON.stringify(data.error));
+          return;
+        }
+
+        addMessage('user', data.text);
+        await sendToChat(data.text);
+      } catch (e) {
+        const lastSystem = messagesEl.querySelector('.msg.system:last-child');
+        if (lastSystem) lastSystem.remove();
+        addMessage('system', 'Error: could not reach Mira daemon');
+      }
+    }
+
+    inputEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') sendTextMessage();
+    });
+
+    inputEl.focus();
+
+    // ---------- Tabs ----------
+    function switchTab(tab) {
+      document.getElementById('tab-chat-btn').classList.toggle('active', tab === 'chat');
+      document.getElementById('tab-meetings-btn').classList.toggle('active', tab === 'meetings');
+      document.getElementById('tab-settings-btn').classList.toggle('active', tab === 'settings');
+      document.getElementById('chat-panel').classList.toggle('active', tab === 'chat');
+      document.getElementById('meetings-panel').classList.toggle('active', tab === 'meetings');
+      document.getElementById('settings-panel').classList.toggle('active', tab === 'settings');
+      if (tab === 'settings') loadSettings();
+    }
+
+    // ---------- Settings tab ----------
+    async function loadSettings() {
+      try {
+        const res = await fetch(`${DAEMON_URL}/settings`);
+        const data = await res.json();
+        document.getElementById('wakeword-toggle').checked = data.wakeword_enabled !== false;
+        document.getElementById('voice-response-toggle').checked = data.voice_response_enabled !== false;
+      } catch (e) {
+        console.error('Could not load settings', e);
+      }
+    }
+
+    async function updateSetting(key, value) {
+      try {
+        await fetch(`${DAEMON_URL}/settings`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ [key]: value })
+        });
+      } catch (e) {
+        console.error('Could not update setting', e);
+      }
+    }
+
+    // ---------- Meetings tab ----------
+    let isMeetingRecording = false;
+    let currentTranscript = '';
+
+    const transcriptBox = document.getElementById('transcript-box');
+    const minutesBox = document.getElementById('minutes-box');
+    const meetingStatus = document.getElementById('meeting-status');
+    const recordBtn = document.getElementById('record-btn');
+
+    async function handleFileUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      transcriptBox.textContent = 'Transcribing... this may take a while for long files.';
+      meetingStatus.textContent = '';
+
+      const formData = new FormData();
+      formData.append('audio', file);
+
+      try {
+        const res = await fetch(`${DAEMON_URL}/transcribe-file`, {
+          method: 'POST',
+          body: formData
+        });
+        const data = await res.json();
+
+        if (data.error) {
+          transcriptBox.textContent = 'Error: ' + JSON.stringify(data.error);
+          return;
+        }
+
+        currentTranscript = data.text;
+        transcriptBox.textContent = data.text;
+        meetingStatus.textContent = `Transcribed using: ${data.engine_used}`;
+      } catch (e) {
+        transcriptBox.textContent = 'Error: could not reach Mira daemon';
+      }
+    }
+
+    function toggleMeetingRecording() {
+      if (!isMeetingRecording) {
+        ipcRenderer.send('meeting-start');
+        recordBtn.textContent = 'Starting...';
+        recordBtn.disabled = true;
+      } else {
+        ipcRenderer.send('meeting-stop');
+        recordBtn.textContent = 'Stopping...';
+        recordBtn.disabled = true;
+      }
+    }
+
+    ipcRenderer.on('meeting-start-result', (event, { result, err }) => {
+      recordBtn.disabled = false;
+      if (err || !result || result.error) {
+        meetingStatus.textContent = 'Error starting recording: ' + (err || result.error);
+        recordBtn.textContent = 'Start Recording';
+        return;
+      }
+      isMeetingRecording = true;
+      recordBtn.textContent = 'Stop Recording';
+      recordBtn.classList.add('recording');
+      meetingStatus.textContent = 'Recording in progress...';
+    });
+
+    ipcRenderer.on('meeting-stop-result', async (event, { result, err }) => {
+      recordBtn.disabled = false;
+      isMeetingRecording = false;
+      recordBtn.textContent = 'Start Recording';
+      recordBtn.classList.remove('recording');
+
+      if (err || !result || result.error) {
+        meetingStatus.textContent = 'Error stopping recording: ' + (err || result.error);
+        return;
+      }
+
+      meetingStatus.textContent = 'Recording saved. Transcribing...';
+      transcriptBox.textContent = 'Transcribing... this may take a while for long recordings.';
+
+      // fetch the saved file from disk via the daemon's transcribe-file endpoint
+      // the file path comes back from meeting/stop as result.file
+      try {
+        const res = await fetch(`${DAEMON_URL}/transcribe-local-meeting`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ filepath: result.file })
+        });
+        const data = await res.json();
+
+        if (data.error) {
+          transcriptBox.textContent = 'Error: ' + JSON.stringify(data.error);
+          return;
+        }
+
+        currentTranscript = data.text;
+        transcriptBox.textContent = data.text;
+        meetingStatus.textContent = `Transcribed using: ${data.engine_used}`;
+      } catch (e) {
+        transcriptBox.textContent = 'Error: could not reach Mira daemon';
+      }
+    });
+
+    async function generateMinutes() {
+      if (!currentTranscript) {
+        minutesBox.textContent = 'No transcript available yet.';
+        return;
+      }
+
+      minutesBox.textContent = 'Generating minutes...';
+
+      try {
+        const res = await fetch(`${DAEMON_URL}/generate-minutes`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ transcript: currentTranscript, model: modelSelect.value })
+        });
+        const data = await res.json();
+
+        if (data.error) {
+          minutesBox.textContent = 'Error: ' + JSON.stringify(data.error);
+          return;
+        }
+
+        minutesBox.textContent = data.minutes;
+      } catch (e) {
+        minutesBox.textContent = 'Error: could not reach Mira daemon';
+      }
+    }
+  </script>
+</body>
+</html>
