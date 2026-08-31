@@ -29,16 +29,30 @@ const BLOCKED_BUNDLE_IDS = [
   'com.todesktop.230313mzl4w4u92' // Cursor
 ];
 
-function getFrontmostBundleId(callback) {
-  execFile('osascript', ['-e', 'tell application "System Events" to get bundle identifier of first application process whose frontmost is true'], (err, stdout) => {
-    if (err) { callback(null); return; }
-    callback(stdout.trim());
-  });
-}
-
 const AX_HELPER_PATH = path.join(__dirname, '..', 'AXHelper.app', 'Contents', 'MacOS', 'ax_helper');
 const TAB_TAP_PATH = path.join(__dirname, '..', 'TabTap.app', 'Contents', 'MacOS', 'tab_tap');
-const POLL_INTERVAL_MS = 500;
+
+// Adaptive polling instead of a fixed interval: this used to poll every 500ms
+// FOREVER, even while completely idle, and each tick spawned a separate
+// `osascript` subprocess just to check the frontmost app (now folded into
+// ax_helper's own read below -- see frontmostBundleIdJSON there). Spawning a
+// process twice a second all day is real, avoidable CPU/battery cost. Two
+// separate backoff tiers, because "nothing to do here" and "paused mid-
+// sentence" deserve very different treatment:
+//  - NO_CONTEXT: not in an editable field at all (blocked app, nothing
+//    focused) -- there's nothing to lose by backing off fast here, and this
+//    covers most of a typical day, so it's where the real savings come from.
+//  - PAUSED: genuinely focused in a text field but not currently typing --
+//    back off only mildly, and only after a much longer pause, since a
+//    laggy first suggestion when the user resumes typing is exactly the
+//    "not matching my typing speed" complaint this whole feature exists to
+//    avoid. Any real text change resets straight back to fast, either way.
+const POLL_FAST_MS = 500;
+const POLL_PAUSED_MS = 900;
+const POLL_NO_CONTEXT_MS = 3000;
+const PAUSED_TICKS_BEFORE_BACKOFF = 10; // ~5s of no change while still focused in a field
+const NO_CONTEXT_TICKS_BEFORE_BACKOFF = 2; // ~1s -- nothing to lose by backing off fast
+let idleTickCount = 0;
 
 let ghostWindow = null;
 let currentSuggestionWords = [];
@@ -49,6 +63,7 @@ let lastCaretBundleId = null; // which app lastCaretX/Y actually belongs to
 let lastShownSuggestion = '';
 let pollTimer = null;
 let enabled = true;
+let stopped = true; // starts true; startPredictiveTyping() flips it before scheduling
 let tabTapProcess = null;
 let pendingRequest = false;
 let acceptingInProgress = false;
@@ -57,9 +72,10 @@ function readFocusedContext(callback) {
   execFile(AX_HELPER_PATH, ['read'], { timeout: 2000 }, (err, stdout) => {
     if (err) { callback(null); return; }
     try {
-      const parsed = JSON.parse(stdout.trim());
-      if (parsed.error) { callback(null); return; }
-      callback(parsed);
+      // parsed.bundleId is preserved even on parsed.error (e.g. "no focused
+      // element" -- browsing without a text field focused) so the blocklist
+      // check can still run without a second lookup
+      callback(JSON.parse(stdout.trim()));
     } catch (e) {
       callback(null);
     }
@@ -220,27 +236,43 @@ function acceptNextWord() {
 }
 
 function pollAndSuggest() {
-  if (!enabled || pendingRequest || acceptingInProgress) return;
+  // setTimeout-based scheduling is self-chaining (see scheduleNextPoll) --
+  // every exit path, including this one, MUST schedule the next poll itself
+  // or the whole loop silently dies. (setInterval didn't have this hazard,
+  // since missing one tick was harmless -- the timer kept firing regardless.)
+  if (!enabled || pendingRequest || acceptingInProgress) {
+    // transient busy state, not an idle signal -- retry soon without touching
+    // the backoff counters at all
+    scheduleNextPoll('retry');
+    return;
+  }
 
-  getFrontmostBundleId((bundleId) => {
-    console.log('[poll] frontmost bundleId:', bundleId);
+  // Single subprocess call now covers both the frontmost-app check AND the text
+  // context read (ax_helper reports bundleId via a cheap in-process NSWorkspace
+  // lookup) -- this used to be two separate subprocess spawns every tick,
+  // including a full `osascript`/AppleScript round-trip just for the app check.
+  readFocusedContext((context) => {
+    console.log('[poll] context:', context ? JSON.stringify(context).slice(0, 200) : null);
+
+    const bundleId = context && context.bundleId;
     if (!bundleId || BLOCKED_BUNDLE_IDS.includes(bundleId)) {
       hideGhostText();
+      scheduleNextPoll('noContext');
       return;
     }
 
-    readFocusedContext((context) => {
-      console.log('[poll] context:', context ? JSON.stringify(context).slice(0, 200) : null);
-      if (!context || !context.textBeforeCursor) {
-        hideGhostText();
-        return;
-      }
+    if (!context || !context.textBeforeCursor) {
+      hideGhostText();
+      scheduleNextPoll('noContext');
+      return;
+    }
 
-      // don't re-request if nothing changed since last poll
-      if (context.textBeforeCursor === lastTextBeforeCursor) {
-        console.log('[poll] no change, skipping');
-        return;
-      }
+    // don't re-request if nothing changed since last poll
+    if (context.textBeforeCursor === lastTextBeforeCursor) {
+      console.log('[poll] no change, skipping');
+      scheduleNextPoll('paused');
+      return;
+    }
 
       // text changed underneath an old suggestion (user typed past it without Tab) — clear stale pill immediately
       if (currentSuggestionWords.length > 0) {
@@ -248,6 +280,9 @@ function pollAndSuggest() {
       }
 
       lastTextBeforeCursor = context.textBeforeCursor;
+      // a real text change is "activity" -- stay on fast polling regardless of
+      // what happens below (too-short context, discarded suggestion, etc.)
+      scheduleNextPoll('active');
 
       // don't suggest on effectively empty context
       if (context.textBeforeCursor.trim().length < 3) {
@@ -353,11 +388,37 @@ function pollAndSuggest() {
         showGhostText(words, lastCaretX, lastCaretY);
       });
     });
-  });
+}
+
+// category: 'active' (just saw a real text change), 'paused' (focused in a
+// text field, nothing changed), 'noContext' (not in an editable field at
+// all), or 'retry' (transient busy state -- doesn't touch backoff at all)
+function scheduleNextPoll(category) {
+  // guards against an in-flight async callback (AX read / daemon request) still
+  // completing and rescheduling itself AFTER stopPredictiveTyping() already ran --
+  // clearTimeout only cancels an already-pending timer, not a callback that
+  // hasn't fired yet, so without this a stopped loop could silently resurrect
+  if (stopped) return;
+
+  let delay;
+  if (category === 'retry') {
+    delay = POLL_FAST_MS;
+  } else if (category === 'active') {
+    idleTickCount = 0;
+    delay = POLL_FAST_MS;
+  } else if (category === 'noContext') {
+    idleTickCount++;
+    delay = idleTickCount >= NO_CONTEXT_TICKS_BEFORE_BACKOFF ? POLL_NO_CONTEXT_MS : POLL_FAST_MS;
+  } else { // 'paused'
+    idleTickCount++;
+    delay = idleTickCount >= PAUSED_TICKS_BEFORE_BACKOFF ? POLL_PAUSED_MS : POLL_FAST_MS;
+  }
+  pollTimer = setTimeout(pollAndSuggest, delay);
 }
 
 function startPredictiveTyping() {
-  pollTimer = setInterval(pollAndSuggest, POLL_INTERVAL_MS);
+  stopped = false;
+  pollTimer = setTimeout(pollAndSuggest, POLL_FAST_MS);
 
   tabTapProcess = spawn(TAB_TAP_PATH, [], { stdio: ['pipe', 'pipe', 'pipe'] });
 
@@ -381,7 +442,8 @@ function startPredictiveTyping() {
 }
 
 function stopPredictiveTyping() {
-  if (pollTimer) clearInterval(pollTimer);
+  stopped = true;
+  if (pollTimer) clearTimeout(pollTimer);
   if (activeRequest) { activeRequest.destroy(); activeRequest = null; }
   if (tabTapProcess && !tabTapProcess.killed) tabTapProcess.kill('SIGKILL');
   hideGhostText();

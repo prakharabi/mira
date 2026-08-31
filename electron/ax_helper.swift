@@ -58,9 +58,21 @@ func getNumberAttribute(_ element: AXUIElement, _ attribute: String) -> Int? {
     return nil
 }
 
+func frontmostBundleIdJSON() -> String {
+    guard let id = NSWorkspace.shared.frontmostApplication?.bundleIdentifier else { return "null" }
+    return "\"\(id)\""
+}
+
 func readContext() {
+    // Reading the frontmost app's bundle ID here (a cheap, in-process NSWorkspace
+    // call) means the caller no longer needs a separate `osascript` subprocess just
+    // to check which app is focused -- that used to run on every single poll tick,
+    // indefinitely, even while idle. Computed first so it's included even when
+    // there's no focused text element to read (e.g. just browsing, no field focused).
+    let bundleId = frontmostBundleIdJSON()
+
     guard let el = getFocusedElement() else {
-        print("{\"error\":\"no focused element\"}")
+        print("{\"error\":\"no focused element\",\"bundleId\":\(bundleId)}")
         return
     }
 
@@ -110,7 +122,7 @@ func readContext() {
         windowJSON = "{\"x\":\(win.origin.x),\"y\":\(win.origin.y),\"width\":\(win.size.width),\"height\":\(win.size.height)}"
     }
 
-    print("{\"textBeforeCursor\":\"\(escaped)\",\"caretX\":\(caretX),\"caretY\":\(caretY),\"boundsError\":\(boundsErrorCode),\"window\":\(windowJSON)}")
+    print("{\"textBeforeCursor\":\"\(escaped)\",\"caretX\":\(caretX),\"caretY\":\(caretY),\"boundsError\":\(boundsErrorCode),\"window\":\(windowJSON),\"bundleId\":\(bundleId)}")
 }
 
 // Types text by posting synthetic keyboard events, exactly like a real keystroke,
