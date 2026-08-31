@@ -854,6 +854,16 @@
               <span class="toggle-slider"></span>
             </label>
           </div>
+          <div class="setting-row">
+            <div>
+              <div class="label">Predictive typing personalization</div>
+              <div class="sublabel">Learns your own word choices from your writing to improve suggestions — fully local, never leaves your machine</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="personalization-toggle">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
         </div>
 
         <div class="settings-section">
@@ -1343,6 +1353,7 @@
       const data = await res.json();
       document.getElementById('wakeword-toggle').checked = data.wakeword_enabled !== false;
       document.getElementById('voice-response-toggle').checked = data.voice_response_enabled !== false;
+      document.getElementById('personalization-toggle').checked = data.predictive_personalization_enabled !== false;
 
       document.getElementById('cloud-provider-select').value = data.cloud_provider || 'groq';
       document.getElementById('cloud-base-url').value = data.cloud_base_url || '';
@@ -1373,6 +1384,7 @@
   }
   document.getElementById('wakeword-toggle').addEventListener('change', (e) => updateSetting('wakeword_enabled', e.target.checked));
   document.getElementById('voice-response-toggle').addEventListener('change', (e) => updateSetting('voice_response_enabled', e.target.checked));
+  document.getElementById('personalization-toggle').addEventListener('change', (e) => updateSetting('predictive_personalization_enabled', e.target.checked));
 
   // ---------- local models (Ollama) ----------
   async function loadLocalModels(selectedName) {

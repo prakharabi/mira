@@ -20,6 +20,7 @@ daemon/mira.log
 daemon/mira_error.log
 daemon/out.aiff
 daemon/settings.json
+daemon/personal_ngrams.json
 daemon/wakeword/command_recording.wav
 daemon/wakeword/command_recording.converted.wav
 daemon/wakeword/command_recording.converted.wav.txt
