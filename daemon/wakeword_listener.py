@@ -108,7 +108,7 @@ def handle_wake_detected(pa: pyaudio.PyAudio, chime: bool = False):
     from main import (
         transcribe_smart, has_internet,
         load_history, save_history, call_local_model, call_cloud_model,
-        needs_cloud, load_settings
+        needs_cloud, load_settings, build_context_message
     )
 
     text, _engine_used, _err = transcribe_smart(audio_path)
@@ -122,12 +122,15 @@ def handle_wake_detected(pa: pyaudio.PyAudio, chime: bool = False):
     history = load_history(WAKEWORD_SESSION_ID)
     history.append({"role": "user", "content": text})
 
+    context_message = build_context_message(text)
+    messages_for_model = [{"role": "system", "content": context_message}] + history
+
     if needs_cloud(text) and has_internet():
-        reply, error = call_cloud_model(history)
+        reply, error = call_cloud_model(messages_for_model)
         if reply is None:
-            reply = call_local_model(history)
+            reply = call_local_model(messages_for_model)
     else:
-        reply = call_local_model(history)
+        reply = call_local_model(messages_for_model)
 
     history.append({"role": "assistant", "content": reply})
     save_history(WAKEWORD_SESSION_ID, history)
