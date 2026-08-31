@@ -914,6 +914,32 @@
         </div>
 
         <div class="settings-section">
+          <div class="settings-section-title">Web Access</div>
+
+          <div class="setting-block">
+            <div class="setting-block-row">
+              <div>
+                <div class="label">Live web search</div>
+                <div class="sublabel">Lets Mira look up current events, news, and other real-time info via Tavily</div>
+              </div>
+            </div>
+            <div class="setting-block-body">
+              <div>
+                <span class="field-label">Tavily API key</span>
+                <input class="rect-field" id="tavily-api-key" type="password" placeholder="Leave blank to disable web search" style="width:100%;" />
+                <div class="sublabel" id="tavily-key-status" style="margin-top:5px;"></div>
+              </div>
+              <div class="field-row">
+                <button class="mini-btn accent" id="save-tavily-btn">Save</button>
+                <button class="mini-btn" id="test-tavily-btn">Test connection</button>
+              </div>
+              <div class="inline-status" id="tavily-test-status"></div>
+              <div class="sublabel">Mira always knows the current date and time regardless of this setting — this only affects live news/search lookups. Get a free key at <span style="color:var(--text-secondary);">tavily.com</span>.</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="settings-section">
           <div class="settings-section-title">Voice &amp; Language</div>
 
           <div class="setting-block">
@@ -1324,6 +1350,9 @@
       document.getElementById('cloud-key-status').textContent = data.cloud_api_key_set
         ? 'An API key is currently saved.' : 'No API key saved yet — using .env fallback if present.';
 
+      document.getElementById('tavily-key-status').textContent = data.tavily_api_key_set
+        ? 'An API key is currently saved — web search is active.' : 'No key saved — web search is disabled.';
+
       sttSeg.setActive(data.stt_prefer || 'local', false);
       modeSeg.setActive(data.transcription_mode || 'translate', false);
 
@@ -1497,6 +1526,53 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ base_url: baseUrl, api_key: typedKey, model })
+      });
+      const data = await res.json();
+      if (data.ok) {
+        status.className = 'inline-status ok';
+        status.textContent = 'Connection works.';
+      } else {
+        status.className = 'inline-status error';
+        status.textContent = 'Failed: ' + JSON.stringify(data.error);
+      }
+    } catch (e) {
+      status.className = 'inline-status error';
+      status.textContent = 'Could not reach Mira daemon.';
+    }
+  };
+
+  // ---------- web search (Tavily) ----------
+  document.getElementById('save-tavily-btn').onclick = async () => {
+    const apiKey = document.getElementById('tavily-api-key').value;
+    const status = document.getElementById('tavily-test-status');
+    try {
+      await fetch(`${DAEMON_URL}/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tavily_api_key: apiKey })
+      });
+      document.getElementById('tavily-api-key').value = '';
+      document.getElementById('tavily-key-status').textContent = apiKey
+        ? 'An API key is currently saved — web search is active.'
+        : 'No key saved — web search is disabled.';
+      status.className = 'inline-status ok';
+      status.textContent = 'Saved.';
+    } catch (e) {
+      status.className = 'inline-status error';
+      status.textContent = 'Could not save settings.';
+    }
+  };
+
+  document.getElementById('test-tavily-btn').onclick = async () => {
+    const typedKey = document.getElementById('tavily-api-key').value;
+    const status = document.getElementById('tavily-test-status');
+    status.className = 'inline-status';
+    status.textContent = 'Testing…';
+    try {
+      const res = await fetch(`${DAEMON_URL}/settings/test-search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: typedKey })
       });
       const data = await res.json();
       if (data.ok) {

@@ -8,6 +8,7 @@ import json
 import subprocess
 import uuid
 import time
+import datetime
 from pathlib import Path
 
 # Load variables from the .env file (like GROQ_API_KEY) into the environment
@@ -54,7 +55,10 @@ DEFAULT_SETTINGS = {
     "stt_prefer": "local",           # "local" | "cloud"
     "transcription_mode": "translate",  # "translate" (-> English) | "native" (original language)
     # TTS: macOS `say` voice name (e.g. "Samantha", "Lekha"). Empty = system default.
-    "tts_voice": ""
+    "tts_voice": "",
+    # optional: Tavily API key for live web search on queries that need current info.
+    # blank = web search disabled, models just answer from their own knowledge.
+    "tavily_api_key": ""
 }
 
 def load_settings():
@@ -75,7 +79,9 @@ def get_settings():
     # never echo the raw API key back to the frontend; expose only whether one is set
     masked = dict(settings)
     masked["cloud_api_key_set"] = bool(settings.get("cloud_api_key"))
+    masked["tavily_api_key_set"] = bool(settings.get("tavily_api_key"))
     masked.pop("cloud_api_key", None)
+    masked.pop("tavily_api_key", None)
     return masked
 
 @app.post("/settings")
@@ -90,6 +96,7 @@ def update_settings(
     stt_prefer: str = Body(None),
     transcription_mode: str = Body(None),
     tts_voice: str = Body(None),
+    tavily_api_key: str = Body(None),
 ):
     settings = load_settings()
 
@@ -120,11 +127,15 @@ def update_settings(
         settings["transcription_mode"] = transcription_mode
     if tts_voice is not None:
         settings["tts_voice"] = tts_voice
+    if tavily_api_key is not None:
+        settings["tavily_api_key"] = tavily_api_key
 
     save_settings(settings)
     result = dict(settings)
     result["cloud_api_key_set"] = bool(settings.get("cloud_api_key"))
+    result["tavily_api_key_set"] = bool(settings.get("tavily_api_key"))
     result.pop("cloud_api_key", None)
+    result.pop("tavily_api_key", None)
     return result
 
 
@@ -256,6 +267,54 @@ def has_internet() -> bool:
     except requests.RequestException:
         return False
 
+
+def web_search(query: str, max_results: int = 4):
+    """Live web search via Tavily (https://tavily.com), used to ground answers about
+    current events/info the model's own training data can't know. Optional -- returns
+    an error if no key is configured, callers should treat that as "skip search"."""
+    settings = load_settings()
+    api_key = settings.get("tavily_api_key")
+    if not api_key:
+        return None, {"error": "no Tavily API key configured"}
+
+    try:
+        response = requests.post(
+            "https://api.tavily.com/search",
+            json={"api_key": api_key, "query": query, "max_results": max_results, "search_depth": "basic"},
+            timeout=15
+        )
+        data = response.json()
+        results = data.get("results", [])
+        if not results:
+            return None, {"error": "no results", "details": data}
+
+        formatted = "\n\n".join(
+            f"- {r.get('title', '')}: {r.get('content', '')} (source: {r.get('url', '')})"
+            for r in results
+        )
+        return formatted, None
+    except requests.RequestException as e:
+        return None, {"error": str(e)}
+
+
+def build_context_message(message: str) -> str:
+    """Built fresh per-request and prepended as a system message to whatever gets
+    sent to the model -- never persisted into saved chat history, so it doesn't
+    pollute the conversation shown to the user."""
+    now = datetime.datetime.now()
+    parts = [f"Current date and time: {now.strftime('%A, %B %d, %Y, %I:%M %p')} (local system time)."]
+
+    if needs_cloud(message) and has_internet():
+        results, _err = web_search(message)
+        if results:
+            parts.append(
+                "Live web search results for reference -- use them if relevant to answer "
+                "accurately, and cite naturally rather than dumping the raw list:\n" + results
+            )
+
+    return "\n\n".join(parts)
+
+
 def call_local_model(history: list) -> str:
     settings = load_settings()
     response = requests.post(
@@ -301,29 +360,34 @@ def chat(session_id: str = Body(...), message: str = Body(...), model: str = Bod
     history = load_history(session_id)
     history.append({"role": "user", "content": message})
 
+    # current date/time (+ live search results, if configured) go in as a system
+    # message for the model only -- never saved into the persisted conversation
+    context_message = build_context_message(message)
+    messages_for_model = [{"role": "system", "content": context_message}] + history
+
     used_model = "local"
     reply = None
 
     if model == "local":
-        reply = call_local_model(history)
+        reply = call_local_model(messages_for_model)
         used_model = "local"
 
     elif model == "cloud":
-        reply, error = call_cloud_model(history)
+        reply, error = call_cloud_model(messages_for_model)
         if reply is None:
             return {"error": error}
         used_model = "cloud"
 
     else:  # auto
         if needs_cloud(message) and has_internet():
-            reply, error = call_cloud_model(history)
+            reply, error = call_cloud_model(messages_for_model)
             if reply is not None:
                 used_model = "cloud"
             else:
-                reply = call_local_model(history)
+                reply = call_local_model(messages_for_model)
                 used_model = "local"
         else:
-            reply = call_local_model(history)
+            reply = call_local_model(messages_for_model)
             used_model = "local"
 
     history.append({"role": "assistant", "content": reply})
@@ -708,5 +772,27 @@ def test_cloud_connection(base_url: str = Body(...), api_key: str = Body(""), mo
         if "choices" in result:
             return {"ok": True, "reply": result["choices"][0]["message"]["content"]}
         return {"ok": False, "error": result}
+    except requests.RequestException as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/settings/test-search")
+def test_search_connection(api_key: str = Body("")):
+    # an empty api_key means "use whatever's already saved"
+    if not api_key:
+        api_key = load_settings().get("tavily_api_key")
+        if not api_key:
+            return {"ok": False, "error": "no API key saved and none provided"}
+
+    try:
+        response = requests.post(
+            "https://api.tavily.com/search",
+            json={"api_key": api_key, "query": "current weather in San Francisco", "max_results": 1},
+            timeout=15
+        )
+        data = response.json()
+        if data.get("results"):
+            return {"ok": True, "sample": data["results"][0].get("title", "")}
+        return {"ok": False, "error": data}
     except requests.RequestException as e:
         return {"ok": False, "error": str(e)}

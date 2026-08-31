@@ -1,9 +1,14 @@
 const { app, BrowserWindow, screen, ipcMain, globalShortcut } = require('electron');
 const { clipboard } = require('electron');
 const http = require('http');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
+const path = require('path');
+const fs = require('fs');
+const os = require('os');
 const { startPredictiveTyping, stopPredictiveTyping } = require('./predictive_typing');
 const { startMeetingRecording, stopMeetingRecording } = require('./meeting_recorder');
+
+const OCR_HELPER_PATH = path.join(__dirname, '..', 'ocr_helper');
 
 app.dock.hide();
 
@@ -328,6 +333,54 @@ function showPill(text) {
   });
 }
 
+// ---------- System-wide OCR ----------
+// Uses macOS's built-in interactive region picker (screencapture -i), then runs
+// the captured region through a local Vision-framework helper (ocr_helper). The
+// recognized text is written to the clipboard, which reuses the existing
+// clipboard-watcher below to pop up the same Search/Summarize/Translate/Remind
+// pill already built for selected text -- no separate UI needed for OCR results.
+let ocrInProgress = false;
+
+function runOCR() {
+  if (ocrInProgress) return;
+  ocrInProgress = true;
+
+  const tmpImage = path.join(os.tmpdir(), `mira_ocr_${Date.now()}.png`);
+  const capture = spawn('screencapture', ['-i', tmpImage]);
+
+  capture.on('error', (e) => {
+    console.error('screencapture failed to start:', e.message);
+    ocrInProgress = false;
+  });
+
+  capture.on('close', () => {
+    if (!fs.existsSync(tmpImage)) {
+      // user pressed Escape / cancelled the region selection -- nothing to do
+      ocrInProgress = false;
+      return;
+    }
+
+    const ocr = spawn(OCR_HELPER_PATH, [tmpImage]);
+    let output = '';
+    let errOutput = '';
+    ocr.stdout.on('data', (d) => { output += d.toString(); });
+    ocr.stderr.on('data', (d) => { errOutput += d.toString(); });
+
+    ocr.on('close', () => {
+      fs.unlink(tmpImage, () => {});
+      ocrInProgress = false;
+
+      const text = output.trim();
+      if (!text) {
+        if (errOutput) console.error('ocr_helper error:', errOutput);
+        return;
+      }
+
+      clipboard.writeText(text);
+    });
+  });
+}
+
 app.whenReady().then(() => {
   createWindow();
   startPredictiveTyping();
@@ -345,6 +398,13 @@ app.whenReady().then(() => {
   // needing to say the wake word -- works system-wide, from any app
   globalShortcut.register('Command+Shift+L', () => {
     triggerWakewordManually();
+  });
+
+  // NEW: Command+Shift+O starts a system-wide OCR capture -- drag-select any
+  // region of the screen, recognized text lands on the clipboard and pops up
+  // the same action pill used for selected text
+  globalShortcut.register('Command+Shift+O', () => {
+    runOCR();
   });
 
   setInterval(() => {
