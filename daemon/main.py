@@ -184,12 +184,14 @@ MEETINGS_DIR.mkdir(parents=True, exist_ok=True)
 
 # ---------- whisper.cpp paths (EDIT THESE if your paths differ) ----------
 WHISPER_CLI = Path.home() / "Mira" / "whisper.cpp" / "build" / "bin" / "whisper-cli"
-WHISPER_MODEL = Path.home() / "Mira" / "whisper.cpp" / "models" / "ggml-base.bin"
+WHISPER_MODEL = Path.home() / "Mira" / "whisper.cpp" / "models" / "ggml-small.bin"
+WHISPER_VAD_MODEL = Path.home() / "Mira" / "whisper.cpp" / "models" / "ggml-silero-v6.2.0.bin"
 
 # ffmpeg's full path -- LaunchAgent daemons run with a minimal PATH that does NOT
 # include Homebrew's /opt/homebrew/bin, so "ffmpeg" alone is not found. Confirm this
 # matches `which ffmpeg` on your machine (Intel Macs often use /usr/local/bin/ffmpeg instead).
 FFMPEG_PATH = "/opt/homebrew/bin/ffmpeg"
+FFPROBE_PATH = "/opt/homebrew/bin/ffprobe"
 
 # ---------- mic_helper (Swift, run by the daemon) ----------
 # mic_helper runs from inside a proper .app bundle (with Info.plist declaring
@@ -328,6 +330,40 @@ def complete_feedback(context: str = Body(...), word: str = Body(...)):
         record_accepted_word(context, word)
         return {"status": "recorded"}
     except Exception as e:
+        return {"error": str(e)}
+
+
+# ---------- In-word (letter-level) completion -- purely local, no LLM ----------
+@app.get("/complete/word")
+def complete_word_endpoint(partial: str):
+    try:
+        from personalization import complete_word
+        suffix = complete_word(partial)
+        return {"suffix": suffix}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/complete/word/feedback")
+def complete_word_feedback(word: str = Body(..., embed=True)):
+    """Called when an in-word completion is Tab-accepted."""
+    try:
+        from personalization import record_accepted_completion
+        record_accepted_completion(word)
+        return {"status": "recorded"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ---------- Spell-check -- proxies to ax_helper's native NSSpellChecker call ----------
+AX_HELPER_PATH = Path.home() / "Mira" / "electron" / "AXHelper.app" / "Contents" / "MacOS" / "ax_helper"
+
+@app.get("/spellcheck")
+def spellcheck_endpoint(word: str):
+    try:
+        result = subprocess.run([str(AX_HELPER_PATH), "spellcheck", word], capture_output=True, text=True, timeout=5)
+        return json.loads(result.stdout.strip())
+    except (subprocess.SubprocessError, json.JSONDecodeError) as e:
         return {"error": str(e)}
 
 
@@ -512,6 +548,12 @@ def transcribe_with_whisper_cpp(filepath: Path, mode: str = "translate"):
     cmd = [str(WHISPER_CLI), "-m", str(WHISPER_MODEL), "-f", str(converted_path), "-l", "auto"]
     if mode == "translate":
         cmd.append("-tr")
+    # VAD splits audio at real speech/silence boundaries instead of decoding one
+    # long continuous stretch -- meaningfully reduces (though doesn't eliminate on
+    # its own, for this small model) the runaway repetition-loop hallucination
+    # small Whisper models are prone to on long/noisy/non-English audio.
+    if WHISPER_VAD_MODEL.exists():
+        cmd += ["--vad", "-vm", str(WHISPER_VAD_MODEL)]
     cmd += ["-nt", "-otxt"]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
@@ -564,6 +606,172 @@ def transcribe_smart(filepath: Path):
     return None, None, errors
 
 
+def collapse_repetition_loops(text: str) -> str:
+    """Small Whisper models can fall into a runaway loop of repeating the same
+    short phrase over and over on long/noisy/non-English audio (a well-known
+    failure mode, confirmed on real meeting recordings here). This is a
+    defensive safety net applied to ANY engine's output: collapses a run of
+    3+ consecutive duplicate lines down to a single copy plus a note, rather
+    than shipping pages of "I don't know. I don't know. I don't know...."."""
+    lines = text.split("\n")
+    out = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        run = 1
+        while i + run < len(lines) and lines[i + run].strip() == line.strip():
+            run += 1
+        if run >= 3 and line.strip():
+            out.append(line)
+            out.append(f"[repeated {run}x, collapsed]")
+        else:
+            out.extend(lines[i:i + run])
+        i += run
+    return "\n".join(out)
+
+
+def get_audio_duration_seconds(filepath: Path):
+    try:
+        result = subprocess.run(
+            [FFPROBE_PATH, "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(filepath)],
+            capture_output=True, text=True, timeout=30
+        )
+        return float(result.stdout.strip())
+    except (subprocess.SubprocessError, ValueError):
+        return None
+
+
+MEETING_CHUNK_SECONDS = 600  # 10 min per chunk -- safely under Groq's per-file upload limit
+
+
+def transcribe_meeting_chunked_groq(filepath: Path, duration: float):
+    """Splits long audio into ~10-minute chunks and transcribes each via Groq's
+    cloud whisper-large-v3 in NATIVE mode (not translate). This is meaningfully
+    more accurate than the local model on long, noisy, real-world (often
+    multilingual) meeting audio -- confirmed directly: the local base model
+    produced runaway hallucination loops on a real Hindi meeting recording
+    where Groq's cloud model transcribed it correctly. Always native mode at
+    the audio level -- Groq's /translations endpoint was separately found to
+    only transliterate Hindi rather than actually translate it; English output
+    (if wanted) is handled afterward as a proper text-to-text LLM translation
+    pass in transcribe_meeting_smart, not baked into the audio model."""
+    chunk_paths = []
+    try:
+        num_chunks = max(1, int(duration // MEETING_CHUNK_SECONDS) + (1 if duration % MEETING_CHUNK_SECONDS > 5 else 0))
+        texts = []
+        for i in range(num_chunks):
+            start = i * MEETING_CHUNK_SECONDS
+            chunk_path = filepath.with_suffix(f".chunk{i}.wav")
+            convert_result = subprocess.run(
+                [FFMPEG_PATH, "-y", "-ss", str(start), "-t", str(MEETING_CHUNK_SECONDS),
+                 "-i", str(filepath), "-ar", "16000", "-ac", "1", str(chunk_path)],
+                capture_output=True, text=True
+            )
+            if convert_result.returncode != 0 or not chunk_path.exists():
+                continue
+            chunk_paths.append(chunk_path)
+
+            text, err = transcribe_with_groq(chunk_path, mode="native")
+            if text is None:
+                return None, {"error": f"chunk {i} failed", "details": err}
+            texts.append(text.strip())
+
+        return "\n".join(t for t in texts if t), None
+    finally:
+        for p in chunk_paths:
+            p.unlink(missing_ok=True)
+
+
+def translate_text_via_llm(text: str):
+    """Text-to-text translation via the chat LLM, used for meeting transcripts
+    instead of relying on an audio model's built-in translate mode -- Groq's
+    /translations endpoint and the local model's -tr flag were both found to
+    handle Hindi poorly (transliteration / hallucination respectively), whereas
+    a general-purpose LLM translating text it can already read in full context
+    does this reliably. Chunks long transcripts to stay within reasonable
+    prompt sizes for the local/small cloud models."""
+    CHUNK_CHARS = 3000
+    chunks = [text[i:i + CHUNK_CHARS] for i in range(0, len(text), CHUNK_CHARS)] or [text]
+
+    translated_parts = []
+    for chunk in chunks:
+        prompt = f"Translate the following meeting transcript to English. Keep it as plain transcript text, no commentary, no preamble:\n\n{chunk}"
+        history = [{"role": "user", "content": prompt}]
+        if has_internet():
+            reply, error = call_cloud_model(history)
+            if reply is None:
+                reply = call_local_model(history)
+        else:
+            reply = call_local_model(history)
+        translated_parts.append(reply)
+
+    return "\n".join(translated_parts)
+
+
+def transcribe_meeting_smart(filepath: Path):
+    """Meeting-specific transcription pipeline (used by /transcribe-file and
+    /transcribe-local-meeting, NOT the short-clip /transcribe endpoint, which
+    already works well via transcribe_smart). Always transcribes at the audio
+    level in the spoken language (native mode) -- proven more reliable than
+    either engine's translate mode -- chunks through Groq's cloud model for
+    long recordings when online (meaningfully more accurate on real meeting
+    audio than the local model), falls back to local whisper.cpp+VAD, and
+    applies a repetition-loop safety net plus an optional LLM-based text
+    translation pass afterward if the user wants English output.
+    Returns (text, engine_used, error_info)."""
+    settings = load_settings()
+    want_english = settings.get("transcription_mode", "translate") == "translate"
+
+    duration = get_audio_duration_seconds(filepath)
+    text, engine_used, error_info = None, None, None
+
+    if duration and duration > MEETING_CHUNK_SECONDS and has_internet():
+        text, err = transcribe_meeting_chunked_groq(filepath, duration)
+        if text is not None:
+            engine_used = "groq (chunked)"
+        else:
+            error_info = {"groq_chunked_error": err}
+
+    if text is None:
+        # short recording, offline, or the chunked cloud pass failed -- fall
+        # back to the existing single-shot pipeline, forced to native mode
+        fallback_text, fallback_engine, fallback_err = None, None, None
+        prefer = settings.get("stt_prefer", "local")
+
+        def try_local():
+            return transcribe_with_whisper_cpp(filepath, "native")
+
+        def try_cloud():
+            if not has_internet():
+                return None, {"error": "no internet connection"}
+            return transcribe_with_groq(filepath, "native")
+
+        order = [("whisper.cpp", try_local), ("groq", try_cloud)]
+        if prefer == "cloud":
+            order = list(reversed(order))
+
+        errors = dict(error_info) if error_info else {}
+        for engine_name, fn in order:
+            fallback_text, fallback_err = fn()
+            if fallback_text is not None:
+                fallback_engine = engine_name
+                break
+            errors[f"{engine_name}_error"] = fallback_err
+
+        if fallback_text is None:
+            return None, None, errors
+
+        text, engine_used = fallback_text, fallback_engine
+
+    text = collapse_repetition_loops(text)
+
+    if want_english:
+        text = translate_text_via_llm(text)
+        engine_used += " + LLM translation"
+
+    return text, engine_used, None
+
+
 # ---------- Short-clip transcription (used by chat mic / push-to-talk) ----------
 @app.post("/transcribe")
 async def transcribe(audio: UploadFile = File(...)):
@@ -591,7 +799,7 @@ async def transcribe_file(audio: UploadFile = File(...)):
     audio_bytes = await audio.read()
     temp_path.write_bytes(audio_bytes)
 
-    text, engine_used, error_info = transcribe_smart(temp_path)
+    text, engine_used, error_info = transcribe_meeting_smart(temp_path)
 
     if text is None:
         return {"error": error_info}
@@ -609,7 +817,7 @@ def transcribe_local_meeting(filepath: str = Body(..., embed=True)):
     if not path.exists():
         return {"error": f"file not found: {filepath}"}
 
-    text, engine_used, error_info = transcribe_smart(path)
+    text, engine_used, error_info = transcribe_meeting_smart(path)
     if text is None:
         return {"error": error_info}
 

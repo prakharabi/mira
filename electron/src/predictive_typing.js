@@ -54,19 +54,38 @@ const PAUSED_TICKS_BEFORE_BACKOFF = 10; // ~5s of no change while still focused 
 const NO_CONTEXT_TICKS_BEFORE_BACKOFF = 2; // ~1s -- nothing to lose by backing off fast
 let idleTickCount = 0;
 
+// Next-word prediction (the LLM call) is deliberately decoupled from every
+// keystroke now. Instead of firing on every text change, it waits for a pause
+// after a completed word before analyzing the accumulated sentence -- this
+// both cuts wasted requests (most in-progress typing never needed a request
+// at all) and gives the model a fuller, more coherent chunk of context to
+// work with (the last several words of an actual finished thought, not a
+// half-typed fragment). Any further typing during the wait resets the timer.
+const NEXT_WORD_DEBOUNCE_MS = 1200;
+const CONTEXT_WORD_COUNT = 8; // "at least 4-8 words" of context for next-word prediction
+const MIN_PARTIAL_WORD_LEN = 3; // shorter than this, in-word completion is too noisy to be useful
+
 let ghostWindow = null;
-let currentSuggestionWords = [];
 let lastTextBeforeCursor = '';
 let lastCaretX = 100;
 let lastCaretY = 100;
 let lastCaretBundleId = null; // which app lastCaretX/Y actually belongs to
 let lastShownSuggestion = '';
 let pollTimer = null;
+let nextWordDebounceTimer = null;
 let enabled = true;
 let stopped = true; // starts true; startPredictiveTyping() flips it before scheduling
 let tabTapProcess = null;
 let pendingRequest = false;
 let acceptingInProgress = false;
+
+// ---------- suggestion state: exactly one of these is active at a time ----------
+// mode: null | 'next-word' | 'in-word' | 'correction'
+let suggestionMode = null;
+let currentSuggestionWords = [];      // mode === 'next-word'
+let currentInWordSuffix = '';         // mode === 'in-word'
+let currentInWordFullWord = '';
+let currentCorrection = null;         // mode === 'correction' -- { wrong, correct }
 
 function readFocusedContext(callback) {
   execFile(AX_HELPER_PATH, ['read'], { timeout: 2000 }, (err, stdout) => {
@@ -94,22 +113,63 @@ function insertTextViaAX(text, callback) {
   });
 }
 
+function correctWordViaAX(deleteCount, replacement, callback) {
+  execFile(AX_HELPER_PATH, ['correct', String(deleteCount), replacement], { timeout: 2000 }, (err, stdout) => {
+    if (err) { callback(false); return; }
+    try {
+      const parsed = JSON.parse(stdout.trim());
+      callback(!!parsed.success);
+    } catch (e) {
+      callback(false);
+    }
+  });
+}
+
+function spellcheckViaDaemon(word, callback) {
+  const url = `http://localhost:11200/spellcheck?word=${encodeURIComponent(word)}`;
+  http.get(url, { timeout: 2000 }, (res) => {
+    let data = '';
+    res.on('data', (c) => { data += c; });
+    res.on('end', () => {
+      try {
+        callback(JSON.parse(data));
+      } catch (e) {
+        callback(null);
+      }
+    });
+  }).on('error', () => callback(null))
+    .on('timeout', function () { this.destroy(); callback(null); });
+}
+
+function completeWordViaDaemon(partial, callback) {
+  const url = `http://localhost:11200/complete/word?partial=${encodeURIComponent(partial)}`;
+  http.get(url, { timeout: 2000 }, (res) => {
+    let data = '';
+    res.on('data', (c) => { data += c; });
+    res.on('end', () => {
+      try {
+        callback(JSON.parse(data));
+      } catch (e) {
+        callback(null);
+      }
+    });
+  }).on('error', () => callback(null))
+    .on('timeout', function () { this.destroy(); callback(null); });
+}
+
 let activeRequest = null;
 
-function callDaemonForCompletion(textBeforeCursor, callback) {
+function callDaemonForCompletion(contextTail, callback) {
   // abort any in-flight request before starting a new one — never let requests stack
   if (activeRequest) {
     activeRequest.destroy();
     activeRequest = null;
   }
 
-  const contextTail = textBeforeCursor.slice(-120);
   // kept intentionally short -- this whole prompt gets re-processed by the model
-  // on every single request while typing, so its length is a direct, constant
-  // latency tax. Trimming it from the original longer instruction block measurably
-  // cut request time (~700ms -> ~570ms). The "no filler words" line earns its
-  // keep specifically: without it the model has a strong tic of tacking on
-  // "now"/"today" onto otherwise-good completions ("the document now").
+  // on every request, so its length is a direct latency tax. The "no filler
+  // words" line earns its keep specifically: without it the model has a strong
+  // tic of tacking on "now"/"today" onto otherwise-good completions.
   const prompt = `Continue this sentence with 2-4 plain words, no punctuation. Do not add filler words like now/today/please unless truly needed:
 "${contextTail}"`;
 
@@ -167,23 +227,25 @@ function setTabTapActive(active) {
   }
 }
 
-function showGhostText(words, x, y) {
+function showGhost(payload, x, y) {
   if (!ghostWindow || ghostWindow.isDestroyed()) createGhostWindow();
-
-  currentSuggestionWords = words;
 
   // pill sits clearly BELOW the current line — generous offset so it never
   // overlaps the text being typed, forgiving of imprecise caret coordinates
   ghostWindow.setPosition(Math.round(x), Math.round(y) + 24);
   ghostWindow.webContents.executeJavaScript(
-    `window.renderGhost && window.renderGhost(${JSON.stringify(words)})`
+    `window.renderGhost && window.renderGhost(${JSON.stringify(payload)})`
   );
   ghostWindow.showInactive();
   setTabTapActive(true);
 }
 
 function hideGhostText() {
+  suggestionMode = null;
   currentSuggestionWords = [];
+  currentInWordSuffix = '';
+  currentInWordFullWord = '';
+  currentCorrection = null;
   setTabTapActive(false);
   if (ghostWindow && !ghostWindow.isDestroyed()) {
     ghostWindow.hide();
@@ -191,16 +253,75 @@ function hideGhostText() {
 }
 
 function reportAcceptedWord(context, word) {
+  postFireAndForget('/complete/feedback', { context, word });
+}
+
+function reportAcceptedCompletion(word) {
+  postFireAndForget('/complete/word/feedback', { word });
+}
+
+function postFireAndForget(pathName, bodyObj) {
   // fire-and-forget: reinforces the personalization model, never blocks typing
-  const body = JSON.stringify({ context, word });
+  const body = JSON.stringify(bodyObj);
   const req = http.request(
-    { hostname: 'localhost', port: 11200, path: '/complete/feedback', method: 'POST',
+    { hostname: 'localhost', port: 11200, path: pathName, method: 'POST',
       headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } },
     (res) => { res.on('data', () => {}); }
   );
-  req.on('error', () => {}); // personalization is a nice-to-have, never surface this failing
+  req.on('error', () => {}); // best-effort only, never surface this failing
   req.write(body);
   req.end();
+}
+
+// ---------- accepting the currently-shown suggestion (Tab), dispatched by mode ----------
+function acceptCurrentSuggestion() {
+  if (suggestionMode === 'correction') {
+    acceptCorrection();
+  } else if (suggestionMode === 'in-word') {
+    acceptInWordCompletion();
+  } else if (suggestionMode === 'next-word') {
+    acceptNextWord();
+  }
+}
+
+function acceptCorrection() {
+  if (!currentCorrection) return;
+  acceptingInProgress = true;
+  const { wrong, correct, trailingWhitespace } = currentCorrection;
+
+  // the cursor sits AFTER the trailing whitespace that triggered this boundary
+  // check (see analyzeContext) -- e.g. for "...wrold ", the characters
+  // immediately before the cursor going backward are: the space, then "d","l",
+  // "o","r","w". Deleting only wrong.length chars would eat into the space
+  // instead of the word, so the whitespace has to be included in both the
+  // delete count and what gets retyped afterward to preserve it exactly
+  // (including any double-space-after-period habits).
+  const deleteCount = wrong.length + trailingWhitespace.length;
+  const replacement = correct + trailingWhitespace;
+
+  correctWordViaAX(deleteCount, replacement, (success) => {
+    acceptingInProgress = false;
+    if (!success) { hideGhostText(); return; }
+    // the word just changed length -- force a fresh AX read on the next poll
+    // rather than trying to patch up lastTextBeforeCursor here
+    lastTextBeforeCursor = '';
+    hideGhostText();
+  });
+}
+
+function acceptInWordCompletion() {
+  if (!currentInWordSuffix) return;
+  acceptingInProgress = true;
+  const suffix = currentInWordSuffix;
+  const fullWord = currentInWordFullWord;
+
+  insertTextViaAX(suffix, (success) => {
+    acceptingInProgress = false;
+    if (!success) { hideGhostText(); return; }
+    reportAcceptedCompletion(fullWord);
+    lastTextBeforeCursor = lastTextBeforeCursor + suffix;
+    hideGhostText();
+  });
 }
 
 function acceptNextWord() {
@@ -230,8 +351,208 @@ function acceptNextWord() {
       lastTextBeforeCursor = ''; // force fresh read on next poll
       lastShownSuggestion = '';
     } else {
-      showGhostText(currentSuggestionWords, lastCaretX, lastCaretY);
+      showGhost({ mode: 'next-word', words: currentSuggestionWords }, lastCaretX, lastCaretY);
     }
+  });
+}
+
+// ---------- splitting textBeforeCursor into "mid-word" vs "just finished a word" ----------
+// Boundary is whitespace-only (not general punctuation) deliberately: the
+// correction-accept path needs to backspace exactly as many characters as it
+// typed, and "the trailing whitespace run is currently right before the
+// cursor" is a clean, simple invariant to build that on. A word ending in
+// punctuation (e.g. "world.") is handled as part of the token itself, and
+// only offered for correction if it's alphabetic once that punctuation is
+// stripped -- see handleWordBoundary.
+function analyzeContext(textBeforeCursor) {
+  const trailingWhitespaceMatch = textBeforeCursor.match(/\s+$/);
+  const trailingWhitespace = trailingWhitespaceMatch ? trailingWhitespaceMatch[0] : '';
+  const trimmed = textBeforeCursor.trim();
+  const tokens = trimmed.length ? trimmed.split(/\s+/) : [];
+
+  if (trailingWhitespace || tokens.length === 0) {
+    return { state: 'boundary', lastCompletedWord: tokens[tokens.length - 1] || null, tokens, trailingWhitespace };
+  }
+  return { state: 'mid-word', partialWord: tokens[tokens.length - 1], precedingTokens: tokens.slice(0, -1) };
+}
+
+function updateCaretPosition(context, bundleId) {
+  // Three-layer validation for the caret position, strongest check first:
+  //
+  // 1. Cross-check against the frontmost window's own bounds (most reliable
+  //    when available) -- some apps report a "successful" bounds lookup with
+  //    a placeholder rect sitting exactly on the window's edge/corner instead
+  //    of a real error, which a bare "caretX >= 0" check can't catch.
+  // 2. If window bounds aren't available, at least check the coordinate falls
+  //    on SOME actual connected display -- always possible via Electron's
+  //    screen module, regardless of the target app's AX quality.
+  // 3. If neither check can be trusted, DON'T keep a stale position from a
+  //    different app/context (that's exactly what "floating in the air"
+  //    looks like) -- snap to the current mouse position instead, which is
+  //    always real, current, and usually close to where the user is
+  //    actually looking/typing.
+  let positionTrusted = false;
+
+  if (typeof context.caretX === 'number' && context.window) {
+    const w = context.window;
+    const margin = 2; // reject values sitting exactly on an edge (placeholder rects)
+    const withinWindow =
+      context.caretX > w.x + margin && context.caretX < w.x + w.width - margin &&
+      context.caretY > w.y + margin && context.caretY < w.y + w.height - margin;
+    if (withinWindow) {
+      lastCaretX = context.caretX;
+      lastCaretY = context.caretY;
+      lastCaretBundleId = bundleId;
+      positionTrusted = true;
+    }
+  } else if (typeof context.caretX === 'number' && context.caretX >= 0) {
+    const point = { x: context.caretX, y: context.caretY };
+    const onSomeDisplay = screen.getAllDisplays().some(d =>
+      point.x >= d.bounds.x && point.x <= d.bounds.x + d.bounds.width &&
+      point.y >= d.bounds.y && point.y <= d.bounds.y + d.bounds.height
+    );
+    if (onSomeDisplay) {
+      lastCaretX = context.caretX;
+      lastCaretY = context.caretY;
+      lastCaretBundleId = bundleId;
+      positionTrusted = true;
+    }
+  }
+
+  if (!positionTrusted && lastCaretBundleId !== bundleId) {
+    const cursor = screen.getCursorScreenPoint();
+    lastCaretX = cursor.x;
+    lastCaretY = cursor.y;
+  }
+}
+
+function clearNextWordDebounce() {
+  if (nextWordDebounceTimer) {
+    clearTimeout(nextWordDebounceTimer);
+    nextWordDebounceTimer = null;
+  }
+}
+
+// ---------- mid-word: fast, local, no debounce (cheap dictionary lookup) ----------
+function handleMidWord(partialWord) {
+  clearNextWordDebounce();
+
+  if (partialWord.length < MIN_PARTIAL_WORD_LEN) {
+    hideGhostText();
+    return;
+  }
+
+  completeWordViaDaemon(partialWord, (result) => {
+    console.log('[in-word] partial:', partialWord, '-> result:', JSON.stringify(result));
+    if (!result || !result.suffix) {
+      hideGhostText();
+      return;
+    }
+    suggestionMode = 'in-word';
+    currentInWordSuffix = result.suffix;
+    currentInWordFullWord = partialWord + result.suffix;
+    showGhost({ mode: 'in-word', suffix: result.suffix }, lastCaretX, lastCaretY);
+  });
+}
+
+// ---------- word boundary: spellcheck immediately, else debounce next-word ----------
+function handleWordBoundary(lastCompletedWord, tokens, rawTextBeforeCursor, trailingWhitespace) {
+  if (!lastCompletedWord || lastCompletedWord.length < 2) {
+    hideGhostText();
+    clearNextWordDebounce();
+    return;
+  }
+
+  // only offer correction for a plain alphabetic word -- one with punctuation
+  // attached ("world.", "wow!") would need the accept-path to carefully
+  // preserve that punctuation while deleting/retyping just the letters,
+  // which isn't worth the complexity for what's already a less common case
+  const isPlainWord = /^[a-zA-Z']+$/.test(lastCompletedWord);
+
+  const proceedToNextWord = () => {
+    clearNextWordDebounce();
+    nextWordDebounceTimer = setTimeout(() => {
+      requestNextWordSuggestion(tokens, rawTextBeforeCursor);
+    }, NEXT_WORD_DEBOUNCE_MS);
+  };
+
+  if (!isPlainWord) {
+    proceedToNextWord();
+    return;
+  }
+
+  spellcheckViaDaemon(lastCompletedWord, (result) => {
+    if (result && result.misspelled && result.suggestion) {
+      clearNextWordDebounce();
+      suggestionMode = 'correction';
+      currentCorrection = { wrong: lastCompletedWord, correct: result.suggestion, trailingWhitespace };
+      showGhost({ mode: 'correction', wrong: lastCompletedWord, correct: result.suggestion }, lastCaretX, lastCaretY);
+      return;
+    }
+
+    // not misspelled (or spellcheck failed) -- debounce the next-word prediction.
+    // Any further typing before this fires just resets the timer, so the
+    // request only actually happens once the user pauses.
+    proceedToNextWord();
+  });
+}
+
+function requestNextWordSuggestion(tokens, rawTextBeforeCursor) {
+  if (pendingRequest || acceptingInProgress) return;
+
+  const contextTail = tokens.slice(-CONTEXT_WORD_COUNT).join(' ');
+  if (!contextTail) return;
+
+  pendingRequest = true;
+  console.log('[predict] analyzing sentence:', contextTail);
+  callDaemonForCompletion(contextTail, (completion) => {
+    pendingRequest = false;
+    console.log('[predict] daemon response:', completion);
+    if (!completion) return;
+
+    // clean up: take only the first line/fragment, strip leading ellipsis/punctuation
+    let cleaned = completion.split('\n')[0].trim();
+    cleaned = cleaned.replace(/^[.…\s]+/, ''); // strip leading … or .
+
+    // safety net: if model echoed part of the input back, strip it out
+    const tailWords = contextTail.split(/\s+/).slice(-6).join(' ');
+    if (tailWords && cleaned.toLowerCase().startsWith(tailWords.toLowerCase())) {
+      cleaned = cleaned.slice(tailWords.length).trim();
+    }
+
+    const words = cleaned
+      .replace(/[,]/g, '')
+      .split(/\s+/)
+      .filter(w => w.length > 0)
+      .slice(0, 4);
+
+    if (words.length === 0) return;
+
+    // reject if this exact phrase already appears anywhere in the typed text —
+    // catches the model re-suggesting something the user already wrote,
+    // which otherwise compounds into a repeat loop as words get Tab-accepted
+    const suggestionPhrase = words.join(' ').toLowerCase();
+    if (rawTextBeforeCursor.toLowerCase().includes(suggestionPhrase)) {
+      console.log('[predict] suggestion duplicates already-typed text, discarding:', suggestionPhrase);
+      return;
+    }
+
+    if (suggestionPhrase === lastShownSuggestion) {
+      console.log('[predict] suppressing repeat suggestion');
+      return;
+    }
+    lastShownSuggestion = suggestionPhrase;
+
+    // the user may have kept typing (or the field/app changed) while this
+    // request was in flight -- only show it if we're still in the same
+    // boundary state that triggered it (a fresh mid-word or a newer
+    // suggestion would already have taken over suggestionMode by now)
+    if (suggestionMode === 'in-word' || suggestionMode === 'correction') return;
+
+    suggestionMode = 'next-word';
+    currentSuggestionWords = words;
+    console.log('[predict] showing ghost at', lastCaretX, lastCaretY, 'words:', words);
+    showGhost({ mode: 'next-word', words }, lastCaretX, lastCaretY);
   });
 }
 
@@ -257,137 +578,47 @@ function pollAndSuggest() {
     const bundleId = context && context.bundleId;
     if (!bundleId || BLOCKED_BUNDLE_IDS.includes(bundleId)) {
       hideGhostText();
+      clearNextWordDebounce();
       scheduleNextPoll('noContext');
       return;
     }
 
     if (!context || !context.textBeforeCursor) {
       hideGhostText();
+      clearNextWordDebounce();
       scheduleNextPoll('noContext');
       return;
     }
 
-    // don't re-request if nothing changed since last poll
+    // don't re-process if nothing changed since last poll
     if (context.textBeforeCursor === lastTextBeforeCursor) {
-      console.log('[poll] no change, skipping');
       scheduleNextPoll('paused');
       return;
     }
 
-      // text changed underneath an old suggestion (user typed past it without Tab) — clear stale pill immediately
-      if (currentSuggestionWords.length > 0) {
-        hideGhostText();
-      }
+    // text changed underneath an old suggestion (user typed past it without
+    // Tab, or accepted it and we're resyncing) — clear the stale pill
+    if (suggestionMode) {
+      hideGhostText();
+    }
 
-      lastTextBeforeCursor = context.textBeforeCursor;
-      // a real text change is "activity" -- stay on fast polling regardless of
-      // what happens below (too-short context, discarded suggestion, etc.)
-      scheduleNextPoll('active');
+    lastTextBeforeCursor = context.textBeforeCursor;
+    scheduleNextPoll('active');
 
-      // don't suggest on effectively empty context
-      if (context.textBeforeCursor.trim().length < 3) {
-        hideGhostText();
-        return;
-      }
+    if (context.textBeforeCursor.trim().length < 2) {
+      clearNextWordDebounce();
+      return;
+    }
 
-      // Three-layer validation for the caret position, strongest check first:
-      //
-      // 1. Cross-check against the frontmost window's own bounds (most reliable
-      //    when available) -- some apps report a "successful" bounds lookup with
-      //    a placeholder rect sitting exactly on the window's edge/corner instead
-      //    of a real error, which a bare "caretX >= 0" check can't catch.
-      // 2. If window bounds aren't available, at least check the coordinate falls
-      //    on SOME actual connected display -- always possible via Electron's
-      //    screen module, regardless of the target app's AX quality.
-      // 3. If neither check can be trusted, DON'T keep a stale position from a
-      //    different app/context (that's exactly what "floating in the air"
-      //    looks like) -- snap to the current mouse position instead, which is
-      //    always real, current, and usually close to where the user is
-      //    actually looking/typing.
-      let positionTrusted = false;
+    updateCaretPosition(context, bundleId);
 
-      if (typeof context.caretX === 'number' && context.window) {
-        const w = context.window;
-        const margin = 2; // reject values sitting exactly on an edge (placeholder rects)
-        const withinWindow =
-          context.caretX > w.x + margin && context.caretX < w.x + w.width - margin &&
-          context.caretY > w.y + margin && context.caretY < w.y + w.height - margin;
-        if (withinWindow) {
-          lastCaretX = context.caretX;
-          lastCaretY = context.caretY;
-          lastCaretBundleId = bundleId;
-          positionTrusted = true;
-        }
-      } else if (typeof context.caretX === 'number' && context.caretX >= 0) {
-        const point = { x: context.caretX, y: context.caretY };
-        const onSomeDisplay = screen.getAllDisplays().some(d =>
-          point.x >= d.bounds.x && point.x <= d.bounds.x + d.bounds.width &&
-          point.y >= d.bounds.y && point.y <= d.bounds.y + d.bounds.height
-        );
-        if (onSomeDisplay) {
-          lastCaretX = context.caretX;
-          lastCaretY = context.caretY;
-          lastCaretBundleId = bundleId;
-          positionTrusted = true;
-        }
-      }
-
-      // no trustworthy position for THIS app -- a stale position from a
-      // different app is worse than useless, fall back to the mouse cursor
-      if (!positionTrusted && lastCaretBundleId !== bundleId) {
-        const cursor = screen.getCursorScreenPoint();
-        lastCaretX = cursor.x;
-        lastCaretY = cursor.y;
-      }
-
-      pendingRequest = true;
-      console.log('[poll] calling daemon...');
-      callDaemonForCompletion(context.textBeforeCursor, (completion) => {
-        pendingRequest = false;
-        console.log('[poll] daemon response:', completion);
-        if (!completion) { hideGhostText(); return; }
-
-        // clean up: take only the first line/fragment, strip leading ellipsis/punctuation
-        let cleaned = completion.split('\n')[0].trim();
-        cleaned = cleaned.replace(/^[.\u2026\s]+/, ''); // strip leading … or .
-
-        // safety net: if model echoed part of the input back, strip it out
-        const tailWords = context.textBeforeCursor.trim().split(/\s+/).slice(-6).join(' ');
-        if (tailWords && cleaned.toLowerCase().startsWith(tailWords.toLowerCase())) {
-          cleaned = cleaned.slice(tailWords.length).trim();
-        }
-
-        const words = cleaned
-          .replace(/[,]/g, '')
-          .split(/\s+/)
-          .filter(w => w.length > 0)
-          .slice(0, 4);
-
-        if (words.length === 0) { hideGhostText(); return; }
-
-        // reject if this exact phrase already appears anywhere in the typed text —
-        // catches the model re-suggesting something the user already wrote,
-        // which otherwise compounds into a repeat loop as words get Tab-accepted
-        const suggestionPhrase = words.join(' ').toLowerCase();
-        const typedSoFar = context.textBeforeCursor.toLowerCase();
-        if (typedSoFar.includes(suggestionPhrase)) {
-          console.log('[poll] suggestion duplicates already-typed text, discarding:', suggestionPhrase);
-          hideGhostText();
-          return;
-        }
-
-        const suggestionKey = suggestionPhrase;
-        if (suggestionKey === lastShownSuggestion) {
-          console.log('[poll] suppressing repeat suggestion');
-          hideGhostText();
-          return;
-        }
-        lastShownSuggestion = suggestionKey;
-
-        console.log('[poll] showing ghost at', lastCaretX, lastCaretY, 'words:', words);
-        showGhostText(words, lastCaretX, lastCaretY);
-      });
-    });
+    const analysis = analyzeContext(context.textBeforeCursor);
+    if (analysis.state === 'mid-word') {
+      handleMidWord(analysis.partialWord);
+    } else {
+      handleWordBoundary(analysis.lastCompletedWord, analysis.tokens, context.textBeforeCursor, analysis.trailingWhitespace);
+    }
+  });
 }
 
 // category: 'active' (just saw a real text change), 'paused' (focused in a
@@ -426,7 +657,7 @@ function startPredictiveTyping() {
     const lines = data.toString().split('\n').filter(l => l.trim().length > 0);
     for (const line of lines) {
       if (line.trim() === 'TAB_PRESSED') {
-        acceptNextWord();
+        acceptCurrentSuggestion();
       }
     }
   });
@@ -444,6 +675,7 @@ function startPredictiveTyping() {
 function stopPredictiveTyping() {
   stopped = true;
   if (pollTimer) clearTimeout(pollTimer);
+  clearNextWordDebounce();
   if (activeRequest) { activeRequest.destroy(); activeRequest = null; }
   if (tabTapProcess && !tabTapProcess.killed) tabTapProcess.kill('SIGKILL');
   hideGhostText();
