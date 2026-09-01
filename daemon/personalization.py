@@ -12,12 +12,14 @@ messages (their own words, already stored locally), and reinforced over time
 every time a suggestion is actually Tab-accepted in the predictive typing UI.
 """
 
+import bisect
 import json
 import re
 import threading
 from pathlib import Path
 
 NGRAM_STORE_PATH = Path.home() / "Mira" / "daemon" / "personal_ngrams.json"
+SYSTEM_DICTIONARY_PATH = Path("/usr/share/dict/words")
 
 # below this many observations for a context, we don't trust it enough to override the LLM
 MIN_CONFIDENT_COUNT = 3
@@ -25,6 +27,14 @@ MIN_CONFIDENT_RATIO = 0.5  # this word must be at least half of all observed con
 
 _lock = threading.Lock()
 _data = None  # lazy-loaded
+
+# in-word (letter-level) completion: a static sorted word list (system dictionary,
+# ~236k words on macOS) enables fast prefix lookups via bisect, no trie needed.
+# Built once, lazily, on first use -- not persisted, cheap to rebuild each daemon
+# start. Kept separate from the n-gram store above: this is about completing the
+# CURRENT word being typed, not predicting the next one.
+_word_list_lock = threading.Lock()
+_sorted_words = None
 
 
 def _load():
@@ -40,6 +50,7 @@ def _load():
         _data = {}
     _data.setdefault("bigram_next", {})   # "word1" -> {"word2": count}
     _data.setdefault("trigram_next", {})  # "word1 word2" -> {"word3": count}
+    _data.setdefault("unigram_counts", {})  # "word" -> count, used to rank in-word completions
     _data.setdefault("bootstrapped", False)
     return _data
 
@@ -70,6 +81,8 @@ def ingest_text(text: str):
                 key = f"{w1} {w2}"
                 data["trigram_next"].setdefault(key, {})
                 data["trigram_next"][key][w3] = data["trigram_next"][key].get(w3, 0) + 1
+        for w in tokens:
+            data["unigram_counts"][w] = data["unigram_counts"].get(w, 0) + 1
         _save()
 
 
@@ -93,6 +106,7 @@ def record_accepted_word(context_before: str, accepted_word: str):
             key = f"{tokens[-2]} {tokens[-1]}"
             data["trigram_next"].setdefault(key, {})
             data["trigram_next"][key][word] = data["trigram_next"][key].get(word, 0) + 1
+        data["unigram_counts"][word] = data["unigram_counts"].get(word, 0) + 1
         _save()
 
 
@@ -134,6 +148,92 @@ def _best_candidate(counts):
     if ratio < MIN_CONFIDENT_RATIO:
         return None
     return best_word, ratio
+
+
+def record_accepted_completion(word: str):
+    """Called when an in-word (letter-level) completion is Tab-accepted --
+    boosts that word's personal frequency so it ranks higher next time."""
+    word = tokenize(word)
+    if not word:
+        return
+    word = word[0]
+    with _lock:
+        data = _load()
+        data["unigram_counts"][word] = data["unigram_counts"].get(word, 0) + 1
+        _save()
+
+
+def _load_word_list():
+    """Word list ranked by real-world usage frequency (wordfreq's corpus-based
+    data), not just "is this a valid word" -- the raw macOS system dictionary
+    (/usr/share/dict/words, an unabridged Webster's) was tried first and gave
+    poor completions in practice: with no frequency signal, a bare shortest-
+    match tie-break picked obscure words over common ones ("environ" ->
+    "environs" instead of "environment", "compl" -> "comply" instead of
+    "complete"). wordfreq's zipf_frequency fixes that by ranking candidates on
+    genuine corpus frequency, with the user's own vocabulary folded in too so
+    names/jargon they actually use (which a general corpus won't know) are
+    still completable."""
+    global _sorted_words
+    with _word_list_lock:
+        if _sorted_words is not None:
+            return _sorted_words
+        from wordfreq import top_n_list
+
+        words = set(top_n_list("en", 60000))
+        with _lock:
+            data = _load()
+            words.update(data.get("unigram_counts", {}).keys())
+        _sorted_words = sorted(words)
+        return _sorted_words
+
+
+def complete_word(partial: str):
+    """Returns the best full-word completion for a word currently being typed
+    (letter-level, e.g. "environ" -> "environment"), or None if there's nothing
+    good to suggest. Uses bisect for fast prefix lookup against a frequency-
+    ranked English word list + the user's own vocabulary, ranked by genuine
+    corpus frequency (wordfreq) with personal usage as a tie-break boost, so
+    common words win over obscure ones with the same prefix."""
+    from wordfreq import zipf_frequency
+
+    partial = partial.lower()
+    if len(partial) < 3:
+        return None  # too short -- far too many candidates to be useful
+
+    words = _load_word_list()
+    lo = bisect.bisect_left(words, partial)
+    hi = bisect.bisect_left(words, partial + "￿")
+    candidates = [w for w in words[lo:hi] if w != partial]
+    if not candidates:
+        return None
+
+    with _lock:
+        data = _load()
+        unigram_counts = data.get("unigram_counts", {})
+
+    # if the partial is already a complete, personally-common word on its own,
+    # don't force a longer completion unless something clearly outranks it
+    own_count = unigram_counts.get(partial, 0)
+
+    def rank(w):
+        # personal usage is a real signal but shouldn't drown out corpus
+        # frequency entirely -- treat it as a modest boost, not the whole score
+        personal_boost = min(unigram_counts.get(w, 0), 5) * 0.3
+        return -(zipf_frequency(w, "en") + personal_boost)
+
+    best = min(candidates, key=rank)
+    best_count = unigram_counts.get(best, 0)
+
+    if own_count > 0 and best_count <= own_count:
+        return None
+
+    # cap how much extra a single completion suggests -- very long completions
+    # for a short partial are usually more distracting than helpful
+    if len(best) - len(partial) > 12:
+        return None
+
+    return best[len(partial):]  # just the remaining suffix to insert
 
 
 def bootstrap_from_chat_history(force: bool = False):

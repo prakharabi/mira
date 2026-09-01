@@ -132,18 +132,15 @@ func readContext() {
 // (AXUIElementSetAttributeValue on kAXSelectedTextAttribute) only ever worked in
 // a handful of apps like TextEdit. Synthetic keyboard events go through the same
 // input pipeline as real typing, so they're received correctly almost anywhere.
-func typeText(_ text: String) {
+@discardableResult
+func postUnicodeText(_ text: String) -> Bool {
     let source = CGEventSource(stateID: .combinedSessionState)
     let utf16Chars = Array(text.utf16)
-    guard !utf16Chars.isEmpty else {
-        print("{\"success\":true}")
-        return
-    }
+    guard !utf16Chars.isEmpty else { return true }
 
     guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
           let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else {
-        print("{\"error\":\"could not create synthetic keyboard event\"}")
-        return
+        return false
     }
 
     keyDown.keyboardSetUnicodeString(stringLength: utf16Chars.count, unicodeString: utf16Chars)
@@ -151,8 +148,82 @@ func typeText(_ text: String) {
 
     keyDown.post(tap: .cgSessionEventTap)
     keyUp.post(tap: .cgSessionEventTap)
+    return true
+}
 
-    print("{\"success\":true}")
+func typeText(_ text: String) {
+    if postUnicodeText(text) {
+        print("{\"success\":true}")
+    } else {
+        print("{\"error\":\"could not create synthetic keyboard event\"}")
+    }
+}
+
+// Backspace as a real key event (not a unicode string) -- deletes one character
+// at a time, same as the user pressing Delete themselves.
+func postBackspace() {
+    let source = CGEventSource(stateID: .combinedSessionState)
+    let kVKDelete: CGKeyCode = 51
+    guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: kVKDelete, keyDown: true),
+          let keyUp = CGEvent(keyboardEventSource: source, virtualKey: kVKDelete, keyDown: false) else { return }
+    keyDown.post(tap: .cgSessionEventTap)
+    keyUp.post(tap: .cgSessionEventTap)
+}
+
+// Deletes `deleteCount` characters then types `replacement` -- used to apply a
+// spelling correction to a word already on the page (delete the wrong one,
+// type the right one), via the same synthetic-keyboard-event path as insert.
+//
+// Small delays between events are deliberate, not incidental: posting a burst
+// of CGEvents back-to-back with zero delay was observed to drop/coalesce
+// events in practice (a real backspace+retype produced "I reciev" instead of
+// "I receive " in testing -- some events in the burst never landed). A few ms
+// between each backspace, and a slightly longer pause before the final type,
+// gives the target app's event loop time to actually process each one.
+func correctWord(deleteCount: Int, replacement: String) {
+    guard deleteCount >= 0, deleteCount <= 200 else {
+        print("{\"error\":\"invalid deleteCount\"}")
+        return
+    }
+    for _ in 0..<deleteCount {
+        postBackspace()
+        usleep(8000) // 8ms
+    }
+    usleep(15000) // 15ms settle before retyping
+    if postUnicodeText(replacement) {
+        print("{\"success\":true}")
+    } else {
+        print("{\"error\":\"could not create synthetic keyboard event\"}")
+    }
+}
+
+func jsonEscape(_ s: String) -> String {
+    s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+}
+
+// Uses macOS's own spell checker (the same one behind right-click "Spelling"
+// everywhere else on the system) -- native, fast, no network call, and already
+// configured for whatever languages the user has enabled.
+func spellcheck(_ word: String) {
+    let checker = NSSpellChecker.shared
+    // the default ambient checkSpelling(of:startingAt:) proved too lenient in
+    // testing (missed "teh", "adress", "wich") -- forcing an explicit language
+    // and using the full overload is meaningfully stricter and catches these
+    checker.automaticallyIdentifiesLanguages = false
+    let language = "en_US"
+    let range = checker.checkSpelling(of: word, startingAt: 0, language: language, wrap: false, inSpellDocumentWithTag: 0, wordCount: nil)
+
+    if range.location == NSNotFound {
+        print("{\"misspelled\":false}")
+        return
+    }
+
+    let guesses = checker.guesses(forWordRange: range, in: word, language: language, inSpellDocumentWithTag: 0) ?? []
+    if let suggestion = guesses.first {
+        print("{\"misspelled\":true,\"suggestion\":\"\(jsonEscape(suggestion))\"}")
+    } else {
+        print("{\"misspelled\":true,\"suggestion\":null}")
+    }
 }
 
 let args = CommandLine.arguments
@@ -161,6 +232,10 @@ if args.count >= 2 && args[1] == "read" {
     readContext()
 } else if args.count >= 3 && args[1] == "insert" {
     typeText(args[2])
+} else if args.count >= 4 && args[1] == "correct", let deleteCount = Int(args[2]) {
+    correctWord(deleteCount: deleteCount, replacement: args[3])
+} else if args.count >= 3 && args[1] == "spellcheck" {
+    spellcheck(args[2])
 } else {
-    print("{\"error\":\"usage: ax_helper read | ax_helper insert <text>\"}")
+    print("{\"error\":\"usage: ax_helper read | insert <text> | correct <deleteCount> <replacement> | spellcheck <word>\"}")
 }

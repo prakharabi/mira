@@ -18,6 +18,14 @@
     color:rgba(255,255,255,0.4); font-size:10px; margin-left:6px;
     border-left: 1px solid rgba(255,255,255,0.2); padding-left:6px;
   }
+
+  /* in-word completion: the remaining letters of the word being typed */
+  .suffix { color:#7c9fff; font-size:13px; white-space:nowrap; }
+
+  /* correction mode: strikethrough wrong word -> correct word */
+  .wrong { color:rgba(255,120,120,0.85); font-size:13px; text-decoration:line-through; white-space:nowrap; }
+  .arrow { color:rgba(255,255,255,0.35); font-size:12px; }
+  .correct { color:#7cffb0; font-size:13px; font-weight:600; white-space:nowrap; }
 </style>
 </head>
 <body>
@@ -26,12 +34,37 @@
     <span id="hint">Tab</span>
   </div>
   <script>
-    window.renderGhost = function(words) {
+    // payload shapes:
+    //   { mode: 'next-word', words: ['foo', 'bar', ...] }   -- existing next-word suggestions
+    //   { mode: 'in-word', suffix: 'ment' }                  -- letters completing the current word
+    //   { mode: 'correction', wrong: 'teh', correct: 'the' } -- misspelling fix
+    window.renderGhost = function(payload) {
       const wordsEl = document.getElementById('words');
-      wordsEl.innerHTML = words.map((w, i) =>
-        '<span class="word">' + w + '</span>'
-      ).join(' ');
+
+      // backward-compatible: a bare array means the old next-word call shape
+      if (Array.isArray(payload)) {
+        payload = { mode: 'next-word', words: payload };
+      }
+
+      if (payload.mode === 'in-word') {
+        wordsEl.innerHTML = '<span class="suffix">' + escapeHtml(payload.suffix) + '</span>';
+      } else if (payload.mode === 'correction') {
+        wordsEl.innerHTML =
+          '<span class="wrong">' + escapeHtml(payload.wrong) + '</span>' +
+          '<span class="arrow"> → </span>' +
+          '<span class="correct">' + escapeHtml(payload.correct) + '</span>';
+      } else {
+        wordsEl.innerHTML = payload.words.map((w) =>
+          '<span class="word">' + escapeHtml(w) + '</span>'
+        ).join(' ');
+      }
     };
+
+    function escapeHtml(s) {
+      const div = document.createElement('div');
+      div.textContent = s;
+      return div.innerHTML;
+    }
   </script>
 </body>
 </html>
