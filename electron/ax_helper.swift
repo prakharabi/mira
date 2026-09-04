@@ -90,14 +90,26 @@ func readContext() {
 
     let textBeforeCursor = String(text.prefix(rangeStart))
 
-    let escaped = textBeforeCursor
-        .replacingOccurrences(of: "\\", with: "\\\\")
-        .replacingOccurrences(of: "\"", with: "\\\"")
-        .replacingOccurrences(of: "\n", with: "\\n")
+    // Whether anything follows the caret on the SAME line. Inline suggestions
+    // are drawn over the app's own window, so with text after the caret they'd
+    // sit on top of it and both become unreadable -- the caller falls back to
+    // showing the suggestion below the line in that case.
+    let remainder = String(text.dropFirst(min(rangeStart, text.count)))
+    let restOfLine = remainder.prefix(while: { $0 != "\n" })
+    let hasTextAfterCaret = !restOfLine.trimmingCharacters(in: .whitespaces).isEmpty
+
+    let escaped = jsonEscape(textBeforeCursor)
 
     // get actual caret screen position via kAXBoundsForRangeParameterizedAttribute
+    //
+    // The rect's HEIGHT matters as much as its origin: it's the line height at
+    // the caret, which is the only signal available for how large the target
+    // app's text is. Suggestions are drawn at a matching size so they read as
+    // part of the line instead of as a floating label.
     var caretX = -1.0
     var caretY = -1.0
+    var caretW = 0.0
+    var caretH = 0.0
     var boundsErrorCode = -999
     if rangeResult == .success, let rangeValue = selectedRange {
         var boundsValue: AnyObject?
@@ -113,7 +125,25 @@ func readContext() {
             if AXValueGetValue((bounds as! AXValue), .cgRect, &rect) {
                 caretX = rect.origin.x
                 caretY = rect.origin.y
+                caretW = rect.size.width
+                caretH = rect.size.height
             }
+        }
+    }
+
+    // The focused text element's own frame. When the caret rect is missing or a
+    // placeholder, anchoring to the text field itself is still far better than
+    // falling back to the mouse pointer, which can be anywhere on screen.
+    var elementJSON = "null"
+    var elPos: AnyObject?
+    var elSize: AnyObject?
+    if AXUIElementCopyAttributeValue(el, kAXPositionAttribute as CFString, &elPos) == .success,
+       AXUIElementCopyAttributeValue(el, kAXSizeAttribute as CFString, &elSize) == .success {
+        var origin = CGPoint.zero
+        var size = CGSize.zero
+        if AXValueGetValue((elPos as! AXValue), .cgPoint, &origin),
+           AXValueGetValue((elSize as! AXValue), .cgSize, &size) {
+            elementJSON = "{\"x\":\(origin.x),\"y\":\(origin.y),\"width\":\(size.width),\"height\":\(size.height)}"
         }
     }
 
@@ -122,7 +152,7 @@ func readContext() {
         windowJSON = "{\"x\":\(win.origin.x),\"y\":\(win.origin.y),\"width\":\(win.size.width),\"height\":\(win.size.height)}"
     }
 
-    print("{\"textBeforeCursor\":\"\(escaped)\",\"caretX\":\(caretX),\"caretY\":\(caretY),\"boundsError\":\(boundsErrorCode),\"window\":\(windowJSON),\"bundleId\":\(bundleId)}")
+    print("{\"textBeforeCursor\":\"\(escaped)\",\"caretX\":\(caretX),\"caretY\":\(caretY),\"caretW\":\(caretW),\"caretH\":\(caretH),\"hasTextAfterCaret\":\(hasTextAfterCaret),\"boundsError\":\(boundsErrorCode),\"window\":\(windowJSON),\"element\":\(elementJSON),\"bundleId\":\(bundleId)}")
 }
 
 // Types text by posting synthetic keyboard events, exactly like a real keystroke,
@@ -197,8 +227,32 @@ func correctWord(deleteCount: Int, replacement: String) {
     }
 }
 
+// JSON forbids raw control characters inside strings. Escaping only quotes,
+// backslashes and newlines is not enough: a single TAB in the user's text
+// produced output that JSON.parse rejected, which silently killed the whole
+// predictive-typing loop until that tab was deleted. Anything below U+0020 has
+// to be escaped, so this handles the named cases and falls back to \uXXXX.
 func jsonEscape(_ s: String) -> String {
-    s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+    var out = ""
+    out.reserveCapacity(s.count + 16)
+    for scalar in s.unicodeScalars {
+        switch scalar {
+        case "\\": out += "\\\\"
+        case "\"": out += "\\\""
+        case "\n": out += "\\n"
+        case "\r": out += "\\r"
+        case "\t": out += "\\t"
+        case "\u{08}": out += "\\b"
+        case "\u{0C}": out += "\\f"
+        default:
+            if scalar.value < 0x20 {
+                out += String(format: "\\u%04x", scalar.value)
+            } else {
+                out.unicodeScalars.append(scalar)
+            }
+        }
+    }
+    return out
 }
 
 // Uses macOS's own spell checker (the same one behind right-click "Spelling"
