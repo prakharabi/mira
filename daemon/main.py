@@ -70,7 +70,18 @@ DEFAULT_SETTINGS = {
     "tavily_api_key": "",
     # predictive typing: rerank the LLM's first suggested word using a local
     # word-frequency model learned from the user's own writing, when confident.
-    "predictive_personalization_enabled": True
+    "predictive_personalization_enabled": True,
+    # Google integration: the user supplies their own OAuth client (Desktop app
+    # type) from their own Google Cloud project. Mira ships no shared secret --
+    # see google_integration.py for why.
+    "google_client_id": "",
+    "google_client_secret": "",
+    # Dump Box: which Reminders list action items get pushed into. Blank = the
+    # system default list.
+    "reminders_list": "",
+    # optional convenience: base URL of the user's n8n instance, used only to
+    # prefill webhook URLs in the Automations UI.
+    "n8n_base_url": ""
 }
 
 def load_settings():
@@ -92,8 +103,10 @@ def get_settings():
     masked = dict(settings)
     masked["cloud_api_key_set"] = bool(settings.get("cloud_api_key"))
     masked["tavily_api_key_set"] = bool(settings.get("tavily_api_key"))
+    masked["google_client_secret_set"] = bool(settings.get("google_client_secret"))
     masked.pop("cloud_api_key", None)
     masked.pop("tavily_api_key", None)
+    masked.pop("google_client_secret", None)
     return masked
 
 @app.post("/settings")
@@ -110,6 +123,10 @@ def update_settings(
     tts_voice: str = Body(None),
     tavily_api_key: str = Body(None),
     predictive_personalization_enabled: bool = Body(None),
+    google_client_id: str = Body(None),
+    google_client_secret: str = Body(None),
+    reminders_list: str = Body(None),
+    n8n_base_url: str = Body(None),
 ):
     settings = load_settings()
 
@@ -144,13 +161,23 @@ def update_settings(
         settings["tavily_api_key"] = tavily_api_key
     if predictive_personalization_enabled is not None:
         settings["predictive_personalization_enabled"] = predictive_personalization_enabled
+    if google_client_id is not None:
+        settings["google_client_id"] = google_client_id
+    if google_client_secret is not None:
+        settings["google_client_secret"] = google_client_secret
+    if reminders_list is not None:
+        settings["reminders_list"] = reminders_list
+    if n8n_base_url is not None:
+        settings["n8n_base_url"] = n8n_base_url
 
     save_settings(settings)
     result = dict(settings)
     result["cloud_api_key_set"] = bool(settings.get("cloud_api_key"))
     result["tavily_api_key_set"] = bool(settings.get("tavily_api_key"))
+    result["google_client_secret_set"] = bool(settings.get("google_client_secret"))
     result.pop("cloud_api_key", None)
     result.pop("tavily_api_key", None)
+    result.pop("google_client_secret", None)
     return result
 
 
@@ -1087,3 +1114,273 @@ def test_search_connection(api_key: str = Body("")):
         return {"ok": False, "error": data}
     except requests.RequestException as e:
         return {"ok": False, "error": str(e)}
+
+
+# ---------- Shared: one-shot prompt through the normal model routing ----------
+def route_prompt(prompt: str, model: str = "auto") -> tuple:
+    """Send a single prompt through the same local/cloud routing as /chat.
+
+    Returns (reply, used_model). Raises RuntimeError if no model could answer.
+    """
+    history = [{"role": "user", "content": prompt}]
+
+    if model == "local":
+        return call_local_model(history), "local"
+
+    if model == "cloud":
+        reply, error = call_cloud_model(history)
+        if reply is None:
+            raise RuntimeError(f"cloud model unavailable: {error}")
+        return reply, "cloud"
+
+    # auto: structured-output tasks are noticeably more reliable on the cloud
+    # model, so prefer it when there's a connection, but never hard-fail offline
+    if has_internet():
+        reply, _error = call_cloud_model(history)
+        if reply is not None:
+            return reply, "cloud"
+    return call_local_model(history), "local"
+
+
+# ---------- Dump Box ----------
+import dumpbox as _dumpbox
+
+
+@app.get("/dumpbox")
+def dumpbox_list():
+    return {"entries": _dumpbox.list_entries()}
+
+
+@app.post("/dumpbox")
+def dumpbox_add(text: str = Body(..., embed=True)):
+    try:
+        return _dumpbox.add_entry(text)
+    except ValueError as e:
+        return {"error": str(e)}
+
+
+@app.get("/dumpbox/{entry_id}")
+def dumpbox_get(entry_id: str):
+    entry = _dumpbox.get_entry(entry_id)
+    if entry is None:
+        return {"error": "not found"}
+    return entry
+
+
+@app.delete("/dumpbox/{entry_id}")
+def dumpbox_delete(entry_id: str):
+    return {"deleted": _dumpbox.delete_entry(entry_id)}
+
+
+@app.post("/dumpbox/{entry_id}/process")
+def dumpbox_process(entry_id: str, model: str = Body("auto", embed=True)):
+    used = {"model": "local"}
+
+    def llm_call(prompt: str) -> str:
+        reply, used_model = route_prompt(prompt, model)
+        used["model"] = used_model
+        return reply
+
+    try:
+        entry = _dumpbox.process_entry(entry_id, llm_call)
+    except KeyError:
+        return {"error": "not found"}
+    except (RuntimeError, requests.RequestException) as e:
+        return {"error": str(e)}
+
+    return {**entry, "model_used": used["model"]}
+
+
+@app.post("/dumpbox/{entry_id}/reminders")
+def dumpbox_push_reminders(entry_id: str, item_ids: list = Body(None, embed=True)):
+    list_name = load_settings().get("reminders_list", "")
+    try:
+        return _dumpbox.push_action_items(entry_id, item_ids, list_name)
+    except KeyError:
+        return {"error": "not found"}
+
+
+@app.post("/dumpbox/{entry_id}/reminders/mark")
+def dumpbox_mark_pushed(entry_id: str, item_ids: list = Body(..., embed=True)):
+    try:
+        return _dumpbox.mark_items_pushed(entry_id, item_ids)
+    except KeyError:
+        return {"error": "not found"}
+
+
+@app.get("/reminders/lists")
+def reminders_lists():
+    result = _dumpbox.reminders_lists()
+    if isinstance(result, dict):
+        return result
+    return {"lists": result}
+
+
+# ---------- Google integration (Gmail / Calendar / Drive) ----------
+import google_integration as _google
+
+
+@app.get("/google/status")
+def google_status():
+    settings = load_settings()
+    status = _google.auth_status()
+    status["client_configured"] = bool(
+        settings.get("google_client_id") and settings.get("google_client_secret")
+    )
+    return status
+
+
+@app.post("/google/auth/start")
+def google_auth_start():
+    settings = load_settings()
+    try:
+        return _google.start_auth_flow(
+            settings.get("google_client_id", ""),
+            settings.get("google_client_secret", ""),
+        )
+    except (ValueError, RuntimeError) as e:
+        return {"error": str(e)}
+
+
+@app.post("/google/auth/disconnect")
+def google_auth_disconnect():
+    _google.clear_tokens()
+    return {"connected": False}
+
+
+@app.get("/google/gmail")
+def google_gmail_list(query: str = "", max_results: int = 15, label: str = "INBOX"):
+    try:
+        return {"messages": _google.gmail_list(query, max_results, label)}
+    except (RuntimeError, requests.RequestException) as e:
+        return {"error": str(e)}
+
+
+@app.get("/google/gmail/{message_id}")
+def google_gmail_get(message_id: str):
+    try:
+        return _google.gmail_get(message_id)
+    except (RuntimeError, requests.RequestException) as e:
+        return {"error": str(e)}
+
+
+@app.post("/google/gmail/draft")
+def google_gmail_draft(to: str = Body(""), subject: str = Body(""),
+                       body: str = Body(""), thread_id: str = Body(None)):
+    try:
+        return _google.gmail_create_draft(to, subject, body, thread_id)
+    except (RuntimeError, requests.RequestException) as e:
+        return {"error": str(e)}
+
+
+@app.post("/google/gmail/summarize")
+def google_gmail_summarize(query: str = Body(""), max_results: int = Body(10),
+                           model: str = Body("auto")):
+    """Summarize what's sitting in the inbox right now."""
+    try:
+        messages = _google.gmail_list(query, max_results)
+    except (RuntimeError, requests.RequestException) as e:
+        return {"error": str(e)}
+
+    if not messages:
+        return {"summary": "No messages matched.", "count": 0, "model_used": "none"}
+
+    lines = [
+        f"{i}. From: {m['from']} | Subject: {m['subject']}\n   {m['snippet'][:300]}"
+        for i, m in enumerate(messages, 1)
+    ]
+    prompt = (
+        "Summarize this inbox for a busy founder. Group related mail, call out anything "
+        "that clearly needs a reply or has a deadline, and keep it under 200 words. "
+        "Do not invent senders or details that aren't listed.\n\n" + "\n".join(lines)
+    )
+
+    try:
+        reply, used_model = route_prompt(prompt, model)
+    except (RuntimeError, requests.RequestException) as e:
+        return {"error": str(e)}
+
+    return {"summary": reply, "count": len(messages), "model_used": used_model}
+
+
+@app.get("/google/calendar")
+def google_calendar_list(days: int = 7, max_results: int = 25):
+    try:
+        return {"events": _google.calendar_list_events(days, max_results)}
+    except (RuntimeError, requests.RequestException) as e:
+        return {"error": str(e)}
+
+
+@app.post("/google/calendar")
+def google_calendar_create(summary: str = Body(...), start: str = Body(...),
+                           end: str = Body(None), description: str = Body(""),
+                           location: str = Body(""), attendees: list = Body(None)):
+    try:
+        return _google.calendar_create_event(summary, start, end, description, location, attendees)
+    except (ValueError, RuntimeError, requests.RequestException) as e:
+        return {"error": str(e)}
+
+
+@app.get("/google/drive")
+def google_drive_list(query: str = "", max_results: int = 20):
+    try:
+        return {"files": _google.drive_list(query, max_results)}
+    except (RuntimeError, requests.RequestException) as e:
+        return {"error": str(e)}
+
+
+# ---------- Automations (n8n and other webhooks) ----------
+import automations as _automations
+
+
+@app.get("/automations")
+def automations_list():
+    return {"automations": _automations.list_automations()}
+
+
+@app.post("/automations")
+def automations_create(name: str = Body(...), webhook_url: str = Body(...),
+                       description: str = Body(""), method: str = Body("POST"),
+                       auth_header_name: str = Body(""), auth_header_value: str = Body("")):
+    try:
+        return _automations.create_automation(
+            name, webhook_url, description, method, auth_header_name, auth_header_value
+        )
+    except ValueError as e:
+        return {"error": str(e)}
+
+
+@app.post("/automations/{automation_id}")
+def automations_update(automation_id: str, name: str = Body(None),
+                       webhook_url: str = Body(None), description: str = Body(None),
+                       method: str = Body(None), auth_header_name: str = Body(None),
+                       auth_header_value: str = Body(None)):
+    try:
+        return _automations.update_automation(
+            automation_id, name=name, webhook_url=webhook_url, description=description,
+            method=method, auth_header_name=auth_header_name,
+            auth_header_value=auth_header_value,
+        )
+    except KeyError:
+        return {"error": "not found"}
+    except ValueError as e:
+        return {"error": str(e)}
+
+
+@app.delete("/automations/{automation_id}")
+def automations_delete(automation_id: str):
+    return {"deleted": _automations.delete_automation(automation_id)}
+
+
+@app.post("/automations/{automation_id}/run")
+def automations_run(automation_id: str, payload: dict = Body(None, embed=True)):
+    try:
+        return _automations.run_automation(automation_id, payload)
+    except KeyError:
+        return {"error": "not found"}
+
+
+@app.post("/automations/match")
+def automations_match(text: str = Body(..., embed=True)):
+    match = _automations.match_automation(text)
+    return {"match": match}

@@ -21,6 +21,9 @@ daemon/mira_error.log
 daemon/out.aiff
 daemon/settings.json
 daemon/personal_ngrams.json
+daemon/google_tokens.json
+daemon/automations.json
+daemon/dumpbox/
 daemon/wakeword/command_recording.wav
 daemon/wakeword/command_recording.converted.wav
 daemon/wakeword/command_recording.converted.wav.txt

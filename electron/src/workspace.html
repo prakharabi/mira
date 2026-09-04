@@ -496,6 +496,150 @@
   .output-box.empty { color: var(--text-tertiary); font-style: italic; }
   .meta-line { font-size: 11px; color: var(--text-tertiary); }
 
+  /* ---------- shared: sub-tabs, list rows, empty states ---------- */
+  .subtabs {
+    display: flex;
+    gap: 4px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 4px;
+    margin-bottom: 16px;
+    align-self: flex-start;
+  }
+  .subtab {
+    padding: 7px 16px;
+    border-radius: 999px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: color 150ms var(--ease-standard), background 200ms var(--ease-standard);
+    white-space: nowrap;
+  }
+  .subtab:hover { color: var(--text-primary); }
+  .subtab.active { color: var(--text-primary); background: var(--bg-elevated-3); }
+
+  .list-row {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 13px 15px;
+    margin-bottom: 8px;
+    transition: border-color 150ms var(--ease-standard), transform 150ms var(--ease-standard);
+    animation: view-in 260ms var(--ease-out);
+  }
+  .list-row:hover { border-color: rgba(255,255,255,0.15); }
+  .list-row .row-top {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+  }
+  .list-row .row-title {
+    font-size: 13px; font-weight: 600; letter-spacing: -0.01em;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .list-row .row-meta { font-size: 11px; color: var(--text-tertiary); flex-shrink: 0; }
+  .list-row .row-body {
+    font-size: 12px; color: var(--text-secondary); margin-top: 5px; line-height: 1.5;
+  }
+  .list-row .row-actions { display: flex; gap: 6px; margin-top: 11px; flex-wrap: wrap; }
+
+  .empty-state {
+    padding: 40px 20px;
+    text-align: center;
+    color: var(--text-tertiary);
+    font-size: 13px;
+    line-height: 1.7;
+  }
+  .empty-state .big { font-size: 15px; color: var(--text-secondary); font-weight: 600; margin-bottom: 6px; }
+
+  .badge {
+    display: inline-block;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 3px 8px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.08);
+    color: var(--text-secondary);
+    vertical-align: middle;
+  }
+  .badge.due { background: rgba(139,92,246,0.18); color: #c4b5fd; }
+  .badge.done { background: rgba(34,197,94,0.16); color: #86efac; }
+  .badge.fail { background: rgba(240,68,56,0.16); color: #fca5a5; }
+  .badge.unread { background: rgba(6,182,212,0.16); color: #67e8f9; }
+
+  .mini-btn-sm {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    border-radius: var(--radius-sm);
+    padding: 6px 11px;
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 150ms var(--ease-standard), transform 100ms var(--ease-standard);
+  }
+  .mini-btn-sm:hover { background: var(--bg-elevated-2); }
+  .mini-btn-sm:active { transform: scale(0.97); }
+  .mini-btn-sm:disabled { opacity: 0.45; cursor: default; }
+  .mini-btn-sm.accent { background: var(--accent-gradient); border-color: transparent; color: #fff; }
+  .mini-btn-sm.accent:hover { filter: brightness(1.12); }
+  .mini-btn-sm.danger { color: #fca5a5; }
+  .mini-btn-sm.danger:hover { background: rgba(240,68,56,0.14); }
+
+  .inline-note {
+    font-size: 11.5px; line-height: 1.6; color: var(--text-tertiary);
+    margin-top: 8px;
+  }
+  .inline-note.error { color: #fca5a5; }
+  .inline-note.ok { color: #86efac; }
+
+  .textarea-field {
+    width: 100%;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 12px 13px;
+    color: var(--text-primary);
+    font-size: 13px;
+    line-height: 1.6;
+    font-family: inherit;
+    outline: none;
+    resize: vertical;
+    min-height: 130px;
+    transition: border-color 150ms var(--ease-standard);
+  }
+  .textarea-field:focus { border-color: rgba(139,92,246,0.5); }
+  .textarea-field::placeholder { color: var(--text-tertiary); }
+
+  /* action items inside a processed dump entry */
+  .action-item {
+    display: flex; align-items: flex-start; gap: 9px;
+    padding: 8px 0;
+    border-top: 1px solid var(--border-soft);
+  }
+  .action-item:first-child { border-top: none; }
+  .action-item input[type=checkbox] {
+    margin-top: 2px; accent-color: #8b5cf6; cursor: pointer; flex-shrink: 0;
+  }
+  .action-item .ai-title { font-size: 12.5px; font-weight: 550; }
+  .action-item .ai-note { font-size: 11.5px; color: var(--text-tertiary); margin-top: 2px; }
+  .action-item.is-pushed .ai-title { color: var(--text-tertiary); text-decoration: line-through; }
+
+  .key-points { margin: 8px 0 0; padding-left: 18px; }
+  .key-points li { font-size: 12px; color: var(--text-secondary); line-height: 1.7; }
+
+  .spinner-inline {
+    display: inline-block; width: 12px; height: 12px;
+    border: 2px solid rgba(255,255,255,0.2);
+    border-top-color: var(--text-primary);
+    border-radius: 50%;
+    animation: spin 700ms linear infinite;
+    vertical-align: -2px; margin-right: 6px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
   /* ---------- Settings view ---------- */
   .setting-row {
     background: var(--bg-elevated);
@@ -697,6 +841,18 @@
         <div class="nav-item" data-view="meetings">
           <svg viewBox="0 0 20 20" fill="none"><rect x="3" y="5" width="10" height="10" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M13 8.5l4-2.2v7.4l-4-2.2" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
           <span>Meetings</span>
+        </div>
+        <div class="nav-item" data-view="dumpbox">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M3 7l7-4 7 4-7 4-7-4z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M3 11l7 4 7-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>Dump Box</span>
+        </div>
+        <div class="nav-item" data-view="google">
+          <svg viewBox="0 0 20 20" fill="none"><rect x="2.5" y="4.5" width="15" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M3 6l7 5 7-5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+          <span>Google</span>
+        </div>
+        <div class="nav-item" data-view="automations">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M11 2.5L4.5 11H9l-1 6.5L15.5 9H11l1-6.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+          <span>Automations</span>
         </div>
         <div class="nav-item" data-view="settings">
           <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="2.6" stroke="currentColor" stroke-width="1.5"/><path d="M10 3v2M10 15v2M17 10h-2M5 10H3M14.9 5.1l-1.4 1.4M6.5 13.5l-1.4 1.4M14.9 14.9l-1.4-1.4M6.5 6.5L5.1 5.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
@@ -995,6 +1151,190 @@
             </div>
           </div>
         </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Connected Services</div>
+
+          <div class="setting-block">
+            <div class="setting-block-row">
+              <div>
+                <div class="label">Google account</div>
+                <div class="sublabel">Uses your own OAuth client, so nothing is shared with the project</div>
+              </div>
+            </div>
+            <div class="setting-block-body">
+              <div>
+                <label class="field-label">Client ID</label>
+                <input type="text" class="rect-field" id="google-client-id" placeholder="xxxxx.apps.googleusercontent.com" style="width:100%;">
+              </div>
+              <div>
+                <label class="field-label">Client secret</label>
+                <input type="password" class="rect-field" id="google-client-secret" placeholder="Enter to set" style="width:100%;">
+              </div>
+              <div class="field-row">
+                <button class="mini-btn-sm" id="save-google-client-btn">Save credentials</button>
+              </div>
+              <div class="inline-note">
+                Create a Google Cloud project → APIs &amp; Services → Credentials → OAuth client ID →
+                <b>Desktop app</b>. Enable the Gmail, Calendar and Drive APIs. Connect the account
+                from the Google tab.
+              </div>
+              <div class="inline-note" id="google-client-msg"></div>
+            </div>
+          </div>
+
+          <div class="setting-block">
+            <div class="setting-block-row">
+              <div>
+                <div class="label">Reminders list</div>
+                <div class="sublabel">Where Dump Box action items get saved</div>
+              </div>
+            </div>
+            <div class="setting-block-body">
+              <div class="field-row">
+                <select class="dropdown-select" id="reminders-list-select" style="flex:1;"></select>
+                <button class="mini-btn" id="refresh-reminders-lists-btn">Refresh</button>
+              </div>
+              <div class="inline-note" id="reminders-list-msg"></div>
+            </div>
+          </div>
+
+          <div class="setting-block">
+            <div class="setting-block-row">
+              <div>
+                <div class="label">n8n instance</div>
+                <div class="sublabel">Optional — prefills webhook URLs when adding automations</div>
+              </div>
+            </div>
+            <div class="setting-block-body">
+              <div class="field-row">
+                <input type="text" class="rect-field" id="n8n-base-url" placeholder="https://n8n.example.com" style="flex:1;">
+                <button class="mini-btn" id="save-n8n-btn">Save</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ---------- DUMP BOX ---------- -->
+      <div class="view" id="dumpbox-view">
+        <div class="view-header">
+          <h1 class="view-title">Dump Box</h1>
+          <p class="view-subtitle">Empty your head here. Mira turns it into a plan.</p>
+        </div>
+
+        <div class="card" style="padding:16px; margin-bottom:18px;">
+          <textarea class="textarea-field" id="dump-input"
+            placeholder="Paste notes, thoughts, meeting scraps, half-formed to-dos… anything. Mira will pull out the summary and the actual tasks."></textarea>
+          <div class="field-row" style="margin-top:11px; justify-content:space-between;">
+            <div class="inline-note" id="dump-hint">Tip: ⌘↵ to capture and process in one go.</div>
+            <div style="display:flex; gap:8px;">
+              <button class="mini-btn-sm" id="dump-save-btn">Capture</button>
+              <button class="mini-btn-sm accent" id="dump-process-btn">Capture &amp; Process</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="dump-list"></div>
+      </div>
+
+      <!-- ---------- GOOGLE ---------- -->
+      <div class="view" id="google-view">
+        <div class="view-header">
+          <h1 class="view-title">Google</h1>
+          <p class="view-subtitle">Mail, calendar, and files — read from your own account.</p>
+        </div>
+
+        <div id="google-disconnected">
+          <div class="card" style="padding:22px;">
+            <div class="empty-state" style="padding:20px;">
+              <div class="big">Not connected</div>
+              <div id="google-connect-help">Add your Google OAuth client in Settings, then connect here.</div>
+              <div style="margin-top:16px; display:flex; gap:8px; justify-content:center;">
+                <button class="mini-btn-sm accent" id="google-connect-btn">Connect Google account</button>
+              </div>
+              <div class="inline-note" id="google-connect-msg"></div>
+            </div>
+          </div>
+        </div>
+
+        <div id="google-connected" style="display:none;">
+          <div class="setting-row" style="margin-bottom:14px;">
+            <div>
+              <div class="label" id="google-account-email">—</div>
+              <div class="sublabel">Connected</div>
+            </div>
+            <button class="mini-btn-sm danger" id="google-disconnect-btn">Disconnect</button>
+          </div>
+
+          <div class="subtabs">
+            <div class="subtab active" data-gtab="mail">Mail</div>
+            <div class="subtab" data-gtab="calendar">Calendar</div>
+            <div class="subtab" data-gtab="drive">Drive</div>
+          </div>
+
+          <div class="gtab-panel" id="gtab-mail">
+            <div class="field-row" style="margin-bottom:12px;">
+              <input type="text" class="rect-field" id="gmail-query" placeholder="Search mail (e.g. from:ravi is:unread)" style="flex:1;">
+              <button class="mini-btn-sm" id="gmail-refresh-btn">Load</button>
+              <button class="mini-btn-sm accent" id="gmail-summarize-btn">Summarize</button>
+            </div>
+            <div id="gmail-summary" class="card" style="display:none; padding:15px; margin-bottom:14px;"></div>
+            <div id="gmail-list"></div>
+          </div>
+
+          <div class="gtab-panel" id="gtab-calendar" style="display:none;">
+            <div class="field-row" style="margin-bottom:12px;">
+              <select class="dropdown-select" id="calendar-range" style="max-width:170px;">
+                <option value="1">Today</option>
+                <option value="7" selected>Next 7 days</option>
+                <option value="30">Next 30 days</option>
+              </select>
+              <button class="mini-btn-sm" id="calendar-refresh-btn">Load</button>
+            </div>
+            <div id="calendar-list"></div>
+          </div>
+
+          <div class="gtab-panel" id="gtab-drive" style="display:none;">
+            <div class="field-row" style="margin-bottom:12px;">
+              <input type="text" class="rect-field" id="drive-query" placeholder="Search files by name" style="flex:1;">
+              <button class="mini-btn-sm" id="drive-refresh-btn">Load</button>
+            </div>
+            <div id="drive-list"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ---------- AUTOMATIONS ---------- -->
+      <div class="view" id="automations-view">
+        <div class="view-header">
+          <h1 class="view-title">Automations</h1>
+          <p class="view-subtitle">Fire your n8n workflows — from here, or by asking Mira.</p>
+        </div>
+
+        <div class="card" style="padding:16px; margin-bottom:18px;">
+          <div class="setting-block-body" style="margin-top:0;">
+            <div class="field-row">
+              <input type="text" class="rect-field" id="auto-name" placeholder="Name (e.g. Daily Standup)" style="flex:1;">
+              <select class="dropdown-select" id="auto-method" style="max-width:110px;">
+                <option value="POST">POST</option>
+                <option value="GET">GET</option>
+              </select>
+            </div>
+            <input type="text" class="rect-field" id="auto-url" placeholder="Webhook URL" style="width:100%;">
+            <input type="text" class="rect-field" id="auto-desc" placeholder="What it does — this is how Mira recognizes it when you ask by voice" style="width:100%;">
+            <div class="field-row">
+              <input type="text" class="rect-field" id="auto-header-name" placeholder="Auth header name (optional)" style="flex:1;">
+              <input type="password" class="rect-field" id="auto-header-value" placeholder="Auth header value" style="flex:1;">
+            </div>
+            <div class="field-row" style="justify-content:flex-end;">
+              <button class="mini-btn-sm accent" id="auto-add-btn">Add automation</button>
+            </div>
+            <div class="inline-note" id="auto-add-msg"></div>
+          </div>
+        </div>
+
+        <div id="auto-list"></div>
       </div>
 
     </div>
@@ -1064,6 +1404,9 @@
     if (activeItem) positionIndicator(activeItem, animateNav);
     if (name === 'settings') loadSettings();
     if (name === 'chat') document.getElementById('text-input').focus();
+    if (name === 'dumpbox') { loadDumpEntries(); document.getElementById('dump-input').focus(); }
+    if (name === 'google') refreshGoogleStatus();
+    if (name === 'automations') loadAutomations();
   }
 
   navItems.forEach(item => item.addEventListener('click', () => switchView(item.dataset.view)));
@@ -1367,8 +1710,14 @@
       sttSeg.setActive(data.stt_prefer || 'local', false);
       modeSeg.setActive(data.transcription_mode || 'translate', false);
 
+      document.getElementById('google-client-id').value = data.google_client_id || '';
+      document.getElementById('google-client-secret').placeholder =
+        data.google_client_secret_set ? 'Saved — enter to replace' : 'Enter to set';
+      document.getElementById('n8n-base-url').value = data.n8n_base_url || '';
+
       await loadLocalModels(data.local_chat_model);
       await loadVoices(data.tts_voice);
+      await loadRemindersLists(data.reminders_list);
     } catch (e) { console.error('Could not load settings', e); }
   }
 
@@ -1734,6 +2083,673 @@
       minutesBox.textContent = data.minutes;
     } catch (e) { minutesBox.textContent = 'Error: could not reach Mira daemon'; }
   };
+
+  // ==================== Dump Box ====================
+  function esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s == null ? '' : String(s);
+    return d.innerHTML;
+  }
+
+  function relativeTime(iso) {
+    if (!iso) return '';
+    const then = new Date(iso).getTime();
+    if (Number.isNaN(then)) return '';
+    const mins = Math.round((Date.now() - then) / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.round(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    return `${Math.round(hrs / 24)}d ago`;
+  }
+
+  const dumpListEl = () => document.getElementById('dump-list');
+
+  async function loadDumpEntries() {
+    const el = dumpListEl();
+    try {
+      const res = await fetch(`${DAEMON_URL}/dumpbox`);
+      const data = await res.json();
+      renderDumpEntries(data.entries || []);
+    } catch (e) {
+      el.innerHTML = '<div class="empty-state">Could not reach Mira daemon.</div>';
+    }
+  }
+
+  function renderDumpEntries(entries) {
+    const el = dumpListEl();
+    if (!entries.length) {
+      el.innerHTML = '<div class="empty-state"><div class="big">Nothing captured yet</div>'
+                   + 'Dump anything above and Mira will pull out the tasks.</div>';
+      return;
+    }
+
+    el.innerHTML = entries.map(entry => {
+      const items = entry.action_items || [];
+      const pushedCount = items.filter(i => i.pushed).length;
+
+      const actionItemsHtml = items.length ? `
+        <div style="margin-top:10px;">
+          ${items.map(i => `
+            <label class="action-item ${i.pushed ? 'is-pushed' : ''}">
+              <input type="checkbox" data-dump-item="${esc(entry.id)}:${esc(i.id)}"
+                     ${i.pushed ? 'disabled' : 'checked'}>
+              <div style="flex:1;">
+                <div class="ai-title">${esc(i.title)}
+                  ${i.due ? `<span class="badge due">${esc(i.due)}</span>` : ''}
+                  ${i.pushed ? '<span class="badge done">In Reminders</span>' : ''}
+                </div>
+                ${i.note ? `<div class="ai-note">${esc(i.note)}</div>` : ''}
+              </div>
+            </label>`).join('')}
+        </div>` : '';
+
+      const keyPointsHtml = (entry.key_points || []).length
+        ? `<ul class="key-points">${entry.key_points.map(p => `<li>${esc(p)}</li>`).join('')}</ul>`
+        : '';
+
+      const summaryHtml = entry.processed
+        ? `<div class="row-body">${esc(entry.summary)}</div>${keyPointsHtml}${actionItemsHtml}`
+        : `<div class="row-body">${esc(entry.text.slice(0, 220))}${entry.text.length > 220 ? '…' : ''}</div>`;
+
+      const pushBtn = (entry.processed && items.length > pushedCount)
+        ? `<button class="mini-btn-sm accent" data-dump-push="${esc(entry.id)}">Send checked to Reminders</button>`
+        : '';
+
+      return `
+        <div class="list-row" data-dump-row="${esc(entry.id)}">
+          <div class="row-top">
+            <div class="row-title">${entry.processed ? 'Processed' : 'Captured'}
+              ${items.length ? `<span class="badge">${items.length} task${items.length > 1 ? 's' : ''}</span>` : ''}
+            </div>
+            <div class="row-meta">${esc(relativeTime(entry.created_at))}</div>
+          </div>
+          ${summaryHtml}
+          <div class="row-actions">
+            ${entry.processed ? '' : `<button class="mini-btn-sm accent" data-dump-process="${esc(entry.id)}">Process</button>`}
+            ${pushBtn}
+            <button class="mini-btn-sm" data-dump-toggle="${esc(entry.id)}">Original text</button>
+            <button class="mini-btn-sm danger" data-dump-delete="${esc(entry.id)}">Delete</button>
+          </div>
+          <div class="output-box" data-dump-raw="${esc(entry.id)}" style="display:none; margin-top:10px;">${esc(entry.text)}</div>
+          <div class="inline-note" data-dump-msg="${esc(entry.id)}"></div>
+        </div>`;
+    }).join('');
+  }
+
+  async function captureDump(thenProcess) {
+    const input = document.getElementById('dump-input');
+    const text = input.value.trim();
+    if (!text) return;
+
+    const saveBtn = document.getElementById('dump-save-btn');
+    const procBtn = document.getElementById('dump-process-btn');
+    saveBtn.disabled = procBtn.disabled = true;
+    procBtn.innerHTML = thenProcess ? '<span class="spinner-inline"></span>Processing…' : procBtn.textContent;
+
+    try {
+      const res = await fetch(`${DAEMON_URL}/dumpbox`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text })
+      });
+      const entry = await res.json();
+      input.value = '';
+
+      if (thenProcess && entry.id) {
+        await fetch(`${DAEMON_URL}/dumpbox/${entry.id}/process`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: 'auto' })
+        });
+      }
+      await loadDumpEntries();
+    } catch (e) {
+      document.getElementById('dump-hint').textContent = 'Could not reach Mira daemon.';
+    } finally {
+      saveBtn.disabled = procBtn.disabled = false;
+      procBtn.textContent = 'Capture & Process';
+    }
+  }
+
+  document.getElementById('dump-save-btn').onclick = () => captureDump(false);
+  document.getElementById('dump-process-btn').onclick = () => captureDump(true);
+  document.getElementById('dump-input').addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); captureDump(true); }
+  });
+
+  dumpListEl().addEventListener('click', async (e) => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+
+    const processId = btn.dataset.dumpProcess;
+    const deleteId = btn.dataset.dumpDelete;
+    const toggleId = btn.dataset.dumpToggle;
+    const pushId = btn.dataset.dumpPush;
+
+    if (toggleId) {
+      const box = document.querySelector(`[data-dump-raw="${toggleId}"]`);
+      box.style.display = box.style.display === 'none' ? 'block' : 'none';
+      return;
+    }
+
+    if (processId) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-inline"></span>Processing…';
+      try {
+        await fetch(`${DAEMON_URL}/dumpbox/${processId}/process`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model: 'auto' })
+        });
+        await loadDumpEntries();
+      } catch (err) {
+        btn.disabled = false;
+        btn.textContent = 'Process';
+      }
+      return;
+    }
+
+    if (deleteId) {
+      await fetch(`${DAEMON_URL}/dumpbox/${deleteId}`, { method: 'DELETE' });
+      await loadDumpEntries();
+      return;
+    }
+
+    if (pushId) {
+      await pushDumpItems(pushId, btn);
+    }
+  });
+
+  // Reminders writes go through Electron, not the daemon: a headless LaunchAgent
+  // can't obtain macOS Automation consent, so the daemon is only told which items
+  // landed afterwards.
+  async function pushDumpItems(entryId, btn) {
+    const msgEl = document.querySelector(`[data-dump-msg="${entryId}"]`);
+    const checked = Array.from(
+      document.querySelectorAll(`[data-dump-item^="${entryId}:"]`)
+    ).filter(cb => cb.checked && !cb.disabled);
+
+    if (!checked.length) {
+      msgEl.className = 'inline-note';
+      msgEl.textContent = 'Nothing checked.';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-inline"></span>Sending…';
+    msgEl.textContent = '';
+
+    let entry;
+    try {
+      entry = await (await fetch(`${DAEMON_URL}/dumpbox/${entryId}`)).json();
+    } catch (e) {
+      msgEl.className = 'inline-note error';
+      msgEl.textContent = 'Could not reach Mira daemon.';
+      btn.disabled = false;
+      btn.textContent = 'Send checked to Reminders';
+      return;
+    }
+
+    const wanted = new Set(checked.map(cb => cb.dataset.dumpItem.split(':')[1]));
+    const targets = (entry.action_items || []).filter(i => wanted.has(i.id) && !i.pushed);
+
+    const listName = document.getElementById('reminders-list-select')?.value || '';
+    const succeeded = [];
+    let failMsg = '';
+
+    for (const item of targets) {
+      const res = await ipcRenderer.invoke('reminders-add', {
+        title: item.title, note: item.note || '', due: item.due, listName
+      });
+      if (res && res.success) {
+        succeeded.push(item.id);
+      } else {
+        failMsg = (res && res.error) || 'Could not create reminder.';
+        break;
+      }
+    }
+
+    if (succeeded.length) {
+      await fetch(`${DAEMON_URL}/dumpbox/${entryId}/reminders/mark`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ item_ids: succeeded })
+      });
+    }
+
+    await loadDumpEntries();
+    const freshMsg = document.querySelector(`[data-dump-msg="${entryId}"]`);
+    if (freshMsg) {
+      if (failMsg) {
+        freshMsg.className = 'inline-note error';
+        freshMsg.textContent = `${succeeded.length} added. ${failMsg}`;
+      } else {
+        freshMsg.className = 'inline-note ok';
+        freshMsg.textContent = `Added ${succeeded.length} to Reminders.`;
+      }
+    }
+  }
+
+  async function loadRemindersLists(selected) {
+    const sel = document.getElementById('reminders-list-select');
+    const msg = document.getElementById('reminders-list-msg');
+    if (!sel) return;
+    sel.innerHTML = '<option value="">Default list</option>';
+    try {
+      const res = await ipcRenderer.invoke('reminders-lists');
+      if (res.error) {
+        msg.className = 'inline-note error';
+        msg.textContent = res.error;
+        return;
+      }
+      msg.textContent = '';
+      (res.lists || []).forEach(name => {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        sel.appendChild(opt);
+      });
+      sel.value = selected || '';
+    } catch (e) {
+      msg.className = 'inline-note error';
+      msg.textContent = 'Could not read Reminders lists.';
+    }
+  }
+
+  document.getElementById('refresh-reminders-lists-btn').onclick = () => loadRemindersLists(
+    document.getElementById('reminders-list-select').value
+  );
+  document.getElementById('reminders-list-select').addEventListener('change', (e) =>
+    updateSetting('reminders_list', e.target.value));
+
+  // ==================== Google ====================
+  document.getElementById('save-google-client-btn').onclick = async () => {
+    const msg = document.getElementById('google-client-msg');
+    const id = document.getElementById('google-client-id').value.trim();
+    const secretEl = document.getElementById('google-client-secret');
+    const body = { google_client_id: id };
+    // blank secret means "keep the saved one" so the field never has to be retyped
+    if (secretEl.value.trim()) body.google_client_secret = secretEl.value.trim();
+
+    try {
+      await fetch(`${DAEMON_URL}/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      secretEl.value = '';
+      msg.className = 'inline-note ok';
+      msg.textContent = 'Saved. Connect your account from the Google tab.';
+      loadSettings();
+    } catch (e) {
+      msg.className = 'inline-note error';
+      msg.textContent = 'Could not save.';
+    }
+  };
+
+  document.getElementById('save-n8n-btn').onclick = () =>
+    updateSetting('n8n_base_url', document.getElementById('n8n-base-url').value.trim());
+
+  let googlePollTimer = null;
+
+  async function refreshGoogleStatus() {
+    try {
+      const status = await (await fetch(`${DAEMON_URL}/google/status`)).json();
+      const disc = document.getElementById('google-disconnected');
+      const conn = document.getElementById('google-connected');
+
+      if (status.connected) {
+        disc.style.display = 'none';
+        conn.style.display = 'block';
+        document.getElementById('google-account-email').textContent = status.email || 'Google account';
+      } else {
+        disc.style.display = 'block';
+        conn.style.display = 'none';
+        document.getElementById('google-connect-help').textContent = status.client_configured
+          ? 'Your OAuth client is saved. Connect to authorize Mira.'
+          : 'Add your Google OAuth client in Settings, then connect here.';
+        document.getElementById('google-connect-btn').disabled = !status.client_configured;
+        if (status.flow_error) {
+          const m = document.getElementById('google-connect-msg');
+          m.className = 'inline-note error';
+          m.textContent = status.flow_error;
+        }
+      }
+      return status;
+    } catch (e) { return null; }
+  }
+
+  document.getElementById('google-connect-btn').onclick = async () => {
+    const msg = document.getElementById('google-connect-msg');
+    msg.className = 'inline-note';
+    msg.innerHTML = '<span class="spinner-inline"></span>Opening Google sign-in…';
+
+    try {
+      const res = await (await fetch(`${DAEMON_URL}/google/auth/start`, { method: 'POST' })).json();
+      if (res.error) {
+        msg.className = 'inline-note error';
+        msg.textContent = res.error;
+        return;
+      }
+      await ipcRenderer.invoke('open-external', res.auth_url);
+      msg.textContent = 'Finish signing in in your browser…';
+
+      // the consent step happens outside the app, so poll until the daemon
+      // reports the callback landed
+      clearInterval(googlePollTimer);
+      googlePollTimer = setInterval(async () => {
+        const status = await refreshGoogleStatus();
+        if (!status) return;
+        if (status.connected) {
+          clearInterval(googlePollTimer);
+          msg.className = 'inline-note ok';
+          msg.textContent = 'Connected.';
+          loadGmail();
+        } else if (!status.flow_active) {
+          clearInterval(googlePollTimer);
+        }
+      }, 2000);
+    } catch (e) {
+      msg.className = 'inline-note error';
+      msg.textContent = 'Could not start sign-in.';
+    }
+  };
+
+  document.getElementById('google-disconnect-btn').onclick = async () => {
+    await fetch(`${DAEMON_URL}/google/auth/disconnect`, { method: 'POST' });
+    refreshGoogleStatus();
+  };
+
+  document.querySelectorAll('[data-gtab]').forEach(tab => {
+    tab.addEventListener('click', () => {
+      const name = tab.dataset.gtab;
+      document.querySelectorAll('[data-gtab]').forEach(t => t.classList.toggle('active', t === tab));
+      ['mail', 'calendar', 'drive'].forEach(n => {
+        document.getElementById('gtab-' + n).style.display = n === name ? 'block' : 'none';
+      });
+      if (name === 'mail') loadGmail();
+      if (name === 'calendar') loadCalendar();
+      if (name === 'drive') loadDrive();
+    });
+  });
+
+  async function loadGmail() {
+    const el = document.getElementById('gmail-list');
+    el.innerHTML = '<div class="empty-state"><span class="spinner-inline"></span>Loading mail…</div>';
+    const q = document.getElementById('gmail-query').value.trim();
+    try {
+      const data = await (await fetch(`${DAEMON_URL}/google/gmail?query=${encodeURIComponent(q)}&max_results=15`)).json();
+      if (data.error) { el.innerHTML = `<div class="empty-state">${esc(data.error)}</div>`; return; }
+      const msgs = data.messages || [];
+      if (!msgs.length) { el.innerHTML = '<div class="empty-state">No messages matched.</div>'; return; }
+
+      el.innerHTML = msgs.map(m => `
+        <div class="list-row">
+          <div class="row-top">
+            <div class="row-title">${esc(m.subject)} ${m.unread ? '<span class="badge unread">New</span>' : ''}</div>
+            <div class="row-meta">${esc((m.date || '').replace(/\s*\([^)]*\)\s*$/, '').slice(0, 22))}</div>
+          </div>
+          <div class="row-body"><b>${esc(m.from)}</b><br>${esc(m.snippet)}</div>
+          <div class="row-actions">
+            <button class="mini-btn-sm" data-gmail-open="${esc(m.id)}">Read</button>
+            <button class="mini-btn-sm" data-gmail-reply="${esc(m.id)}">Draft reply</button>
+          </div>
+          <div class="output-box" data-gmail-body="${esc(m.id)}" style="display:none; margin-top:10px;"></div>
+        </div>`).join('');
+    } catch (e) {
+      el.innerHTML = '<div class="empty-state">Could not reach Mira daemon.</div>';
+    }
+  }
+
+  document.getElementById('gmail-refresh-btn').onclick = loadGmail;
+  document.getElementById('gmail-query').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') loadGmail();
+  });
+
+  document.getElementById('gmail-summarize-btn').onclick = async () => {
+    const box = document.getElementById('gmail-summary');
+    box.style.display = 'block';
+    box.innerHTML = '<span class="spinner-inline"></span>Reading your inbox…';
+    try {
+      const data = await (await fetch(`${DAEMON_URL}/google/gmail/summarize`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: document.getElementById('gmail-query').value.trim(), max_results: 12, model: 'auto' })
+      })).json();
+      box.innerHTML = data.error
+        ? `<div class="inline-note error">${esc(data.error)}</div>`
+        : `<div style="font-size:12.5px; line-height:1.7; white-space:pre-wrap;">${esc(data.summary)}</div>
+           <div class="meta-line" style="margin-top:9px;">${data.count} messages · ${esc(data.model_used)}</div>`;
+    } catch (e) {
+      box.innerHTML = '<div class="inline-note error">Could not reach Mira daemon.</div>';
+    }
+  };
+
+  document.getElementById('gmail-list').addEventListener('click', async (e) => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+
+    const openId = btn.dataset.gmailOpen;
+    const replyId = btn.dataset.gmailReply;
+
+    if (openId) {
+      const box = document.querySelector(`[data-gmail-body="${openId}"]`);
+      if (box.style.display === 'block') { box.style.display = 'none'; return; }
+      box.style.display = 'block';
+      box.textContent = 'Loading…';
+      const data = await (await fetch(`${DAEMON_URL}/google/gmail/${openId}`)).json();
+      box.textContent = data.error ? data.error : (data.body || data.snippet || '(empty)');
+      return;
+    }
+
+    if (replyId) {
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-inline"></span>Drafting…';
+      try {
+        const msg = await (await fetch(`${DAEMON_URL}/google/gmail/${replyId}`)).json();
+        const prompt = `Write a short, professional reply to this email. Reply body only, no subject line, `
+                     + `no placeholders like [Name] -- use what's in the email.\n\n`
+                     + `From: ${msg.from}\nSubject: ${msg.subject}\n\n${(msg.body || msg.snippet || '').slice(0, 3000)}`;
+        const gen = await (await fetch(`${DAEMON_URL}/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: 'gmail_drafts', message: prompt, model: 'auto' })
+        })).json();
+
+        const draft = await (await fetch(`${DAEMON_URL}/google/gmail/draft`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to: msg.from,
+            subject: msg.subject.startsWith('Re:') ? msg.subject : `Re: ${msg.subject}`,
+            body: gen.response || ''
+          })
+        })).json();
+
+        const box = document.querySelector(`[data-gmail-body="${replyId}"]`);
+        box.style.display = 'block';
+        box.textContent = draft.error
+          ? `Error: ${draft.error}`
+          : `Draft saved to Gmail — review and send it there.\n\n${gen.response || ''}`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Draft reply';
+      }
+    }
+  });
+
+  async function loadCalendar() {
+    const el = document.getElementById('calendar-list');
+    el.innerHTML = '<div class="empty-state"><span class="spinner-inline"></span>Loading calendar…</div>';
+    const days = document.getElementById('calendar-range').value;
+    try {
+      const data = await (await fetch(`${DAEMON_URL}/google/calendar?days=${days}`)).json();
+      if (data.error) { el.innerHTML = `<div class="empty-state">${esc(data.error)}</div>`; return; }
+      const events = data.events || [];
+      if (!events.length) { el.innerHTML = '<div class="empty-state">Nothing scheduled.</div>'; return; }
+
+      el.innerHTML = events.map(ev => {
+        const when = ev.all_day
+          ? new Date(ev.start).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' })
+          : new Date(ev.start).toLocaleString([], { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+        return `
+          <div class="list-row">
+            <div class="row-top">
+              <div class="row-title">${esc(ev.summary)} ${ev.all_day ? '<span class="badge">All day</span>' : ''}</div>
+              <div class="row-meta">${esc(when)}</div>
+            </div>
+            ${ev.location ? `<div class="row-body">${esc(ev.location)}</div>` : ''}
+            ${ev.attendees && ev.attendees.length ? `<div class="row-body">${ev.attendees.length} attendee${ev.attendees.length > 1 ? 's' : ''}</div>` : ''}
+          </div>`;
+      }).join('');
+    } catch (e) {
+      el.innerHTML = '<div class="empty-state">Could not reach Mira daemon.</div>';
+    }
+  }
+
+  document.getElementById('calendar-refresh-btn').onclick = loadCalendar;
+  document.getElementById('calendar-range').addEventListener('change', loadCalendar);
+
+  async function loadDrive() {
+    const el = document.getElementById('drive-list');
+    el.innerHTML = '<div class="empty-state"><span class="spinner-inline"></span>Loading files…</div>';
+    const q = document.getElementById('drive-query').value.trim();
+    try {
+      const data = await (await fetch(`${DAEMON_URL}/google/drive?query=${encodeURIComponent(q)}`)).json();
+      if (data.error) { el.innerHTML = `<div class="empty-state">${esc(data.error)}</div>`; return; }
+      const files = data.files || [];
+      if (!files.length) { el.innerHTML = '<div class="empty-state">No files matched.</div>'; return; }
+
+      el.innerHTML = files.map(f => `
+        <div class="list-row">
+          <div class="row-top">
+            <div class="row-title">${esc(f.name)}</div>
+            <div class="row-meta">${esc(new Date(f.modified).toLocaleDateString())}</div>
+          </div>
+          <div class="row-body">${esc((f.mime_type || '').replace('application/vnd.google-apps.', ''))}${f.owner ? ' · ' + esc(f.owner) : ''}</div>
+        </div>`).join('');
+    } catch (e) {
+      el.innerHTML = '<div class="empty-state">Could not reach Mira daemon.</div>';
+    }
+  }
+
+  document.getElementById('drive-refresh-btn').onclick = loadDrive;
+  document.getElementById('drive-query').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') loadDrive();
+  });
+
+  // ==================== Automations ====================
+  async function loadAutomations() {
+    const el = document.getElementById('auto-list');
+    try {
+      const data = await (await fetch(`${DAEMON_URL}/automations`)).json();
+      const items = data.automations || [];
+      if (!items.length) {
+        el.innerHTML = '<div class="empty-state"><div class="big">No automations yet</div>'
+                     + 'Add an n8n webhook above, then run it from here or just ask Mira.</div>';
+        return;
+      }
+      el.innerHTML = items.map(a => `
+        <div class="list-row">
+          <div class="row-top">
+            <div class="row-title">${esc(a.name)}
+              ${a.last_status === 'success' ? '<span class="badge done">OK</span>' : ''}
+              ${a.last_status === 'failed' ? '<span class="badge fail">Failed</span>' : ''}
+            </div>
+            <div class="row-meta">${a.last_run ? 'Ran ' + esc(relativeTime(a.last_run)) : 'Never run'}</div>
+          </div>
+          ${a.description ? `<div class="row-body">${esc(a.description)}</div>` : ''}
+          <div class="row-body" style="color:var(--text-tertiary); font-size:11px;">${esc(a.method)} ${esc(a.webhook_url)}</div>
+          <div class="row-actions">
+            <button class="mini-btn-sm accent" data-auto-run="${esc(a.id)}">Run</button>
+            <button class="mini-btn-sm danger" data-auto-delete="${esc(a.id)}">Delete</button>
+          </div>
+          <div class="inline-note" data-auto-msg="${esc(a.id)}"></div>
+        </div>`).join('');
+    } catch (e) {
+      el.innerHTML = '<div class="empty-state">Could not reach Mira daemon.</div>';
+    }
+  }
+
+  document.getElementById('auto-add-btn').onclick = async () => {
+    const msg = document.getElementById('auto-add-msg');
+    const body = {
+      name: document.getElementById('auto-name').value.trim(),
+      webhook_url: document.getElementById('auto-url').value.trim(),
+      description: document.getElementById('auto-desc').value.trim(),
+      method: document.getElementById('auto-method').value,
+      auth_header_name: document.getElementById('auto-header-name').value.trim(),
+      auth_header_value: document.getElementById('auto-header-value').value.trim()
+    };
+
+    try {
+      const res = await (await fetch(`${DAEMON_URL}/automations`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      })).json();
+
+      if (res.error) {
+        msg.className = 'inline-note error';
+        msg.textContent = res.error;
+        return;
+      }
+      msg.className = 'inline-note ok';
+      msg.textContent = 'Added.';
+      ['auto-name', 'auto-url', 'auto-desc', 'auto-header-name', 'auto-header-value']
+        .forEach(id => document.getElementById(id).value = '');
+      loadAutomations();
+    } catch (e) {
+      msg.className = 'inline-note error';
+      msg.textContent = 'Could not reach Mira daemon.';
+    }
+  };
+
+  document.getElementById('auto-list').addEventListener('click', async (e) => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+
+    const runId = btn.dataset.autoRun;
+    const delId = btn.dataset.autoDelete;
+
+    if (delId) {
+      await fetch(`${DAEMON_URL}/automations/${delId}`, { method: 'DELETE' });
+      loadAutomations();
+      return;
+    }
+
+    if (runId) {
+      const msg = document.querySelector(`[data-auto-msg="${runId}"]`);
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spinner-inline"></span>Running…';
+      try {
+        const res = await (await fetch(`${DAEMON_URL}/automations/${runId}/run`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ payload: {} })
+        })).json();
+
+        msg.className = res.success ? 'inline-note ok' : 'inline-note error';
+        msg.textContent = res.success
+          ? `Triggered (HTTP ${res.status_code}).`
+          : `Failed: ${res.error || 'HTTP ' + res.status_code}`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = 'Run';
+        loadAutomations();
+      }
+    }
+  });
+
+  // prefill the webhook field from the saved n8n base URL, so adding an
+  // automation is mostly just pasting the path
+  document.getElementById('auto-url').addEventListener('focus', async () => {
+    const el = document.getElementById('auto-url');
+    if (el.value) return;
+    const base = document.getElementById('n8n-base-url').value.trim();
+    if (base) el.value = base.replace(/\/$/, '') + '/webhook/';
+  });
 </script>
 </body>
 </html>
