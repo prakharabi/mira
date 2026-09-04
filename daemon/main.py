@@ -500,9 +500,40 @@ def call_cloud_model(history: list):
     return result["choices"][0]["message"]["content"], None
 
 
+# Firing a webhook has real side effects, so an automation only runs when the
+# user said so explicitly. Both gates must pass: the message has to open with a
+# run verb, AND automations.match_automation has to find one unambiguous match.
+# Anything less falls through to a normal reply rather than guessing.
+RUN_VERBS = ("run", "trigger", "start", "execute", "fire", "launch", "kick off")
+
+
+def maybe_run_automation(message: str):
+    text = (message or "").strip().lower()
+    if not any(text.startswith(v) or f" {v} " in f" {text} " for v in RUN_VERBS):
+        return None
+
+    import automations as _a
+    match = _a.match_automation(message)
+    if not match:
+        return None
+
+    result = _a.run_automation(match["id"])
+    if result.get("success"):
+        return f"Ran \"{match['name']}\"."
+    return f"Couldn't run \"{match['name']}\": {result.get('error') or 'HTTP ' + str(result.get('status_code'))}"
+
+
 # ---------- Groq/local routed chatbot endpoint ----------
 @app.post("/chat")
 def chat(session_id: str = Body(...), message: str = Body(...), model: str = Body("auto")):
+    automation_reply = maybe_run_automation(message)
+    if automation_reply:
+        history = load_history(session_id)
+        history.append({"role": "user", "content": message})
+        history.append({"role": "assistant", "content": automation_reply})
+        save_history(session_id, history)
+        return {"response": automation_reply, "model_used": "automation"}
+
     history = load_history(session_id)
     history.append({"role": "user", "content": message})
 
@@ -1350,6 +1381,15 @@ def automations_create(name: str = Body(...), webhook_url: str = Body(...),
         return {"error": str(e)}
 
 
+# Declared before the /automations/{automation_id} route below: FastAPI matches
+# routes in definition order, so a parameterized path registered first would
+# swallow "match" as an automation id.
+@app.post("/automations/match")
+def automations_match(text: str = Body(..., embed=True)):
+    match = _automations.match_automation(text)
+    return {"match": match}
+
+
 @app.post("/automations/{automation_id}")
 def automations_update(automation_id: str, name: str = Body(None),
                        webhook_url: str = Body(None), description: str = Body(None),
@@ -1378,9 +1418,3 @@ def automations_run(automation_id: str, payload: dict = Body(None, embed=True)):
         return _automations.run_automation(automation_id, payload)
     except KeyError:
         return {"error": "not found"}
-
-
-@app.post("/automations/match")
-def automations_match(text: str = Body(..., embed=True)):
-    match = _automations.match_automation(text)
-    return {"match": match}
