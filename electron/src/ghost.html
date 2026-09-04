@@ -1,69 +1,117 @@
 <!DOCTYPE html>
 <html>
 <head>
+<meta charset="utf-8">
 <style>
-  body { margin:0; background:transparent; font-family:sans-serif; }
-  #pill {
-    display:inline-flex; gap:6px; background:#1e1e1e; padding:8px 14px;
-    border-radius:20px; align-items:center; flex-wrap:nowrap;
-    box-sizing:border-box; box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-  }
-  .word {
-    color:white; font-size:13px; white-space:nowrap;
-  }
-  .word:not(:first-child) {
-    color:rgba(255,255,255,0.5);
-  }
-  #hint {
-    color:rgba(255,255,255,0.4); font-size:10px; margin-left:6px;
-    border-left: 1px solid rgba(255,255,255,0.2); padding-left:6px;
+  html, body {
+    margin: 0;
+    background: transparent;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
   }
 
-  /* in-word completion: the remaining letters of the word being typed */
-  .suffix { color:#7c9fff; font-size:13px; white-space:nowrap; }
+  /* One row, vertically centred, left-aligned at x=0. The window itself is
+     transparent and click-through, so it can be wider than the text without
+     any visual cost -- that avoids resizing (and re-flashing) the window on
+     every keystroke. */
+  #wrap {
+    display: flex;
+    align-items: center;
+    height: 100vh;
+    padding: 0;
+    white-space: nowrap;
+  }
 
-  /* correction mode: strikethrough wrong word -> correct word */
-  .wrong { color:rgba(255,120,120,0.85); font-size:13px; text-decoration:line-through; white-space:nowrap; }
-  .arrow { color:rgba(255,255,255,0.35); font-size:12px; }
-  .correct { color:#7cffb0; font-size:13px; font-weight:600; white-space:nowrap; }
+  /* Inline suggestions sit directly on the target app's own background, whose
+     colour is unknowable from here. A mid-grey reads acceptably on both light
+     and dark surfaces, and the paired shadows keep it legible on either
+     extreme rather than dissolving into one of them. */
+  .inline {
+    color: #8b8b93;
+    text-shadow:
+      0 0 2px rgba(255,255,255,0.55),
+      0 0 3px rgba(0,0,0,0.35);
+    letter-spacing: 0.1px;
+  }
+  .inline.next { font-style: italic; opacity: 0.92; }
+
+  .tabhint {
+    color: #8b8b93;
+    opacity: 0.55;
+    font-weight: 600;
+    margin-left: 0.45em;
+    text-shadow: 0 0 2px rgba(255,255,255,0.5), 0 0 3px rgba(0,0,0,0.3);
+  }
+
+  /* Corrections are a distinct affordance rather than a continuation of the
+     line, so they keep an explicit chip and sit below the text. */
+  #chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(28,28,32,0.94);
+    border: 1px solid rgba(255,255,255,0.1);
+    padding: 6px 11px;
+    border-radius: 8px;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+  }
+  .wrong { color: #ff9a9a; text-decoration: line-through; }
+  .arrow { color: rgba(255,255,255,0.35); }
+  .correct { color: #7cffb0; font-weight: 600; }
+  .chip-hint {
+    color: rgba(255,255,255,0.4);
+    border-left: 1px solid rgba(255,255,255,0.18);
+    padding-left: 7px;
+    font-weight: 600;
+  }
 </style>
 </head>
 <body>
-  <div id="pill">
-    <span id="words"></span>
-    <span id="hint">Tab</span>
-  </div>
+  <div id="wrap"></div>
   <script>
     // payload shapes:
-    //   { mode: 'next-word', words: ['foo', 'bar', ...] }   -- existing next-word suggestions
-    //   { mode: 'in-word', suffix: 'ment' }                  -- letters completing the current word
-    //   { mode: 'correction', wrong: 'teh', correct: 'the' } -- misspelling fix
-    window.renderGhost = function(payload) {
-      const wordsEl = document.getElementById('words');
+    //   { mode:'in-word',   suffix:'ment',            fontSize:13 }
+    //   { mode:'next-word', words:['foo','bar'],      fontSize:13 }
+    //   { mode:'correction', wrong:'teh', correct:'the', fontSize:13 }
+    window.renderGhost = function (payload) {
+      const wrap = document.getElementById('wrap');
 
-      // backward-compatible: a bare array means the old next-word call shape
-      if (Array.isArray(payload)) {
-        payload = { mode: 'next-word', words: payload };
-      }
+      if (Array.isArray(payload)) payload = { mode: 'next-word', words: payload };
+
+      const size = Math.max(10, Math.min(30, Number(payload.fontSize) || 13));
+      wrap.style.fontSize = size + 'px';
 
       if (payload.mode === 'in-word') {
-        wordsEl.innerHTML = '<span class="suffix">' + escapeHtml(payload.suffix) + '</span>';
+        // Only the letters that would complete the word, drawn immediately
+        // after the caret so the word reads as already finished.
+        wrap.innerHTML =
+          '<span class="inline">' + esc(payload.suffix) + '</span>' +
+          '<span class="tabhint">⇥</span>';
+
       } else if (payload.mode === 'correction') {
-        wordsEl.innerHTML =
-          '<span class="wrong">' + escapeHtml(payload.wrong) + '</span>' +
-          '<span class="arrow"> → </span>' +
-          '<span class="correct">' + escapeHtml(payload.correct) + '</span>';
+        wrap.innerHTML =
+          '<span id="chip" style="font-size:' + Math.max(11, size - 1) + 'px">' +
+            '<span class="wrong">' + esc(payload.wrong) + '</span>' +
+            '<span class="arrow">→</span>' +
+            '<span class="correct">' + esc(payload.correct) + '</span>' +
+            '<span class="chip-hint">⇥</span>' +
+          '</span>';
+
       } else {
-        wordsEl.innerHTML = payload.words.map((w) =>
-          '<span class="word">' + escapeHtml(w) + '</span>'
-        ).join(' ');
+        const words = payload.words || [];
+        // Only the top prediction is drawn inline -- a list of alternatives
+        // reads as a menu sitting in the sentence, which is exactly the
+        // floating-label effect inline mode exists to avoid.
+        wrap.innerHTML =
+          '<span class="inline next">' + esc(words[0] || '') + '</span>' +
+          '<span class="tabhint">⇥</span>';
       }
     };
 
-    function escapeHtml(s) {
-      const div = document.createElement('div');
-      div.textContent = s;
-      return div.innerHTML;
+    function esc(s) {
+      const d = document.createElement('div');
+      d.textContent = s == null ? '' : String(s);
+      return d.innerHTML;
     }
   </script>
 </body>

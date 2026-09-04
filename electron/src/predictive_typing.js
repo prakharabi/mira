@@ -3,6 +3,11 @@ const { execFile, spawn } = require('child_process');
 const http = require('http');
 const path = require('path');
 
+// Set MIRA_DEBUG_PREDICTIVE=1 to log every poll tick. Off by default: the
+// polling loop runs for as long as Mira does, so leaving it on grows the log
+// file continuously for no benefit.
+const DEBUG_PREDICTIVE = process.env.MIRA_DEBUG_PREDICTIVE === '1';
+
 // Universal: active in every app except this short blocklist. Tab is only ever
 // intercepted globally while a suggestion pill is actively showing (see
 // tab_tap.swift's `suggestionActive` flag) -- it behaves completely normally
@@ -69,6 +74,9 @@ let ghostWindow = null;
 let lastTextBeforeCursor = '';
 let lastCaretX = 100;
 let lastCaretY = 100;
+let lastCaretH = 0;           // line height at the caret; 0 = unknown
+let lastCaretExact = false;   // true only when anchored to a real caret rect
+let lastHasTextAfterCaret = false; // inline would overlap the app's own text
 let lastCaretBundleId = null; // which app lastCaretX/Y actually belongs to
 let lastShownSuggestion = '';
 let pollTimer = null;
@@ -88,14 +96,19 @@ let currentInWordFullWord = '';
 let currentCorrection = null;         // mode === 'correction' -- { wrong, correct }
 
 function readFocusedContext(callback) {
-  execFile(AX_HELPER_PATH, ['read'], { timeout: 2000 }, (err, stdout) => {
-    if (err) { callback(null); return; }
+  execFile(AX_HELPER_PATH, ['read'], { timeout: 2000 }, (err, stdout, stderr) => {
+    if (err) {
+      if (DEBUG_PREDICTIVE) console.log('[ax] read failed:', err.code || err.message, '| stderr:', (stderr || '').slice(0, 200));
+      callback(null);
+      return;
+    }
     try {
       // parsed.bundleId is preserved even on parsed.error (e.g. "no focused
       // element" -- browsing without a text field focused) so the blocklist
       // check can still run without a second lookup
       callback(JSON.parse(stdout.trim()));
     } catch (e) {
+      if (DEBUG_PREDICTIVE) console.log('[ax] unparseable stdout:', JSON.stringify((stdout || '').slice(0, 300)));
       callback(null);
     }
   });
@@ -204,8 +217,11 @@ function callDaemonForCompletion(contextTail, callback) {
 
 function createGhostWindow() {
   ghostWindow = new BrowserWindow({
-    width: 300,
-    height: 44,
+    // Deliberately wider/taller than any suggestion needs. The window is
+    // transparent and click-through, so extra area costs nothing visually,
+    // and a fixed size avoids resizing (and re-flashing) it on every keystroke.
+    width: 460,
+    height: GHOST_WINDOW_HEIGHT,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
@@ -227,15 +243,58 @@ function setTabTapActive(active) {
   }
 }
 
+const GHOST_WINDOW_HEIGHT = 46;
+const DEFAULT_LINE_HEIGHT = 18;
+
+// Converts the caret rect's line height into a font size for the suggestion.
+// A line's rect is taller than its glyphs by the font's leading; measured
+// against TextEdit at 12pt (rect 14) and 36pt (rect 43), the ratio holds at
+// ~0.84, which puts the suggestion on the same visual size as the text it
+// continues.
+function fontSizeForCaret(caretHeight) {
+  const h = caretHeight > 4 ? caretHeight : DEFAULT_LINE_HEIGHT;
+  return Math.max(10, Math.min(32, Math.round(h * 0.84)));
+}
+
+// AXBoundsForRange hands back the caret rect with its origin on the OPPOSITE
+// vertical edge from the top-left screen space everything else here uses, so
+// the reported y sits exactly one line height above the real line. Verified in
+// TextEdit across four consecutive lines and at two font sizes: the corrected
+// value lands exactly on the focused element's top for line one at both 12pt
+// (217+14) and 36pt (188+43).
+//
+// When caretH is 0 the app returned a placeholder rect rather than a real
+// measurement, and this correctly becomes a no-op -- those positions get
+// rejected by the bounds checks anyway.
+function caretTopFromRect(context) {
+  return context.caretY + (context.caretH > 0 ? context.caretH : 0);
+}
+
 function showGhost(payload, x, y) {
   if (!ghostWindow || ghostWindow.isDestroyed()) createGhostWindow();
 
-  // pill sits clearly BELOW the current line — generous offset so it never
-  // overlaps the text being typed, forgiving of imprecise caret coordinates
-  ghostWindow.setPosition(Math.round(x), Math.round(y) + 24);
+  const lineHeight = lastCaretH > 4 ? lastCaretH : DEFAULT_LINE_HEIGHT;
+  const fontSize = fontSizeForCaret(lastCaretH);
+
+  let posX = Math.round(x);
+  let posY;
+
+  if (payload.mode === 'correction' || !lastCaretExact || lastHasTextAfterCaret) {
+    // Corrections are a separate affordance, and an unverified caret position
+    // shouldn't have text drawn through the user's own line -- both sit below
+    // the caret, where being a few pixels off is harmless.
+    posY = Math.round(y) + Math.round(lineHeight) + 4;
+  } else {
+    // Inline: centre the suggestion on the caret's own line so it reads as a
+    // continuation of the sentence rather than as a label near it.
+    posX += 1;
+    posY = Math.round(y + lineHeight / 2 - GHOST_WINDOW_HEIGHT / 2);
+  }
+
+  ghostWindow.setPosition(posX, posY);
   ghostWindow.webContents.executeJavaScript(
-    `window.renderGhost && window.renderGhost(${JSON.stringify(payload)})`
-  );
+    `window.renderGhost && window.renderGhost(${JSON.stringify({ ...payload, fontSize })})`
+  ).catch(() => {});
   ghostWindow.showInactive();
   setTabTapActive(true);
 }
@@ -377,43 +436,79 @@ function analyzeContext(textBeforeCursor) {
 }
 
 function updateCaretPosition(context, bundleId) {
-  // Three-layer validation for the caret position, strongest check first:
+  // Anchoring, strongest source first. Only the first tier is precise enough
+  // to draw a suggestion inline on the user's own text line; the rest place it
+  // below, where being off by a few pixels doesn't corrupt the reading of the
+  // sentence.
   //
-  // 1. Cross-check against the frontmost window's own bounds (most reliable
-  //    when available) -- some apps report a "successful" bounds lookup with
-  //    a placeholder rect sitting exactly on the window's edge/corner instead
-  //    of a real error, which a bare "caretX >= 0" check can't catch.
-  // 2. If window bounds aren't available, at least check the coordinate falls
-  //    on SOME actual connected display -- always possible via Electron's
-  //    screen module, regardless of the target app's AX quality.
-  // 3. If neither check can be trusted, DON'T keep a stale position from a
-  //    different app/context (that's exactly what "floating in the air"
-  //    looks like) -- snap to the current mouse position instead, which is
-  //    always real, current, and usually close to where the user is
-  //    actually looking/typing.
+  // 1. The caret rect itself, cross-checked against the frontmost window's
+  //    bounds -- some apps report a "successful" bounds lookup with a
+  //    placeholder rect sitting exactly on the window's edge instead of a real
+  //    error, which a bare "caretX >= 0" check can't catch.
+  // 2. The caret rect checked only against the connected displays, for apps
+  //    that expose no usable window bounds.
+  // 3. The focused text element's own frame. Not the caret, but it IS the
+  //    field being typed into -- far better than the pointer.
+  // 4. The mouse position, and only when the app changed. This was the old
+  //    fallback for everything, and is what made suggestions appear wherever
+  //    the pointer happened to be rather than near the text.
   let positionTrusted = false;
+  lastCaretExact = false;
+  lastHasTextAfterCaret = context.hasTextAfterCaret === true;
 
-  if (typeof context.caretX === 'number' && context.window) {
+  const caretRectUsable =
+    typeof context.caretX === 'number' && context.caretX >= 0 &&
+    typeof context.caretY === 'number' && context.caretY >= 0;
+
+  const caretTop = caretRectUsable ? caretTopFromRect(context) : 0;
+
+  if (caretRectUsable && context.window) {
     const w = context.window;
     const margin = 2; // reject values sitting exactly on an edge (placeholder rects)
     const withinWindow =
       context.caretX > w.x + margin && context.caretX < w.x + w.width - margin &&
-      context.caretY > w.y + margin && context.caretY < w.y + w.height - margin;
+      caretTop > w.y + margin && caretTop < w.y + w.height - margin;
     if (withinWindow) {
       lastCaretX = context.caretX;
-      lastCaretY = context.caretY;
+      lastCaretY = caretTop;
+      lastCaretH = context.caretH || 0;
       lastCaretBundleId = bundleId;
       positionTrusted = true;
+      lastCaretExact = true;
     }
-  } else if (typeof context.caretX === 'number' && context.caretX >= 0) {
-    const point = { x: context.caretX, y: context.caretY };
+  } else if (caretRectUsable) {
+    const point = { x: context.caretX, y: caretTop };
     const onSomeDisplay = screen.getAllDisplays().some(d =>
       point.x >= d.bounds.x && point.x <= d.bounds.x + d.bounds.width &&
       point.y >= d.bounds.y && point.y <= d.bounds.y + d.bounds.height
     );
     if (onSomeDisplay) {
       lastCaretX = context.caretX;
-      lastCaretY = context.caretY;
+      lastCaretY = caretTop;
+      lastCaretH = context.caretH || 0;
+      lastCaretBundleId = bundleId;
+      positionTrusted = true;
+      lastCaretExact = true;
+    }
+  }
+
+  if (!positionTrusted && context.element && context.window) {
+    const e = context.element;
+    const w = context.window;
+    // An "element" the size of the whole window isn't a text field -- it's the
+    // window reported as focused because nothing narrower was. Anchoring to
+    // that would put suggestions in the window's top-left corner.
+    const isRealField =
+      e.width > 0 && e.height > 0 &&
+      (e.width < w.width - 8 || e.height < w.height - 8);
+
+    if (isRealField) {
+      lastCaretX = e.x + 6;
+      // Single-line fields: the text sits on the field's own line. Taller
+      // fields are multi-line, and without a caret rect there's no way to know
+      // which line is active, so the first line is the least-wrong guess.
+      lastCaretY = e.height <= 44 ? e.y + Math.max(0, (e.height - 18) / 2) : e.y + 4;
+      lastCaretH = e.height <= 44 ? Math.min(e.height, 22) : 0;
       lastCaretBundleId = bundleId;
       positionTrusted = true;
     }
@@ -423,6 +518,8 @@ function updateCaretPosition(context, bundleId) {
     const cursor = screen.getCursorScreenPoint();
     lastCaretX = cursor.x;
     lastCaretY = cursor.y;
+    lastCaretH = 0;
+    lastCaretBundleId = bundleId;
   }
 }
 
@@ -573,7 +670,11 @@ function pollAndSuggest() {
   // lookup) -- this used to be two separate subprocess spawns every tick,
   // including a full `osascript`/AppleScript round-trip just for the app check.
   readFocusedContext((context) => {
-    console.log('[poll] context:', context ? JSON.stringify(context).slice(0, 200) : null);
+    // This fires on every tick for as long as Mira runs, so it stays off unless
+    // explicitly asked for -- left on it writes to the log file continuously.
+    if (DEBUG_PREDICTIVE) {
+      console.log('[poll] context:', context ? JSON.stringify(context).slice(0, 200) : null);
+    }
 
     const bundleId = context && context.bundleId;
     if (!bundleId || BLOCKED_BUNDLE_IDS.includes(bundleId)) {
