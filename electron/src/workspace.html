@@ -3,26 +3,57 @@
 <head>
 <meta charset="UTF-8">
 <style>
+  /* Light appearance is the default here and dark is applied via the media
+     query below, so the window follows the system setting the way a native app
+     does instead of forcing one look. The window itself is a macOS vibrancy
+     material (see main.js), so surfaces are deliberately semi-transparent --
+     opaque panels would cover the material and undo the effect. */
   :root {
-    --bg: #08080c;
-    --bg-elevated: rgba(255,255,255,0.035);
-    --bg-elevated-2: rgba(255,255,255,0.065);
-    --bg-elevated-3: rgba(255,255,255,0.09);
-    --border: rgba(255,255,255,0.08);
-    --border-soft: rgba(255,255,255,0.05);
-    --text-primary: #f3f3f6;
-    --text-secondary: #9a9aa6;
-    --text-tertiary: #64646e;
+    /* lets the engine render scrollbars, focus rings and any native control in
+       the appearance the user is actually using */
+    color-scheme: light dark;
+    --content-bg: rgba(246,246,247,0.60);
+    --bg-elevated: rgba(255,255,255,0.72);
+    --bg-elevated-2: rgba(0,0,0,0.055);
+    --bg-elevated-3: rgba(0,0,0,0.085);
+    --border: rgba(0,0,0,0.11);
+    --border-soft: rgba(0,0,0,0.07);
+    --text-primary: rgba(0,0,0,0.87);
+    --text-secondary: rgba(0,0,0,0.52);
+    --text-tertiary: rgba(0,0,0,0.36);
+    --sidebar-selected: rgba(0,0,0,0.085);
+    --field-bg: rgba(255,255,255,0.85);
+    --output-bg: rgba(0,0,0,0.04);
     --accent-1: #8b5cf6;
     --accent-2: #06b6d4;
     --accent-gradient: linear-gradient(135deg, #8b5cf6 0%, #6366f1 45%, #06b6d4 100%);
-    --danger: #f04438;
-    --success: #22c55e;
-    --radius-lg: 18px;
-    --radius-md: 12px;
-    --radius-sm: 8px;
+    --danger: #e5484d;
+    --success: #30a46c;
+    /* macOS uses tighter corner radii than the previous look did */
+    --radius-lg: 12px;
+    --radius-md: 8px;
+    --radius-sm: 6px;
     --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
     --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --content-bg: rgba(30,30,32,0.55);
+      --bg-elevated: rgba(255,255,255,0.055);
+      --bg-elevated-2: rgba(255,255,255,0.09);
+      --bg-elevated-3: rgba(255,255,255,0.13);
+      --border: rgba(255,255,255,0.10);
+      --border-soft: rgba(255,255,255,0.06);
+      --text-primary: rgba(255,255,255,0.92);
+      --text-secondary: rgba(255,255,255,0.55);
+      --text-tertiary: rgba(255,255,255,0.36);
+      --sidebar-selected: rgba(255,255,255,0.11);
+      --field-bg: rgba(255,255,255,0.06);
+      --output-bg: rgba(0,0,0,0.22);
+      --danger: #ff6369;
+      --success: #3dd68c;
+    }
   }
 
   * { box-sizing: border-box; }
@@ -46,20 +77,20 @@
   ::-webkit-scrollbar { width: 8px; height: 8px; }
   ::-webkit-scrollbar-track { background: transparent; }
   ::-webkit-scrollbar-thumb {
-    background: rgba(255,255,255,0.12);
+    background: var(--bg-elevated-3);
     border-radius: 8px;
   }
-  ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--bg-elevated-3); }
 
+  /* No background, radius, border or shadow here: with a real macOS window the
+     system draws all of that. Painting our own produced the "not quite a Mac
+     app" look -- a rounded rectangle sitting inside another rounded rectangle. */
   #shell {
     position: relative;
     width: 100vw;
     height: 100vh;
-    background: var(--bg);
-    border-radius: 16px;
     overflow: hidden;
     display: flex;
-    border: 1px solid var(--border-soft);
   }
 
   /* ---------- ambient background ---------- */
@@ -70,56 +101,42 @@
     pointer-events: none;
     overflow: hidden;
   }
+  /* Kept, but at a fraction of the previous strength. Animated colour washes
+     read as a web app; at this level it's just a faint tint over the material. */
   #ambient .blob {
     position: absolute;
     width: 60vw;
     height: 60vw;
     border-radius: 50%;
-    filter: blur(90px);
-    opacity: 0.16;
+    filter: blur(110px);
+    opacity: 0.05;
     will-change: transform;
   }
   #ambient .blob.a { background: #8b5cf6; top: -20%; left: -10%; }
-  #ambient .blob.b { background: #06b6d4; bottom: -25%; right: -15%; opacity: 0.12; }
+  #ambient .blob.b { background: #06b6d4; bottom: -25%; right: -15%; opacity: 0.04; }
 
-  /* ---------- titlebar (drag region spans full top) ---------- */
+  /* Drag region only. The window's buttons are the system's real traffic
+     lights, positioned by main.js -- this just makes the empty strip beside
+     them behave like a title bar. */
   #titlebar {
     position: absolute;
     top: 0; left: 0; right: 0;
-    height: 40px;
+    height: 52px;
     -webkit-app-region: drag;
     z-index: 20;
-    display: flex;
-    align-items: center;
-    justify-content: flex-end;
-    padding: 0 14px;
-    gap: 6px;
+    pointer-events: none;
   }
-  .win-btn {
-    -webkit-app-region: no-drag;
-    width: 26px;
-    height: 26px;
-    border-radius: 8px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-tertiary);
-    cursor: pointer;
-    transition: background 150ms var(--ease-standard), color 150ms var(--ease-standard);
-  }
-  .win-btn:hover { background: var(--bg-elevated-2); color: var(--text-primary); }
-  .win-btn:active { transform: scale(0.92); }
-  .win-btn.close:hover { background: rgba(240, 68, 56, 0.15); color: #f04438; }
 
   /* ---------- sidebar ---------- */
+  /* Left as bare vibrancy -- this is the pane the window's material is for, and
+     any background here would sit on top of it. The top padding clears the
+     system traffic lights. */
   #sidebar {
     position: relative;
     z-index: 10;
-    width: 216px;
+    width: 200px;
     flex-shrink: 0;
-    padding: 52px 12px 16px;
-    background: rgba(255,255,255,0.015);
-    border-right: 1px solid var(--border-soft);
+    padding: 52px 10px 12px;
     display: flex;
     flex-direction: column;
     -webkit-app-region: drag;
@@ -128,20 +145,20 @@
   #brand {
     display: flex;
     align-items: center;
-    gap: 9px;
-    padding: 0 10px 22px;
+    gap: 8px;
+    padding: 0 8px 14px;
   }
   #brand .mark {
-    width: 26px;
-    height: 26px;
+    width: 20px;
+    height: 20px;
     flex-shrink: 0;
-    filter: drop-shadow(0 0 10px rgba(139, 92, 246, 0.45));
   }
   #brand .mark svg { width: 100%; height: 100%; display: block; }
   #brand .name {
-    font-size: 15px;
+    font-size: 13px;
     font-weight: 600;
     letter-spacing: -0.01em;
+    color: var(--text-secondary);
   }
 
   #nav {
@@ -152,14 +169,15 @@
     -webkit-app-region: no-drag;
   }
 
+  /* A macOS source list selects with a plain filled rounded rect -- no border,
+     no elevation. Sized and spaced like a system sidebar row. */
   #nav-indicator {
     position: absolute;
     left: 0;
     width: 100%;
-    height: 38px;
+    height: 30px;
     border-radius: var(--radius-sm);
-    background: var(--bg-elevated-2);
-    border: 1px solid var(--border);
+    background: var(--sidebar-selected);
     z-index: 0;
     pointer-events: none;
   }
@@ -169,22 +187,21 @@
     z-index: 1;
     display: flex;
     align-items: center;
-    gap: 10px;
-    height: 38px;
-    padding: 0 10px;
+    gap: 9px;
+    height: 30px;
+    padding: 0 9px;
     border-radius: var(--radius-sm);
     color: var(--text-secondary);
     font-size: 13px;
     font-weight: 500;
-    cursor: pointer;
+    cursor: default;
     user-select: none;
-    transition: color 150ms var(--ease-standard);
+    transition: color 120ms var(--ease-standard);
   }
-  .nav-item svg { width: 17px; height: 17px; flex-shrink: 0; opacity: 0.85; }
+  .nav-item svg { width: 16px; height: 16px; flex-shrink: 0; opacity: 0.75; }
   .nav-item:hover { color: var(--text-primary); }
-  .nav-item.active { color: var(--text-primary); }
-  .nav-item.active svg { opacity: 1; }
-  .nav-item:active { transform: scale(0.98); }
+  .nav-item.active { color: var(--text-primary); font-weight: 600; }
+  .nav-item.active svg { opacity: 1; color: var(--accent-1); }
 
   #sidebar-footer {
     margin-top: auto;
@@ -210,6 +227,8 @@
   .status-dot.offline { background: var(--danger); box-shadow: 0 0 8px rgba(240,68,56,0.5); }
 
   /* ---------- main area ---------- */
+  /* The content pane is more opaque than the sidebar and separated by a hairline
+     -- the standard macOS split where only the sidebar carries the material. */
   #main {
     position: relative;
     z-index: 5;
@@ -217,6 +236,8 @@
     display: flex;
     flex-direction: column;
     min-width: 0;
+    background: var(--content-bg);
+    border-left: 1px solid var(--border-soft);
   }
 
   .view {
@@ -269,7 +290,7 @@
     gap: 8px;
     transition: border-color 200ms var(--ease-standard), transform 200ms var(--ease-standard);
   }
-  .stat-card:hover { border-color: rgba(255,255,255,0.16); transform: translateY(-1px); }
+  .stat-card:hover { border-color: var(--border); transform: translateY(-1px); }
   .stat-card .stat-top { display: flex; align-items: center; justify-content: space-between; }
   .stat-card .stat-label { font-size: 11.5px; color: var(--text-tertiary); font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; }
   .stat-card .stat-value { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
@@ -294,7 +315,7 @@
     cursor: pointer;
     transition: transform 100ms var(--ease-standard), border-color 200ms var(--ease-standard), background 200ms var(--ease-standard);
   }
-  .action-btn:hover { border-color: rgba(255,255,255,0.18); background: var(--bg-elevated-2); }
+  .action-btn:hover { border-color: var(--border); background: var(--bg-elevated-2); }
   .action-btn:active { transform: scale(0.98); }
   .action-btn .icon-wrap {
     width: 32px; height: 32px;
@@ -310,7 +331,7 @@
   /* ---------- generic inputs / buttons ---------- */
   .text-field {
     flex: 1;
-    background: rgba(255,255,255,0.04);
+    background: var(--field-bg);
     border: 1px solid var(--border);
     border-radius: 999px;
     padding: 10px 16px;
@@ -319,7 +340,7 @@
     outline: none;
     transition: border-color 150ms var(--ease-standard), background 150ms var(--ease-standard);
   }
-  .text-field:focus { border-color: rgba(139,92,246,0.5); background: rgba(255,255,255,0.06); }
+  .text-field:focus { border-color: rgba(139,92,246,0.5); background: var(--bg-elevated-2); }
   .text-field::placeholder { color: var(--text-tertiary); }
 
   .btn-primary {
@@ -340,7 +361,7 @@
   .icon-btn {
     width: 38px; height: 38px;
     border-radius: 999px;
-    background: rgba(255,255,255,0.05);
+    background: var(--bg-elevated-2);
     border: 1px solid var(--border);
     color: var(--text-primary);
     display: flex; align-items: center; justify-content: center;
@@ -349,7 +370,7 @@
     transition: transform 100ms var(--ease-standard), background 150ms var(--ease-standard), border-color 150ms var(--ease-standard);
   }
   .icon-btn svg { width: 16px; height: 16px; }
-  .icon-btn:hover { background: rgba(255,255,255,0.09); }
+  .icon-btn:hover { background: var(--bg-elevated-3); }
   .icon-btn:active { transform: scale(0.94); }
   .icon-btn.recording {
     background: rgba(240, 68, 56, 0.18);
@@ -366,7 +387,7 @@
   .segmented {
     position: relative;
     display: inline-flex;
-    background: rgba(255,255,255,0.04);
+    background: var(--field-bg);
     border: 1px solid var(--border);
     border-radius: 999px;
     padding: 3px;
@@ -468,7 +489,7 @@
   .full-btn.danger { background: linear-gradient(135deg, #f04438, #dc2626); }
   .full-btn:disabled { opacity: 0.5; cursor: default; }
   .ghost-btn {
-    background: rgba(255,255,255,0.05);
+    background: var(--bg-elevated-2);
     border: 1px solid var(--border);
     color: var(--text-primary);
     border-radius: var(--radius-sm);
@@ -482,7 +503,7 @@
   .ghost-btn:active { transform: scale(0.98); }
 
   .output-box {
-    background: rgba(0,0,0,0.25);
+    background: var(--output-bg);
     border: 1px solid var(--border-soft);
     border-radius: var(--radius-sm);
     padding: 12px;
@@ -491,7 +512,7 @@
     white-space: pre-wrap;
     max-height: 220px;
     overflow-y: auto;
-    color: #d4d4dc;
+    color: var(--text-primary);
   }
   .output-box.empty { color: var(--text-tertiary); font-style: italic; }
   .meta-line { font-size: 11px; color: var(--text-tertiary); }
@@ -500,7 +521,7 @@
   .subtabs {
     display: flex;
     gap: 4px;
-    background: rgba(255,255,255,0.04);
+    background: var(--field-bg);
     border: 1px solid var(--border);
     border-radius: 999px;
     padding: 4px;
@@ -529,7 +550,7 @@
     transition: border-color 150ms var(--ease-standard), transform 150ms var(--ease-standard);
     animation: view-in 260ms var(--ease-out);
   }
-  .list-row:hover { border-color: rgba(255,255,255,0.15); }
+  .list-row:hover { border-color: var(--border); }
   .list-row .row-top {
     display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
   }
@@ -560,7 +581,7 @@
     letter-spacing: 0.05em;
     padding: 3px 8px;
     border-radius: 999px;
-    background: rgba(255,255,255,0.08);
+    background: var(--bg-elevated-2);
     color: var(--text-secondary);
     vertical-align: middle;
   }
@@ -570,7 +591,7 @@
   .badge.unread { background: rgba(6,182,212,0.16); color: #67e8f9; }
 
   .mini-btn-sm {
-    background: rgba(255,255,255,0.06);
+    background: var(--bg-elevated-2);
     border: 1px solid var(--border);
     color: var(--text-primary);
     border-radius: var(--radius-sm);
@@ -597,7 +618,7 @@
 
   .textarea-field {
     width: 100%;
-    background: rgba(255,255,255,0.04);
+    background: var(--field-bg);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 12px 13px;
@@ -632,7 +653,7 @@
 
   .spinner-inline {
     display: inline-block; width: 12px; height: 12px;
-    border: 2px solid rgba(255,255,255,0.2);
+    border: 2px solid var(--bg-elevated-3);
     border-top-color: var(--text-primary);
     border-radius: 50%;
     animation: spin 700ms linear infinite;
@@ -658,7 +679,7 @@
   .toggle-switch input { opacity: 0; width: 0; height: 0; }
   .toggle-slider {
     position: absolute; cursor: pointer; inset: 0;
-    background: rgba(255,255,255,0.12);
+    background: var(--bg-elevated-3);
     border-radius: 24px;
     transition: background 200ms var(--ease-standard);
   }
@@ -707,7 +728,7 @@
 
   select.text-field, .dropdown-select {
     flex: 1;
-    background: rgba(255,255,255,0.04);
+    background: var(--field-bg);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 9px 12px;
@@ -727,7 +748,7 @@
 
   .rect-field {
     flex: 1;
-    background: rgba(255,255,255,0.04);
+    background: var(--field-bg);
     border: 1px solid var(--border);
     border-radius: var(--radius-sm);
     padding: 9px 12px;
@@ -745,7 +766,7 @@
     display: flex; align-items: center; justify-content: space-between;
     padding: 8px 10px;
     border-radius: var(--radius-sm);
-    background: rgba(255,255,255,0.025);
+    background: var(--bg-elevated);
     border: 1px solid var(--border-soft);
   }
   .model-row.selected { border-color: rgba(139,92,246,0.45); background: rgba(139,92,246,0.08); }
@@ -753,7 +774,7 @@
   .model-row .model-meta { font-size: 10.5px; color: var(--text-tertiary); margin-top: 1px; }
   .model-row .model-actions { display: flex; gap: 6px; align-items: center; }
   .mini-btn {
-    background: rgba(255,255,255,0.06);
+    background: var(--bg-elevated-2);
     border: 1px solid var(--border);
     color: var(--text-secondary);
     border-radius: 999px;
@@ -763,7 +784,7 @@
     cursor: pointer;
     transition: background 150ms var(--ease-standard), color 150ms var(--ease-standard), transform 100ms var(--ease-standard);
   }
-  .mini-btn:hover { background: rgba(255,255,255,0.12); color: var(--text-primary); }
+  .mini-btn:hover { background: var(--bg-elevated-3); color: var(--text-primary); }
   .mini-btn:active { transform: scale(0.95); }
   .mini-btn.danger:hover { background: rgba(240,68,56,0.18); color: #ff6b5e; border-color: rgba(240,68,56,0.35); }
   .mini-btn.accent { background: var(--accent-gradient); color: white; border: none; }
@@ -771,7 +792,7 @@
   .progress-track {
     height: 5px;
     border-radius: 999px;
-    background: rgba(255,255,255,0.08);
+    background: var(--bg-elevated-2);
     overflow: hidden;
     margin-top: 4px;
   }
@@ -801,12 +822,6 @@
     <div id="ambient"><div class="blob a"></div><div class="blob b"></div></div>
 
     <div id="titlebar">
-      <div class="win-btn" id="minimize-btn" title="Minimize">
-        <svg viewBox="0 0 16 16" fill="none"><path d="M4 8h8" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-      </div>
-      <div class="win-btn close" id="close-btn" title="Close">
-        <svg viewBox="0 0 16 16" fill="none"><path d="M4.5 4.5l7 7M11.5 4.5l-7 7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
-      </div>
     </div>
 
     <div id="sidebar">
@@ -986,6 +1001,21 @@
         <div class="view-header">
           <h1 class="view-title">Settings</h1>
           <p class="view-subtitle">Control what Mira listens to, which models it uses, and how it responds.</p>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Appearance</div>
+          <div class="setting-row">
+            <div>
+              <div class="label">Theme</div>
+              <div class="sublabel">Follow macOS, or pin light or dark</div>
+            </div>
+            <select class="dropdown-select" id="appearance-select" style="width:150px; flex:none;">
+              <option value="system">System</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </div>
         </div>
 
         <div class="settings-section">
@@ -1378,10 +1408,6 @@
 
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-  // ---------- window controls ----------
-  document.getElementById('close-btn').onclick = () => ipcRenderer.send('close-chat');
-  document.getElementById('minimize-btn').onclick = () => ipcRenderer.send('minimize-window');
-
   // ---------- nav ----------
   const navItems = Array.from(document.querySelectorAll('.nav-item'));
   const navIndicator = document.getElementById('nav-indicator');
@@ -1714,6 +1740,7 @@
       document.getElementById('google-client-secret').placeholder =
         data.google_client_secret_set ? 'Saved — enter to replace' : 'Enter to set';
       document.getElementById('n8n-base-url').value = data.n8n_base_url || '';
+      document.getElementById('appearance-select').value = data.appearance || 'system';
 
       await loadLocalModels(data.local_chat_model);
       await loadVoices(data.tts_voice);
@@ -2390,6 +2417,29 @@
 
   document.getElementById('save-n8n-btn').onclick = () =>
     updateSetting('n8n_base_url', document.getElementById('n8n-base-url').value.trim());
+
+  // ---------- appearance ----------
+  // The CSS reacts to prefers-color-scheme; the main process is what actually
+  // decides what that resolves to, so the choice has to cross the IPC boundary
+  // as well as being persisted.
+  async function applyAppearance(mode) {
+    try { await ipcRenderer.invoke('set-appearance', mode); } catch (e) {}
+  }
+
+  document.getElementById('appearance-select').addEventListener('change', (e) => {
+    applyAppearance(e.target.value);
+    updateSetting('appearance', e.target.value);
+  });
+
+  // restore the saved choice on launch, independently of the Settings view
+  // being opened -- otherwise the window would start on the system appearance
+  // and only switch once the user visited Settings
+  (async function restoreAppearance() {
+    try {
+      const data = await (await fetch(`${DAEMON_URL}/settings`)).json();
+      if (data.appearance && data.appearance !== 'system') applyAppearance(data.appearance);
+    } catch (e) {}
+  })();
 
   let googlePollTimer = null;
 

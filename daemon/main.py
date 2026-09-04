@@ -81,7 +81,9 @@ DEFAULT_SETTINGS = {
     "reminders_list": "",
     # optional convenience: base URL of the user's n8n instance, used only to
     # prefill webhook URLs in the Automations UI.
-    "n8n_base_url": ""
+    "n8n_base_url": "",
+    # window appearance: "system" follows macOS, "light"/"dark" pin it.
+    "appearance": "system"
 }
 
 def load_settings():
@@ -127,6 +129,7 @@ def update_settings(
     google_client_secret: str = Body(None),
     reminders_list: str = Body(None),
     n8n_base_url: str = Body(None),
+    appearance: str = Body(None),
 ):
     settings = load_settings()
 
@@ -169,6 +172,8 @@ def update_settings(
         settings["reminders_list"] = reminders_list
     if n8n_base_url is not None:
         settings["n8n_base_url"] = n8n_base_url
+    if appearance is not None:
+        settings["appearance"] = appearance
 
     save_settings(settings)
     result = dict(settings)
