@@ -7,6 +7,7 @@ const fs = require('fs');
 const os = require('os');
 const { startPredictiveTyping, stopPredictiveTyping } = require('./predictive_typing');
 const { startMeetingRecording, stopMeetingRecording } = require('./meeting_recorder');
+const reminders = require('./reminders');
 
 const OCR_HELPER_PATH = path.join(__dirname, '..', 'ocr_helper');
 
@@ -22,15 +23,9 @@ let lastClipboard = clipboard.readText(); // seed with current clipboard so it d
 let petWasVisibleBeforePill = null;
 
 function createReminder(title) {
-  const safeTitle = title.replace(/"/g, '\\"').replace(/\n/g, ' ').trim();
-  const script = `tell application "Reminders" to make new reminder in list "Reminders" with properties {name:"${safeTitle}"}`;
-
-  exec(`osascript -e '${script}'`, (error, stdout, stderr) => {
-    if (error) {
-      console.log('Reminder creation failed:', stderr);
-    } else {
-      console.log('Reminder created:', safeTitle);
-    }
+  reminders.addReminder({ title }).then((res) => {
+    if (res.success) console.log('Reminder created:', title);
+    else console.log('Reminder creation failed:', res.error);
   });
 }
 
@@ -207,6 +202,23 @@ ipcMain.on('meeting-stop', (event) => {
       chatWindow.webContents.send('meeting-stop-result', { result, err });
     }
   });
+});
+
+// ---------- Reminders IPC (Dump Box action items) ----------
+// Reminders access lives here rather than in the daemon -- see reminders.js for
+// why. The renderer awaits these directly via ipcRenderer.invoke.
+ipcMain.handle('reminders-lists', () => reminders.listLists());
+
+ipcMain.handle('reminders-add', (event, item) => reminders.addReminder(item));
+
+// Opens a URL in the user's real browser. Used for the Google consent screen,
+// which must run in a normal browser session rather than an Electron window.
+ipcMain.handle('open-external', (event, url) => {
+  if (typeof url !== 'string' || !/^https:\/\//i.test(url)) {
+    return { success: false, error: 'Only https URLs can be opened.' };
+  }
+  require('electron').shell.openExternal(url);
+  return { success: true };
 });
 
 ipcMain.on('pill-action', (event, { action, text }) => {
