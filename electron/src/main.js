@@ -1,4 +1,4 @@
-const { app, BrowserWindow, screen, ipcMain, globalShortcut } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, globalShortcut, nativeTheme } = require('electron');
 const { clipboard } = require('electron');
 const http = require('http');
 const { exec, spawn } = require('child_process');
@@ -17,6 +17,7 @@ let win = null;
 let pillWindow = null;
 let chatWindow = null;
 let lastClipboard = clipboard.readText(); // seed with current clipboard so it doesn't trigger on startup
+let isQuitting = false; // lets the workspace window's close handler tell "put away" from "really quit"
 
 // tracks whether the pet was already visible BEFORE the current pill triggered it
 // null = no pill-triggered show in progress; true/false = pet's visibility state before pill appeared
@@ -122,11 +123,21 @@ function toggleChatWindow() {
     height: 720,
     minWidth: 860,
     minHeight: 560,
-    frame: false,
-    transparent: true,
+    // Real macOS window: the system draws the traffic lights, the rounded
+    // corners and the shadow. 'hiddenInset' keeps the title bar out of the way
+    // so the sidebar can run full height, which is what native apps built this
+    // way (Mail, Notes, Finder) do.
+    titleBarStyle: 'hiddenInset',
+    trafficLightPosition: { x: 19, y: 20 },
+    // The sidebar material -- a genuine macOS blur that samples the desktop
+    // behind it, rather than a CSS gradient imitating one. `transparent` must
+    // stay false: it and vibrancy are mutually exclusive, and setting it would
+    // silently give a flat window with no material at all.
+    vibrancy: 'sidebar',
+    visualEffectState: 'followWindow',
+    backgroundColor: '#00000000',
     alwaysOnTop: false,
     resizable: true,
-    hasShadow: true,
     skipTaskbar: false,
     show: false,
     webPreferences: {
@@ -140,6 +151,16 @@ function toggleChatWindow() {
   chatWindow.once('ready-to-show', () => {
     chatWindow.show();
     chatWindow.focus();
+  });
+
+  // The red traffic light hides the window instead of destroying it. Mira is a
+  // background app (no dock icon), so closing is really "put it away" -- and
+  // keeping the window alive preserves scroll position and in-progress input
+  // for the next Control+Space.
+  chatWindow.on('close', (e) => {
+    if (isQuitting) return;
+    e.preventDefault();
+    chatWindow.hide();
   });
 
   chatWindow.on('closed', () => {
@@ -210,6 +231,14 @@ ipcMain.on('meeting-stop', (event) => {
 ipcMain.handle('reminders-lists', () => reminders.listLists());
 
 ipcMain.handle('reminders-add', (event, item) => reminders.addReminder(item));
+
+// Appearance override. macOS apps are expected to follow the system setting by
+// default while still letting the user pin light or dark, so 'system' hands
+// control back to nativeTheme rather than freezing whatever is current.
+ipcMain.handle('set-appearance', (event, mode) => {
+  nativeTheme.themeSource = ['light', 'dark'].includes(mode) ? mode : 'system';
+  return { applied: nativeTheme.themeSource };
+});
 
 // Opens a URL in the user's real browser. Used for the Google consent screen,
 // which must run in a normal browser session rather than an Electron window.
@@ -426,6 +455,10 @@ app.whenReady().then(() => {
       showPill(current);
     }
   }, 500);
+});
+
+app.on('before-quit', () => {
+  isQuitting = true;
 });
 
 app.on('will-quit', () => {
