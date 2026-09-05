@@ -83,7 +83,13 @@ DEFAULT_SETTINGS = {
     # prefill webhook URLs in the Automations UI.
     "n8n_base_url": "",
     # window appearance: "system" follows macOS, "light"/"dark" pin it.
-    "appearance": "system"
+    "appearance": "system",
+    # How long Ollama keeps a local model resident after a request. Ollama's own
+    # default is 5m, which meant predicting a single word held ~2GB of memory
+    # for five idle minutes. Short enough to free memory promptly, long enough
+    # that a model isn't reloaded between words while actively typing.
+    # Accepts Ollama duration strings; "0" unloads immediately.
+    "local_model_keep_alive": "60s"
 }
 
 def load_settings():
@@ -130,6 +136,7 @@ def update_settings(
     reminders_list: str = Body(None),
     n8n_base_url: str = Body(None),
     appearance: str = Body(None),
+    local_model_keep_alive: str = Body(None),
 ):
     settings = load_settings()
 
@@ -174,6 +181,8 @@ def update_settings(
         settings["n8n_base_url"] = n8n_base_url
     if appearance is not None:
         settings["appearance"] = appearance
+    if local_model_keep_alive is not None:
+        settings["local_model_keep_alive"] = local_model_keep_alive
 
     save_settings(settings)
     result = dict(settings)
@@ -270,11 +279,17 @@ def ask_mira(prompt: str):
         json={
             "model": "qwen3:1.7b",
             "prompt": prompt,
-            "stream": False
+            "stream": False,
+            "keep_alive": keep_alive_value()
         }
     )
     result = response.json()
     return {"response": result["response"]}
+
+
+def keep_alive_value():
+    """How long Ollama should hold the model after this request."""
+    return load_settings().get("local_model_keep_alive") or DEFAULT_SETTINGS["local_model_keep_alive"]
 
 
 def _normalize_word(w: str) -> str:
@@ -321,7 +336,12 @@ def complete_mira(prompt: str, context: str = ""):
             "prompt": prompt,
             "stream": False,
             "think": False,
+            "keep_alive": keep_alive_value(),
             "options": {
+                # Without this Ollama allocates the model's full declared window
+                # -- 131072 tokens -- to predict eight. The prompt here is a
+                # handful of words, so the KV cache only needs room for that.
+                "num_ctx": 512,
                 # client only ever shows the first 4 words -- generating more than
                 # ~8 tokens is pure wasted latency. Lower temperature + higher
                 # repeat_penalty were tuned together with the shorter prompt to
@@ -474,7 +494,8 @@ def call_local_model(history: list) -> str:
             "model": settings.get("local_chat_model") or DEFAULT_SETTINGS["local_chat_model"],
             "messages": history,
             "stream": False,
-            "think": False
+            "think": False,
+            "keep_alive": keep_alive_value()
         }
     )
     result = response.json()
@@ -1077,6 +1098,53 @@ def list_local_models():
         return {"models": data.get("models", [])}
     except requests.RequestException as e:
         return {"error": f"could not reach Ollama: {e}"}
+
+
+@app.get("/models/local/loaded")
+def loaded_local_models():
+    """Which models Ollama currently holds in memory, and until when."""
+    try:
+        response = requests.get(f"{OLLAMA_URL}/api/ps", timeout=5)
+        data = response.json()
+    except (requests.RequestException, ValueError) as e:
+        return {"error": str(e), "models": []}
+
+    models = []
+    for m in data.get("models", []) or []:
+        models.append({
+            "name": m.get("name"),
+            "size_bytes": m.get("size"),
+            "expires_at": m.get("expires_at", ""),
+        })
+    return {"models": models, "keep_alive": keep_alive_value()}
+
+
+@app.post("/models/local/unload")
+def unload_local_models():
+    """Drop every loaded model from memory now.
+
+    Ollama has no explicit unload call -- a request with keep_alive 0 is how you
+    ask it to release a model, so this issues a trivial one per loaded model.
+    """
+    try:
+        loaded = requests.get(f"{OLLAMA_URL}/api/ps", timeout=5).json().get("models", []) or []
+    except (requests.RequestException, ValueError) as e:
+        return {"error": str(e)}
+
+    unloaded = []
+    for m in loaded:
+        name = m.get("name")
+        if not name:
+            continue
+        try:
+            requests.post(f"{OLLAMA_URL}/api/generate",
+                          json={"model": name, "prompt": "", "keep_alive": 0},
+                          timeout=20)
+            unloaded.append(name)
+        except requests.RequestException:
+            pass
+
+    return {"unloaded": unloaded}
 
 
 @app.post("/models/local/pull")

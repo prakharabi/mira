@@ -68,6 +68,15 @@ let idleTickCount = 0;
 // half-typed fragment). Any further typing during the wait resets the timer.
 const NEXT_WORD_DEBOUNCE_MS = 1200;
 const CONTEXT_WORD_COUNT = 8; // "at least 4-8 words" of context for next-word prediction
+// Next-word prediction is the ONLY thing here that runs a language model, and
+// running it after the first word or two is both the least useful (almost no
+// context to go on) and the most expensive -- each call wakes a multi-gigabyte
+// model that then sits resident. Waiting until there's a real sentence fragment
+// to work with cuts the number of model loads sharply and improves the
+// suggestions that do appear. In-word completion and spellcheck are unaffected:
+// they're local lookups with no model behind them, so they stay instant from
+// the first keystroke.
+const MIN_WORDS_BEFORE_PREDICT = 4;
 const MIN_PARTIAL_WORD_LEN = 3; // shorter than this, in-word completion is too noisy to be useful
 
 let ghostWindow = null;
@@ -619,15 +628,16 @@ function handleWordBoundary(lastCompletedWord, tokens, rawTextBeforeCursor, trai
 
 function requestNextWordSuggestion(tokens, rawTextBeforeCursor) {
   if (pendingRequest || acceptingInProgress) return;
+  if (tokens.length < MIN_WORDS_BEFORE_PREDICT) return;
 
   const contextTail = tokens.slice(-CONTEXT_WORD_COUNT).join(' ');
   if (!contextTail) return;
 
   pendingRequest = true;
-  console.log('[predict] analyzing sentence:', contextTail);
+  if (DEBUG_PREDICTIVE) console.log('[predict] analyzing sentence:', contextTail);
   callDaemonForCompletion(contextTail, (completion) => {
     pendingRequest = false;
-    console.log('[predict] daemon response:', completion);
+    if (DEBUG_PREDICTIVE) console.log('[predict] daemon response:', completion);
     if (!completion) return;
 
     // clean up: take only the first line/fragment, strip leading ellipsis/punctuation

@@ -1082,6 +1082,28 @@
           <div class="setting-block">
             <div class="setting-block-row">
               <div>
+                <div class="label">Memory use</div>
+                <div class="sublabel">How long a local model stays in memory after Mira uses it</div>
+              </div>
+              <select class="dropdown-select" id="keep-alive-select" style="width:170px; flex:none;">
+                <option value="0">Unload immediately</option>
+                <option value="30s">After 30 seconds</option>
+                <option value="60s">After 1 minute</option>
+                <option value="5m">After 5 minutes</option>
+                <option value="-1">Keep loaded</option>
+              </select>
+            </div>
+            <div class="setting-block-body">
+              <div class="field-row" style="justify-content:space-between;">
+                <div class="inline-note" id="loaded-models-note">Checking…</div>
+                <button class="mini-btn-sm" id="unload-models-btn">Unload now</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="setting-block">
+            <div class="setting-block-row">
+              <div>
                 <div class="label">Cloud model</div>
                 <div class="sublabel">Used when a query needs the internet or you pick Cloud mode</div>
               </div>
@@ -1760,6 +1782,8 @@
         data.google_client_secret_set ? 'Saved — enter to replace' : 'Enter to set';
       document.getElementById('n8n-base-url').value = data.n8n_base_url || '';
       document.getElementById('appearance-select').value = data.appearance || 'system';
+      document.getElementById('keep-alive-select').value = data.local_model_keep_alive || '60s';
+      refreshLoadedModels();
 
       await loadLocalModels(data.local_chat_model);
       await loadVoices(data.tts_voice);
@@ -2462,6 +2486,48 @@
     } catch (e) {
       msg.className = 'inline-note error';
       msg.textContent = 'Could not save.';
+    }
+  };
+
+  // ---------- local model memory ----------
+  function formatBytes(n) {
+    if (!n) return '';
+    return (n / 1073741824).toFixed(1) + ' GB';
+  }
+
+  async function refreshLoadedModels() {
+    const note = document.getElementById('loaded-models-note');
+    if (!note) return;
+    try {
+      const data = await (await fetch(`${DAEMON_URL}/models/local/loaded`)).json();
+      const models = data.models || [];
+      if (!models.length) {
+        note.className = 'inline-note';
+        note.textContent = 'No model in memory.';
+        return;
+      }
+      note.className = 'inline-note';
+      note.textContent = 'In memory: ' + models
+        .map(m => `${m.name} (${formatBytes(m.size_bytes)})`).join(', ');
+    } catch (e) {
+      note.className = 'inline-note';
+      note.textContent = 'Could not reach Ollama.';
+    }
+  }
+
+  document.getElementById('keep-alive-select').addEventListener('change', (e) =>
+    updateSetting('local_model_keep_alive', e.target.value));
+
+  document.getElementById('unload-models-btn').onclick = async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.textContent = 'Unloading…';
+    try {
+      await fetch(`${DAEMON_URL}/models/local/unload`, { method: 'POST' });
+      await refreshLoadedModels();
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Unload now';
     }
   };
 
