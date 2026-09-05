@@ -608,6 +608,13 @@
   .mini-btn-sm.accent:hover { filter: brightness(1.12); }
   .mini-btn-sm.danger { color: #fca5a5; }
   .mini-btn-sm.danger:hover { background: rgba(240,68,56,0.14); }
+  .mini-btn-sm.recording {
+    background: rgba(240,68,56,0.16);
+    border-color: rgba(240,68,56,0.4);
+    color: #ff6369;
+    animation: mic-pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes mic-pulse { 50% { opacity: 0.62; } }
 
   .inline-note {
     font-size: 11.5px; line-height: 1.6; color: var(--text-tertiary);
@@ -1259,6 +1266,13 @@
           <div class="field-row" style="margin-top:11px; justify-content:space-between;">
             <div class="inline-note" id="dump-hint">Tip: ⌘↵ to capture and process in one go.</div>
             <div style="display:flex; gap:8px;">
+              <button class="mini-btn-sm" id="dump-mic-btn" title="Dictate">
+                <svg viewBox="0 0 20 20" fill="none" style="width:13px;height:13px;vertical-align:-2px;">
+                  <rect x="7.5" y="2.5" width="5" height="9" rx="2.5" stroke="currentColor" stroke-width="1.5"/>
+                  <path d="M5 9.5a5 5 0 0 0 10 0M10 14.5V17" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+                </svg>
+                <span id="dump-mic-label">Dictate</span>
+              </button>
               <button class="mini-btn-sm" id="dump-save-btn">Capture</button>
               <button class="mini-btn-sm accent" id="dump-process-btn">Capture &amp; Process</button>
             </div>
@@ -1436,6 +1450,11 @@
   }
 
   navItems.forEach(item => item.addEventListener('click', () => switchView(item.dataset.view)));
+
+  // menu bar items can open the window straight to a given view
+  ipcRenderer.on('navigate-to-view', (event, view) => {
+    if (navItems.some(i => i.dataset.view === view)) switchView(view);
+  });
   window.addEventListener('resize', () => {
     const active = navItems.find(i => i.classList.contains('active'));
     if (active) positionIndicator(active, false);
@@ -2241,6 +2260,37 @@
 
   document.getElementById('dump-save-btn').onclick = () => captureDump(false);
   document.getElementById('dump-process-btn').onclick = () => captureDump(true);
+
+  // ---------- Dump Box dictation ----------
+  const { createDictation } = require('./dictation');
+  const dumpMicBtn = document.getElementById('dump-mic-btn');
+  const dumpMicLabel = document.getElementById('dump-mic-label');
+  const dumpHint = document.getElementById('dump-hint');
+
+  const dumpDictation = createDictation({
+    onText: (text) => {
+      // Append rather than replace: dictation is meant to be mixed freely with
+      // typing, and in several passes if the thought arrives in pieces.
+      const el = document.getElementById('dump-input');
+      el.value = el.value ? `${el.value.replace(/\s+$/, '')} ${text}` : text;
+      el.focus();
+      el.setSelectionRange(el.value.length, el.value.length);
+    },
+    onStateChange: (state) => {
+      dumpMicBtn.classList.toggle('recording', state === 'recording');
+      dumpMicLabel.textContent =
+        state === 'recording' ? 'Stop' :
+        state === 'transcribing' ? 'Transcribing…' : 'Dictate';
+      dumpMicBtn.disabled = state === 'transcribing';
+      if (state !== 'idle') dumpHint.textContent = state === 'recording'
+        ? 'Listening — click Stop when you\'re done.'
+        : 'Transcribing…';
+      else dumpHint.textContent = 'Tip: ⌘↵ to capture and process in one go.';
+    },
+    onError: (msg) => { dumpHint.textContent = msg; },
+  });
+
+  dumpMicBtn.onclick = () => dumpDictation.toggle();
   document.getElementById('dump-input').addEventListener('keydown', (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); captureDump(true); }
   });

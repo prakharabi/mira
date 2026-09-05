@@ -1,4 +1,4 @@
-const { app, BrowserWindow, screen, ipcMain, globalShortcut, nativeTheme } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, globalShortcut, nativeTheme, Tray, Menu, nativeImage } = require('electron');
 const { clipboard } = require('electron');
 const http = require('http');
 const { exec, spawn } = require('child_process');
@@ -166,6 +166,132 @@ function toggleChatWindow() {
   chatWindow.on('closed', () => {
     chatWindow = null;
   });
+}
+
+// ---------- Quick Capture (Dump Box) ----------
+// A Spotlight-style panel for getting a thought out of your head without
+// opening the main window. The window is created once and reused: rebuilding it
+// per invocation added a visible delay, which defeats the point of a capture
+// tool you're supposed to reach for mid-thought.
+let quickCaptureWindow = null;
+
+function buildQuickCaptureWindow() {
+  const win = new BrowserWindow({
+    width: 560,
+    height: 210,
+    frame: false,
+    vibrancy: 'hud',
+    visualEffectState: 'active',
+    backgroundColor: '#00000000',
+    roundedCorners: true,
+    alwaysOnTop: true,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    show: false,
+    webPreferences: { nodeIntegration: true, contextIsolation: false }
+  });
+
+  win.loadFile('src/quick_capture.html');
+  win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+
+  // Dismiss on focus loss, the way Spotlight and other system panels behave --
+  // except while the mic is live or a transcription is in flight, where hiding
+  // would leave a recording running behind an invisible window.
+  win.on('blur', () => {
+    if (win.isVisible() && !quickCaptureBusy) win.hide();
+  });
+
+  return win;
+}
+
+let quickCaptureBusy = false;
+ipcMain.on('quick-capture-busy', (event, busy) => { quickCaptureBusy = !!busy; });
+
+function showQuickCapture() {
+  if (!quickCaptureWindow || quickCaptureWindow.isDestroyed()) {
+    quickCaptureWindow = buildQuickCaptureWindow();
+  }
+
+  // Open on the display the user is actually looking at, sitting slightly above
+  // centre where a system panel would be, rather than always on the main screen.
+  const cursor = screen.getCursorScreenPoint();
+  const { bounds } = screen.getDisplayNearestPoint(cursor);
+  const [w, h] = quickCaptureWindow.getSize();
+  quickCaptureWindow.setPosition(
+    Math.round(bounds.x + (bounds.width - w) / 2),
+    Math.round(bounds.y + (bounds.height - h) / 3)
+  );
+
+  quickCaptureWindow.webContents.send('quick-capture-reset');
+  quickCaptureWindow.show();
+  quickCaptureWindow.focus();
+}
+
+ipcMain.on('quick-capture-close', () => {
+  if (quickCaptureWindow && !quickCaptureWindow.isDestroyed()) quickCaptureWindow.hide();
+});
+
+ipcMain.on('quick-capture-done', (event, entryId) => {
+  if (quickCaptureWindow && !quickCaptureWindow.isDestroyed()) quickCaptureWindow.hide();
+  if (!entryId) return;
+
+  // Fire-and-forget: the text is already stored, so a failed or slow model call
+  // costs the user nothing -- the entry just stays unprocessed in the Dump Box.
+  const body = JSON.stringify({ model: 'auto' });
+  const req = http.request(
+    `http://localhost:11200/dumpbox/${entryId}/process`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } },
+    (res) => { res.on('data', () => {}); }
+  );
+  req.on('error', (e) => console.error('Quick capture processing failed:', e.message));
+  req.write(body);
+  req.end();
+});
+
+// ---------- Menu bar ----------
+let tray = null;
+
+function buildTray() {
+  const iconPath = path.join(__dirname, '..', 'assets', 'miraTemplate.png');
+  const icon = nativeImage.createFromPath(iconPath);
+  // Template images let macOS handle light/dark menu bars and the highlighted
+  // state itself, instead of shipping two icons and guessing which to show.
+  icon.setTemplateImage(true);
+
+  tray = new Tray(icon);
+  tray.setToolTip('Mira');
+  tray.setContextMenu(Menu.buildFromTemplate([
+    { label: 'Quick Capture…', accelerator: 'Command+Shift+D', click: showQuickCapture },
+    { label: 'Ask Mira', accelerator: 'Command+Shift+L', click: triggerWakewordManually },
+    { label: 'Capture Text (OCR)', accelerator: 'Command+Shift+O', click: runOCR },
+    { type: 'separator' },
+    { label: 'Open Mira', accelerator: 'Control+Space', click: () => {
+        if (chatWindow && !chatWindow.isDestroyed()) { chatWindow.show(); chatWindow.focus(); }
+        else toggleChatWindow();
+      } },
+    { label: 'Dump Box', click: () => openWorkspaceAt('dumpbox') },
+    { label: 'Settings', click: () => openWorkspaceAt('settings') },
+    { type: 'separator' },
+    { label: 'Quit Mira', accelerator: 'Command+Q', click: () => { isQuitting = true; app.quit(); } },
+  ]));
+}
+
+function openWorkspaceAt(view) {
+  const focusAndNavigate = () => {
+    chatWindow.show();
+    chatWindow.focus();
+    chatWindow.webContents.send('navigate-to-view', view);
+  };
+
+  if (chatWindow && !chatWindow.isDestroyed()) {
+    focusAndNavigate();
+    return;
+  }
+  toggleChatWindow();
+  chatWindow.webContents.once('did-finish-load', focusAndNavigate);
 }
 
 // hides the pet again, but ONLY if it wasn't already visible before the pill triggered it
@@ -447,6 +573,14 @@ app.whenReady().then(() => {
   globalShortcut.register('Command+Shift+O', () => {
     runOCR();
   });
+
+  // NEW: Command+Shift+D opens Quick Capture -- dump a thought into the Dump Box
+  // from any app without opening the main window
+  globalShortcut.register('Command+Shift+D', () => {
+    showQuickCapture();
+  });
+
+  buildTray();
 
   setInterval(() => {
     const current = clipboard.readText();

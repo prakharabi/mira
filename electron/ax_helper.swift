@@ -100,33 +100,68 @@ func readContext() {
 
     let escaped = jsonEscape(textBeforeCursor)
 
-    // get actual caret screen position via kAXBoundsForRangeParameterizedAttribute
+    // Caret screen position.
     //
-    // The rect's HEIGHT matters as much as its origin: it's the line height at
-    // the caret, which is the only signal available for how large the target
-    // app's text is. Suggestions are drawn at a matching size so they read as
-    // part of the line instead of as a floating label.
+    // A zero-length range is the obvious thing to ask for, and it's the wrong
+    // thing to rely on: in TextEdit it comes back one line height too high
+    // (a coordinate-convention mismatch), and in Chromium-based apps every
+    // variant returns an all-zero placeholder. Measuring a SINGLE CHARACTER
+    // instead gives a rect whose y and height are correct, and whose horizontal
+    // edge is exactly where the caret sits.
+    //
+    // The height matters as much as the origin: it's the line height at the
+    // caret, and the only signal available for how large the target app's text
+    // is, which is what lets a suggestion be drawn at a matching size.
     var caretX = -1.0
     var caretY = -1.0
-    var caretW = 0.0
     var caretH = 0.0
     var boundsErrorCode = -999
-    if rangeResult == .success, let rangeValue = selectedRange {
-        var boundsValue: AnyObject?
-        let boundsResult = AXUIElementCopyParameterizedAttributeValue(
-            el,
-            kAXBoundsForRangeParameterizedAttribute as CFString,
-            rangeValue,
-            &boundsValue
-        )
-        boundsErrorCode = Int(boundsResult.rawValue)
-        if boundsResult == .success, let bounds = boundsValue {
-            var rect = CGRect.zero
-            if AXValueGetValue((bounds as! AXValue), .cgRect, &rect) {
-                caretX = rect.origin.x
-                caretY = rect.origin.y
-                caretW = rect.size.width
-                caretH = rect.size.height
+
+    func boundsForRange(_ location: Int, _ length: Int) -> CGRect? {
+        var range = CFRange(location: location, length: length)
+        guard let axRange = AXValueCreate(.cfRange, &range) else { return nil }
+        var out: AnyObject?
+        let res = AXUIElementCopyParameterizedAttributeValue(
+            el, kAXBoundsForRangeParameterizedAttribute as CFString, axRange, &out)
+        guard res == .success, let o = out else { return nil }
+        var rect = CGRect.zero
+        guard AXValueGetValue((o as! AXValue), .cgRect, &rect) else { return nil }
+        // An all-zero or zero-height rect is a placeholder, not a measurement.
+        guard rect.size.height > 0 else { return nil }
+        return rect
+    }
+
+    if rangeStart >= 0 {
+        let totalChars = text.count
+
+        if rangeStart < totalChars, let r = boundsForRange(rangeStart, 1) {
+            // Character the caret sits in front of: its left edge IS the caret,
+            // and it's guaranteed to be on the caret's own line.
+            caretX = r.origin.x
+            caretY = r.origin.y
+            caretH = r.size.height
+            boundsErrorCode = 0
+        } else if rangeStart > 0, let r = boundsForRange(rangeStart - 1, 1) {
+            // Caret at end of text: measure the character behind it and take
+            // its right edge.
+            caretX = r.origin.x + r.size.width
+            caretY = r.origin.y
+            caretH = r.size.height
+            boundsErrorCode = 0
+        } else if rangeResult == .success, let rangeValue = selectedRange {
+            // Last resort. This is the path with the flipped-origin quirk, so
+            // the height is added back to land on the real line.
+            var boundsValue: AnyObject?
+            let res = AXUIElementCopyParameterizedAttributeValue(
+                el, kAXBoundsForRangeParameterizedAttribute as CFString, rangeValue, &boundsValue)
+            boundsErrorCode = Int(res.rawValue)
+            if res == .success, let bounds = boundsValue {
+                var rect = CGRect.zero
+                if AXValueGetValue((bounds as! AXValue), .cgRect, &rect), rect.size.height > 0 {
+                    caretX = rect.origin.x
+                    caretY = rect.origin.y + rect.size.height
+                    caretH = rect.size.height
+                }
             }
         }
     }
@@ -152,7 +187,7 @@ func readContext() {
         windowJSON = "{\"x\":\(win.origin.x),\"y\":\(win.origin.y),\"width\":\(win.size.width),\"height\":\(win.size.height)}"
     }
 
-    print("{\"textBeforeCursor\":\"\(escaped)\",\"caretX\":\(caretX),\"caretY\":\(caretY),\"caretW\":\(caretW),\"caretH\":\(caretH),\"hasTextAfterCaret\":\(hasTextAfterCaret),\"boundsError\":\(boundsErrorCode),\"window\":\(windowJSON),\"element\":\(elementJSON),\"bundleId\":\(bundleId)}")
+    print("{\"textBeforeCursor\":\"\(escaped)\",\"caretX\":\(caretX),\"caretY\":\(caretY),\"caretH\":\(caretH),\"hasTextAfterCaret\":\(hasTextAfterCaret),\"boundsError\":\(boundsErrorCode),\"window\":\(windowJSON),\"element\":\(elementJSON),\"bundleId\":\(bundleId)}")
 }
 
 // Types text by posting synthetic keyboard events, exactly like a real keystroke,
