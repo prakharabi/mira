@@ -1,12 +1,29 @@
 import Cocoa
 import ApplicationServices
 
+// Chromium-based apps (Electron, Chrome, Slack, Discord, Notion...) ship with
+// their accessibility tree switched OFF and only build it once an assistive
+// client asks for it. Until then the app reports no focused element at all, so
+// predictive typing saw nothing and silently did nothing in a large share of
+// the apps people actually type in. `AXManualAccessibility` is Chromium's
+// documented opt-in for exactly this.
+//
+// Building the tree is not instant, so the retry here may still come back
+// empty; the next poll picks it up, and it stays enabled in the target app
+// afterwards. The write is only attempted when the lookup actually failed, so
+// once an app is switched on this costs nothing. (This helper is a fresh
+// process per call, so there is no point caching which apps were asked.)
 func getFocusedElement() -> AXUIElement? {
     guard let frontApp = NSWorkspace.shared.frontmostApplication else { return nil }
     let appElement = AXUIElementCreateApplication(frontApp.processIdentifier)
 
     var focusedElement: AnyObject?
-    let result = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedElement)
+    var result = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedElement)
+
+    if result != .success {
+        AXUIElementSetAttributeValue(appElement, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        result = AXUIElementCopyAttributeValue(appElement, kAXFocusedUIElementAttribute as CFString, &focusedElement)
+    }
 
     guard result == .success, let element = focusedElement else { return nil }
     return (element as! AXUIElement)
@@ -199,24 +216,50 @@ func readContext() {
 // input pipeline as real typing, so they're received correctly almost anywhere.
 @discardableResult
 func postUnicodeText(_ text: String) -> Bool {
-    let source = CGEventSource(stateID: .combinedSessionState)
     let utf16Chars = Array(text.utf16)
     guard !utf16Chars.isEmpty else { return true }
+
+    // A private source rather than .combinedSessionState. The combined state
+    // inherits whatever keys and modifiers are physically down right now, and
+    // insertion always runs immediately after a Tab press -- so the synthetic
+    // event could carry the tail of that keypress and be discarded by the
+    // target app. CGEventPost reports success either way, since it reports
+    // that the event was posted, not that it was delivered.
+    let source = CGEventSource(stateID: .privateState)
 
     guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
           let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else {
         return false
     }
 
+    // Explicitly unset modifiers: a Shift or Command still held from the
+    // triggering keystroke would otherwise turn the insertion into a shortcut.
+    keyDown.flags = []
+    keyUp.flags = []
+
     keyDown.keyboardSetUnicodeString(stringLength: utf16Chars.count, unicodeString: utf16Chars)
     keyUp.keyboardSetUnicodeString(stringLength: utf16Chars.count, unicodeString: utf16Chars)
 
     keyDown.post(tap: .cgSessionEventTap)
+    usleep(2000)
     keyUp.post(tap: .cgSessionEventTap)
+
+    // CGEventPost only ENQUEUES the event. This helper is a short-lived process
+    // that exits as soon as it returns, and measured on its own -- no Tab, no
+    // race, a quarter second between calls -- only 7 of 10 insertions actually
+    // arrived. Staying alive briefly lets the queued events be delivered before
+    // the process goes away.
+    usleep(40000) // 40ms
     return true
 }
 
 func typeText(_ text: String) {
+    // Insertion follows a Tab that was just intercepted, so the focused app is
+    // still finishing with that key event. Posting immediately raced it and the
+    // text intermittently never landed -- despite CGEventPost reporting success,
+    // since it reports only that the event was posted, not delivered. Same
+    // reason correctWord() spaces its events out.
+    usleep(30000) // 30ms
     if postUnicodeText(text) {
         print("{\"success\":true}")
     } else {
