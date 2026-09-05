@@ -82,6 +82,10 @@ let lastTextBeforeCursor = '';
 //   'mouse' -- nothing better available.
 let lastAnchorX = 100;
 let lastAnchorY = 100;
+// Top edge of whatever the suggestion must not cover (the caret's line, or the
+// focused field). Used when there's no room below and the strip has to flip
+// above -- flipping relative to lastAnchorY would land it ON the field.
+let lastAnchorTopY = 100;
 let lastAnchorMode = 'mouse';
 let lastCaretH = 0;           // line height at the caret; 0 = unknown
 let lastHasTextAfterCaret = false; // inline would overlap the app's own text
@@ -315,7 +319,7 @@ function showGhost(payload) {
   // otherwise push it off the edge entirely.
   const display = screen.getDisplayNearestPoint({ x: posX, y: posY });
   if (posY + GHOST_WINDOW_HEIGHT > display.bounds.y + display.bounds.height - 2) {
-    posY = Math.round(lastAnchorY) - GHOST_WINDOW_HEIGHT - 2;
+    posY = Math.round(lastAnchorTopY) - GHOST_WINDOW_HEIGHT - 2;
   }
   posX = Math.min(posX, display.bounds.x + display.bounds.width - 80);
 
@@ -367,6 +371,7 @@ function postFireAndForget(pathName, bodyObj) {
 
 // ---------- accepting the currently-shown suggestion (Tab), dispatched by mode ----------
 function acceptCurrentSuggestion() {
+  if (DEBUG_PREDICTIVE) console.log('[tab] mode=', suggestionMode, 'suffix=', JSON.stringify(currentInWordSuffix), 'accepting=', acceptingInProgress);
   if (suggestionMode === 'correction') {
     acceptCorrection();
   } else if (suggestionMode === 'in-word') {
@@ -408,6 +413,7 @@ function acceptInWordCompletion() {
   const fullWord = currentInWordFullWord;
 
   insertTextViaAX(suffix, (success) => {
+    if (DEBUG_PREDICTIVE) console.log('[tab] insert', JSON.stringify(suffix), 'success=', success);
     acceptingInProgress = false;
     if (!success) { hideGhostText(); return; }
     reportAcceptedCompletion(fullWord);
@@ -497,6 +503,7 @@ function updateCaretPosition(context, bundleId) {
     if (insideWindow === true || (insideWindow === null && onDisplay)) {
       lastAnchorX = context.caretX;
       lastAnchorY = context.caretY;
+      lastAnchorTopY = context.caretY;
       lastCaretH = context.caretH;
       lastAnchorMode = 'caret';
       lastCaretBundleId = bundleId;
@@ -518,6 +525,7 @@ function updateCaretPosition(context, bundleId) {
     if (isRealField) {
       lastAnchorX = e.x + 2;
       lastAnchorY = e.y + e.height;   // BOTTOM edge; showGhost draws under it
+      lastAnchorTopY = e.y;           // used if it has to flip above the field
       lastCaretH = 0;                 // unknown -- fall back to a default size
       lastAnchorMode = 'field';
       lastCaretBundleId = bundleId;
@@ -531,6 +539,7 @@ function updateCaretPosition(context, bundleId) {
     const cursor = screen.getCursorScreenPoint();
     lastAnchorX = cursor.x;
     lastAnchorY = cursor.y;
+    lastAnchorTopY = cursor.y;
     lastCaretH = 0;
     lastAnchorMode = 'mouse';
     lastCaretBundleId = bundleId;

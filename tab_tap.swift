@@ -5,23 +5,39 @@ import ApplicationServices
 // Controlled via a tiny local HTTP server on 127.0.0.1:11201
 var suggestionActive = false
 
+// A swallowed keyDown must have its keyUp swallowed too. Tapping only keyDown
+// let a Tab keyUp with no matching keyDown reach the focused app, and that
+// stray event raced the synthetic text insertion that follows -- the accepted
+// word intermittently never appeared even though posting reported success.
+var swallowedTabDown = false
+
 let kVK_Tab: Int64 = 48
 
 func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, refcon: UnsafeMutableRawPointer?) -> Unmanaged<CGEvent>? {
+    let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
+
     if type == .keyDown {
-        let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
         if keyCode == kVK_Tab && suggestionActive {
             // swallow Tab: notify Node via stdout, don't pass the event through
+            swallowedTabDown = true
             print("TAB_PRESSED")
             fflush(stdout)
             return nil
         }
+    } else if type == .keyUp {
+        // Only the keyUp partnered with a swallowed keyDown; a Tab pressed
+        // while no suggestion was showing must still behave completely normally.
+        if keyCode == kVK_Tab && swallowedTabDown {
+            swallowedTabDown = false
+            return nil
+        }
     }
+
     return Unmanaged.passRetained(event)
 }
 
 func startEventTap() {
-    let eventMask = (1 << CGEventType.keyDown.rawValue)
+    let eventMask = (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue)
 
     guard let tap = CGEvent.tapCreate(
         tap: .cgSessionEventTap,
