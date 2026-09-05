@@ -366,6 +366,31 @@ ipcMain.handle('set-appearance', (event, mode) => {
   return { applied: nativeTheme.themeSource };
 });
 
+// ---------- Launch at login ----------
+// macOS's own Login Items list IS the persistent state here -- it survives
+// reboots and is visible/removable in System Settings -- so there is
+// deliberately no separate copy of this in the daemon's settings.json. Reading
+// app.getLoginItemSettings() is always the source of truth, never a cache of it.
+//
+// This only works correctly against a PACKAGED app (Mira.app, built by
+// scripts/build_app.js). Electron's own docs note that on macOS this API
+// targets the app's own bundle path -- running via `npx electron .` means that
+// path is node_modules/electron/dist/Electron.app, so toggling it on in dev
+// would silently register a login item that launches a bare, unconfigured
+// Electron shell rather than Mira.
+ipcMain.handle('login-item-get', () => {
+  return { openAtLogin: app.getLoginItemSettings().openAtLogin };
+});
+
+ipcMain.handle('login-item-set', (event, enabled) => {
+  // openAsHidden matters here specifically because this app has no Dock icon
+  // (LSUIElement) and no window on launch -- without it, some macOS versions
+  // still surface a brief "just launched" state. It's a no-op when it doesn't
+  // apply, so it's safe to always pass.
+  app.setLoginItemSettings({ openAtLogin: !!enabled, openAsHidden: true });
+  return { openAtLogin: app.getLoginItemSettings().openAtLogin };
+});
+
 // Opens a URL in the user's real browser. Used for the Google consent screen,
 // which must run in a normal browser session rather than an Electron window.
 ipcMain.handle('open-external', (event, url) => {

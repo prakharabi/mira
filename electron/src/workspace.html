@@ -1011,6 +1011,20 @@
         </div>
 
         <div class="settings-section">
+          <div class="settings-section-title">General</div>
+          <div class="setting-row">
+            <div>
+              <div class="label">Launch Mira at login</div>
+              <div class="sublabel">Start automatically in the background when you sign in</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="login-item-toggle">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <div class="settings-section">
           <div class="settings-section-title">Appearance</div>
           <div class="setting-row">
             <div>
@@ -1784,6 +1798,7 @@
       document.getElementById('appearance-select').value = data.appearance || 'system';
       document.getElementById('keep-alive-select').value = data.local_model_keep_alive || '60s';
       refreshLoadedModels();
+      refreshLoginItemState();
 
       await loadLocalModels(data.local_chat_model);
       await loadVoices(data.tts_voice);
@@ -2533,6 +2548,27 @@
 
   document.getElementById('save-n8n-btn').onclick = () =>
     updateSetting('n8n_base_url', document.getElementById('n8n-base-url').value.trim());
+
+  // ---------- launch at login ----------
+  // Backed entirely by the OS's own Login Items list via main.js -- see the
+  // comment on the login-item-get/set IPC handlers for why there's no daemon
+  // setting mirroring this.
+  async function refreshLoginItemState() {
+    const toggle = document.getElementById('login-item-toggle');
+    if (!toggle) return;
+    try {
+      const state = await ipcRenderer.invoke('login-item-get');
+      toggle.checked = !!state.openAtLogin;
+    } catch (e) { /* not fatal -- toggle just shows its default (off) */ }
+  }
+
+  document.getElementById('login-item-toggle').addEventListener('change', async (e) => {
+    try {
+      await ipcRenderer.invoke('login-item-set', e.target.checked);
+    } catch (err) {
+      e.target.checked = !e.target.checked; // revert on failure
+    }
+  });
 
   // ---------- appearance ----------
   // The CSS reacts to prefers-color-scheme; the main process is what actually
