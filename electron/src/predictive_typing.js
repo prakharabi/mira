@@ -72,12 +72,20 @@ const MIN_PARTIAL_WORD_LEN = 3; // shorter than this, in-word completion is too 
 
 let ghostWindow = null;
 let lastTextBeforeCursor = '';
-let lastCaretX = 100;
-let lastCaretY = 100;
+// Where a suggestion should be drawn, and how much the position can be trusted.
+//   'caret' -- a real measured caret rect; precise enough to draw inline on the
+//              user's own text line.
+//   'field' -- no caret rect available (Chromium-based apps expose none), so
+//              anchored to the BOTTOM of the focused field and drawn under it
+//              like a completion popup. Never inline: an inline guess here
+//              would land on the wrong line.
+//   'mouse' -- nothing better available.
+let lastAnchorX = 100;
+let lastAnchorY = 100;
+let lastAnchorMode = 'mouse';
 let lastCaretH = 0;           // line height at the caret; 0 = unknown
-let lastCaretExact = false;   // true only when anchored to a real caret rect
 let lastHasTextAfterCaret = false; // inline would overlap the app's own text
-let lastCaretBundleId = null; // which app lastCaretX/Y actually belongs to
+let lastCaretBundleId = null; // which app the anchor actually belongs to
 let lastShownSuggestion = '';
 let pollTimer = null;
 let nextWordDebounceTimer = null;
@@ -270,25 +278,50 @@ function caretTopFromRect(context) {
   return context.caretY + (context.caretH > 0 ? context.caretH : 0);
 }
 
-function showGhost(payload, x, y) {
+function showGhost(payload) {
   if (!ghostWindow || ghostWindow.isDestroyed()) createGhostWindow();
 
   const lineHeight = lastCaretH > 4 ? lastCaretH : DEFAULT_LINE_HEIGHT;
   const fontSize = fontSizeForCaret(lastCaretH);
 
-  let posX = Math.round(x);
+  // Inline only when the position is a real measured caret AND nothing of the
+  // user's own would be drawn over. Corrections are a distinct affordance
+  // rather than a continuation of the sentence, so they always sit below.
+  const inline =
+    lastAnchorMode === 'caret' &&
+    payload.mode !== 'correction' &&
+    !lastHasTextAfterCaret;
+
+  let posX = Math.round(lastAnchorX);
   let posY;
 
-  if (payload.mode === 'correction' || !lastCaretExact || lastHasTextAfterCaret) {
-    // Corrections are a separate affordance, and an unverified caret position
-    // shouldn't have text drawn through the user's own line -- both sit below
-    // the caret, where being a few pixels off is harmless.
-    posY = Math.round(y) + Math.round(lineHeight) + 4;
-  } else {
-    // Inline: centre the suggestion on the caret's own line so it reads as a
-    // continuation of the sentence rather than as a label near it.
+  if (inline) {
     posX += 1;
-    posY = Math.round(y + lineHeight / 2 - GHOST_WINDOW_HEIGHT / 2);
+    posY = Math.round(lastAnchorY + lineHeight / 2 - GHOST_WINDOW_HEIGHT / 2);
+  } else if (lastAnchorMode === 'field') {
+    // lastAnchorY is already the field's BOTTOM edge -- sit just under it, the
+    // way a completion popup does. Anchoring to the top (as this used to) put
+    // the suggestion behind the field's own text once it ran to several lines.
+    posY = Math.round(lastAnchorY) + 4;
+  } else if (lastAnchorMode === 'caret') {
+    posY = Math.round(lastAnchorY + lineHeight) + 4;
+  } else {
+    posY = Math.round(lastAnchorY) + 20;
+  }
+
+  posX = Math.max(4, posX);
+
+  // Keep the strip on screen: a field near the bottom of a display would
+  // otherwise push it off the edge entirely.
+  const display = screen.getDisplayNearestPoint({ x: posX, y: posY });
+  if (posY + GHOST_WINDOW_HEIGHT > display.bounds.y + display.bounds.height - 2) {
+    posY = Math.round(lastAnchorY) - GHOST_WINDOW_HEIGHT - 2;
+  }
+  posX = Math.min(posX, display.bounds.x + display.bounds.width - 80);
+
+  if (DEBUG_PREDICTIVE) {
+    console.log('[ghost]', payload.mode, 'anchor=' + lastAnchorMode,
+      'inline=' + inline, 'at', posX, posY, 'caretH=' + lastCaretH);
   }
 
   ghostWindow.setPosition(posX, posY);
@@ -410,7 +443,7 @@ function acceptNextWord() {
       lastTextBeforeCursor = ''; // force fresh read on next poll
       lastShownSuggestion = '';
     } else {
-      showGhost({ mode: 'next-word', words: currentSuggestionWords }, lastCaretX, lastCaretY);
+      showGhost({ mode: 'next-word', words: currentSuggestionWords });
     }
   });
 }
@@ -436,89 +469,70 @@ function analyzeContext(textBeforeCursor) {
 }
 
 function updateCaretPosition(context, bundleId) {
-  // Anchoring, strongest source first. Only the first tier is precise enough
-  // to draw a suggestion inline on the user's own text line; the rest place it
-  // below, where being off by a few pixels doesn't corrupt the reading of the
-  // sentence.
-  //
-  // 1. The caret rect itself, cross-checked against the frontmost window's
-  //    bounds -- some apps report a "successful" bounds lookup with a
-  //    placeholder rect sitting exactly on the window's edge instead of a real
-  //    error, which a bare "caretX >= 0" check can't catch.
-  // 2. The caret rect checked only against the connected displays, for apps
-  //    that expose no usable window bounds.
-  // 3. The focused text element's own frame. Not the caret, but it IS the
-  //    field being typed into -- far better than the pointer.
-  // 4. The mouse position, and only when the app changed. This was the old
-  //    fallback for everything, and is what made suggestions appear wherever
-  //    the pointer happened to be rather than near the text.
-  let positionTrusted = false;
-  lastCaretExact = false;
+  // Anchor selection, best source first. Only a real measured caret rect is
+  // precise enough to draw on the user's own line; everything else is placed
+  // below something, where being a few pixels out is harmless.
   lastHasTextAfterCaret = context.hasTextAfterCaret === true;
 
-  const caretRectUsable =
+  const w = context.window;
+  const caretUsable =
     typeof context.caretX === 'number' && context.caretX >= 0 &&
-    typeof context.caretY === 'number' && context.caretY >= 0;
+    typeof context.caretY === 'number' && context.caretY >= 0 &&
+    context.caretH > 0;
 
-  const caretTop = caretRectUsable ? caretTopFromRect(context) : 0;
+  if (caretUsable) {
+    // ax_helper measures a single character rather than the zero-length caret
+    // range, so this is already the real line -- it only needs to be sanity
+    // checked against the window (or failing that, the displays).
+    const insideWindow = w
+      ? context.caretX > w.x - 2 && context.caretX < w.x + w.width + 2 &&
+        context.caretY > w.y - 2 && context.caretY < w.y + w.height + 2
+      : null;
 
-  if (caretRectUsable && context.window) {
-    const w = context.window;
-    const margin = 2; // reject values sitting exactly on an edge (placeholder rects)
-    const withinWindow =
-      context.caretX > w.x + margin && context.caretX < w.x + w.width - margin &&
-      caretTop > w.y + margin && caretTop < w.y + w.height - margin;
-    if (withinWindow) {
-      lastCaretX = context.caretX;
-      lastCaretY = caretTop;
-      lastCaretH = context.caretH || 0;
-      lastCaretBundleId = bundleId;
-      positionTrusted = true;
-      lastCaretExact = true;
-    }
-  } else if (caretRectUsable) {
-    const point = { x: context.caretX, y: caretTop };
-    const onSomeDisplay = screen.getAllDisplays().some(d =>
-      point.x >= d.bounds.x && point.x <= d.bounds.x + d.bounds.width &&
-      point.y >= d.bounds.y && point.y <= d.bounds.y + d.bounds.height
+    const onDisplay = screen.getAllDisplays().some(d =>
+      context.caretX >= d.bounds.x && context.caretX <= d.bounds.x + d.bounds.width &&
+      context.caretY >= d.bounds.y && context.caretY <= d.bounds.y + d.bounds.height
     );
-    if (onSomeDisplay) {
-      lastCaretX = context.caretX;
-      lastCaretY = caretTop;
-      lastCaretH = context.caretH || 0;
+
+    if (insideWindow === true || (insideWindow === null && onDisplay)) {
+      lastAnchorX = context.caretX;
+      lastAnchorY = context.caretY;
+      lastCaretH = context.caretH;
+      lastAnchorMode = 'caret';
       lastCaretBundleId = bundleId;
-      positionTrusted = true;
-      lastCaretExact = true;
+      return;
     }
   }
 
-  if (!positionTrusted && context.element && context.window) {
-    const e = context.element;
-    const w = context.window;
+  // No usable caret rect. Chromium-based apps (Electron, Chrome, VS Code, Slack)
+  // return an all-zero placeholder for every bounds query, so this is the normal
+  // path there, not an edge case. The field itself is still a good anchor.
+  const e = context.element;
+  if (e && w) {
     // An "element" the size of the whole window isn't a text field -- it's the
-    // window reported as focused because nothing narrower was. Anchoring to
-    // that would put suggestions in the window's top-left corner.
+    // window reported as focused because nothing narrower was.
     const isRealField =
       e.width > 0 && e.height > 0 &&
       (e.width < w.width - 8 || e.height < w.height - 8);
 
     if (isRealField) {
-      lastCaretX = e.x + 6;
-      // Single-line fields: the text sits on the field's own line. Taller
-      // fields are multi-line, and without a caret rect there's no way to know
-      // which line is active, so the first line is the least-wrong guess.
-      lastCaretY = e.height <= 44 ? e.y + Math.max(0, (e.height - 18) / 2) : e.y + 4;
-      lastCaretH = e.height <= 44 ? Math.min(e.height, 22) : 0;
+      lastAnchorX = e.x + 2;
+      lastAnchorY = e.y + e.height;   // BOTTOM edge; showGhost draws under it
+      lastCaretH = 0;                 // unknown -- fall back to a default size
+      lastAnchorMode = 'field';
       lastCaretBundleId = bundleId;
-      positionTrusted = true;
+      return;
     }
   }
 
-  if (!positionTrusted && lastCaretBundleId !== bundleId) {
+  // Nothing to anchor to. Only move to the pointer when the app actually
+  // changed, so a suggestion doesn't jump around while typing in one place.
+  if (lastCaretBundleId !== bundleId) {
     const cursor = screen.getCursorScreenPoint();
-    lastCaretX = cursor.x;
-    lastCaretY = cursor.y;
+    lastAnchorX = cursor.x;
+    lastAnchorY = cursor.y;
     lastCaretH = 0;
+    lastAnchorMode = 'mouse';
     lastCaretBundleId = bundleId;
   }
 }
@@ -548,7 +562,7 @@ function handleMidWord(partialWord) {
     suggestionMode = 'in-word';
     currentInWordSuffix = result.suffix;
     currentInWordFullWord = partialWord + result.suffix;
-    showGhost({ mode: 'in-word', suffix: result.suffix }, lastCaretX, lastCaretY);
+    showGhost({ mode: 'in-word', suffix: result.suffix });
   });
 }
 
@@ -583,7 +597,7 @@ function handleWordBoundary(lastCompletedWord, tokens, rawTextBeforeCursor, trai
       clearNextWordDebounce();
       suggestionMode = 'correction';
       currentCorrection = { wrong: lastCompletedWord, correct: result.suggestion, trailingWhitespace };
-      showGhost({ mode: 'correction', wrong: lastCompletedWord, correct: result.suggestion }, lastCaretX, lastCaretY);
+      showGhost({ mode: 'correction', wrong: lastCompletedWord, correct: result.suggestion });
       return;
     }
 
@@ -648,8 +662,8 @@ function requestNextWordSuggestion(tokens, rawTextBeforeCursor) {
 
     suggestionMode = 'next-word';
     currentSuggestionWords = words;
-    console.log('[predict] showing ghost at', lastCaretX, lastCaretY, 'words:', words);
-    showGhost({ mode: 'next-word', words }, lastCaretX, lastCaretY);
+    if (DEBUG_PREDICTIVE) console.log('[predict] ghost', lastAnchorMode, lastAnchorX, lastAnchorY, words);
+    showGhost({ mode: 'next-word', words });
   });
 }
 
