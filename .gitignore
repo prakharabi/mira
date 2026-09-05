@@ -9,6 +9,9 @@ __pycache__/
 # Node
 node_modules/
 
+# Packaged app (rebuild with: cd electron && node scripts/build_app.js)
+electron/dist/
+
 # Third-party (re-fetch via setup steps, not tracked)
 whisper.cpp/
 
