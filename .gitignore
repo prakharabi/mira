@@ -27,6 +27,7 @@ daemon/personal_ngrams.json
 daemon/google_tokens.json
 daemon/automations.json
 daemon/dumpbox/
+daemon/telegram_voice/
 daemon/wakeword/command_recording.wav
 daemon/wakeword/command_recording.converted.wav
 daemon/wakeword/command_recording.converted.wav.txt

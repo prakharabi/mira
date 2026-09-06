@@ -37,6 +37,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[main] Could not bootstrap personalization: {e}", flush=True)
 
+    try:
+        from telegram_bot import start_telegram_bot_background
+        start_telegram_bot_background()
+        print("[main] telegram bot start call completed", flush=True)
+    except Exception as e:
+        print(f"[main] Could not start telegram bot: {e}", flush=True)
+
     yield
     # shutdown (nothing needed here currently)
 
@@ -89,7 +96,14 @@ DEFAULT_SETTINGS = {
     # for five idle minutes. Short enough to free memory promptly, long enough
     # that a model isn't reloaded between words while actively typing.
     # Accepts Ollama duration strings; "0" unloads immediately.
-    "local_model_keep_alive": "60s"
+    "local_model_keep_alive": "60s",
+    # Telegram: the user's own bot (created via @BotFather -- Mira ships no
+    # shared bot/token, same reasoning as the Google integration). The daemon
+    # only ever acts on messages from telegram_owner_chat_id, set by the user
+    # after the bot's own bootstrap message tells them their chat ID.
+    "telegram_enabled": False,
+    "telegram_bot_token": "",
+    "telegram_owner_chat_id": ""
 }
 
 def load_settings():
@@ -112,9 +126,11 @@ def get_settings():
     masked["cloud_api_key_set"] = bool(settings.get("cloud_api_key"))
     masked["tavily_api_key_set"] = bool(settings.get("tavily_api_key"))
     masked["google_client_secret_set"] = bool(settings.get("google_client_secret"))
+    masked["telegram_bot_token_set"] = bool(settings.get("telegram_bot_token"))
     masked.pop("cloud_api_key", None)
     masked.pop("tavily_api_key", None)
     masked.pop("google_client_secret", None)
+    masked.pop("telegram_bot_token", None)
     return masked
 
 @app.post("/settings")
@@ -137,6 +153,9 @@ def update_settings(
     n8n_base_url: str = Body(None),
     appearance: str = Body(None),
     local_model_keep_alive: str = Body(None),
+    telegram_enabled: bool = Body(None),
+    telegram_bot_token: str = Body(None),
+    telegram_owner_chat_id: str = Body(None),
 ):
     settings = load_settings()
 
@@ -183,15 +202,28 @@ def update_settings(
         settings["appearance"] = appearance
     if local_model_keep_alive is not None:
         settings["local_model_keep_alive"] = local_model_keep_alive
+    if telegram_enabled is not None:
+        settings["telegram_enabled"] = telegram_enabled
+        try:
+            from telegram_bot import set_telegram_enabled
+            set_telegram_enabled(telegram_enabled)
+        except Exception as e:
+            print(f"[main] Could not toggle telegram bot: {e}", flush=True)
+    if telegram_bot_token is not None:
+        settings["telegram_bot_token"] = telegram_bot_token
+    if telegram_owner_chat_id is not None:
+        settings["telegram_owner_chat_id"] = telegram_owner_chat_id.strip()
 
     save_settings(settings)
     result = dict(settings)
     result["cloud_api_key_set"] = bool(settings.get("cloud_api_key"))
     result["tavily_api_key_set"] = bool(settings.get("tavily_api_key"))
     result["google_client_secret_set"] = bool(settings.get("google_client_secret"))
+    result["telegram_bot_token_set"] = bool(settings.get("telegram_bot_token"))
     result.pop("cloud_api_key", None)
     result.pop("tavily_api_key", None)
     result.pop("google_client_secret", None)
+    result.pop("telegram_bot_token", None)
     return result
 
 
@@ -1491,3 +1523,33 @@ def automations_run(automation_id: str, payload: dict = Body(None, embed=True)):
         return _automations.run_automation(automation_id, payload)
     except KeyError:
         return {"error": "not found"}
+
+
+# ---------- Telegram ----------
+import telegram_bot as _telegram
+
+
+@app.get("/telegram/status")
+def telegram_status():
+    return _telegram.status()
+
+
+@app.post("/telegram/test")
+def telegram_test(bot_token: str = Body("", embed=True)):
+    """Validates a token via getMe without saving anything -- lets the UI show
+    the bot's own username before the user commits to pasting it into Settings."""
+    token = bot_token or load_settings().get("telegram_bot_token")
+    if not token:
+        return {"ok": False, "error": "no bot token saved and none provided"}
+
+    try:
+        resp = requests.get(f"https://api.telegram.org/bot{token}/getMe", timeout=15)
+        data = resp.json()
+    except requests.RequestException as e:
+        return {"ok": False, "error": str(e)}
+
+    if not data.get("ok"):
+        return {"ok": False, "error": data.get("description", "invalid token")}
+
+    bot_info = data.get("result", {})
+    return {"ok": True, "username": bot_info.get("username", "")}
