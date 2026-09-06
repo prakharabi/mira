@@ -1286,6 +1286,40 @@
               </div>
             </div>
           </div>
+
+          <div class="setting-block">
+            <div class="setting-block-row">
+              <div>
+                <div class="label">Telegram</div>
+                <div class="sublabel">Talk to Mira from your phone — works whenever this Mac is reachable</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="telegram-enabled-toggle">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="setting-block-body">
+              <div class="inline-note">
+                Create a bot with <b>@BotFather</b> on Telegram (send it <code>/newbot</code>), then paste the
+                token it gives you below.
+              </div>
+              <div>
+                <label class="field-label">Bot token</label>
+                <div class="field-row">
+                  <input type="password" class="rect-field" id="telegram-bot-token" placeholder="Enter to set" style="flex:1;">
+                  <button class="mini-btn-sm" id="test-telegram-btn">Test</button>
+                </div>
+              </div>
+              <div>
+                <label class="field-label">Owner chat ID</label>
+                <input type="text" class="rect-field" id="telegram-owner-chat-id" placeholder="Message your bot once — it will tell you this" style="width:100%;">
+              </div>
+              <div class="field-row" style="justify-content:flex-end;">
+                <button class="mini-btn-sm accent" id="save-telegram-btn">Save</button>
+              </div>
+              <div class="inline-note" id="telegram-status-msg"></div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1795,6 +1829,11 @@
       document.getElementById('google-client-secret').placeholder =
         data.google_client_secret_set ? 'Saved — enter to replace' : 'Enter to set';
       document.getElementById('n8n-base-url').value = data.n8n_base_url || '';
+      document.getElementById('telegram-enabled-toggle').checked = !!data.telegram_enabled;
+      document.getElementById('telegram-bot-token').placeholder =
+        data.telegram_bot_token_set ? 'Saved — enter to replace' : 'Enter to set';
+      document.getElementById('telegram-owner-chat-id').value = data.telegram_owner_chat_id || '';
+      refreshTelegramStatus();
       document.getElementById('appearance-select').value = data.appearance || 'system';
       document.getElementById('keep-alive-select').value = data.local_model_keep_alive || '60s';
       refreshLoadedModels();
@@ -2548,6 +2587,85 @@
 
   document.getElementById('save-n8n-btn').onclick = () =>
     updateSetting('n8n_base_url', document.getElementById('n8n-base-url').value.trim());
+
+  // ---------- telegram ----------
+  async function refreshTelegramStatus() {
+    const msg = document.getElementById('telegram-status-msg');
+    try {
+      const s = await (await fetch(`${DAEMON_URL}/telegram/status`)).json();
+      if (!s.token_set) {
+        msg.className = 'inline-note';
+        msg.textContent = 'No bot token saved yet.';
+      } else if (!s.linked) {
+        msg.className = 'inline-note';
+        msg.textContent = 'Token saved. Message your bot on Telegram — it will reply with a chat ID to paste above.';
+      } else if (s.last_error) {
+        msg.className = 'inline-note error';
+        msg.textContent = `Linked, but having trouble reaching Telegram: ${s.last_error}`;
+      } else if (s.polling) {
+        msg.className = 'inline-note ok';
+        msg.textContent = 'Connected — Mira is listening on Telegram.';
+      } else {
+        msg.className = 'inline-note';
+        msg.textContent = 'Linked, but currently off. Turn on the toggle above.';
+      }
+    } catch (e) {
+      msg.className = 'inline-note error';
+      msg.textContent = 'Could not reach Mira daemon.';
+    }
+  }
+
+  document.getElementById('telegram-enabled-toggle').addEventListener('change', async (e) => {
+    await updateSetting('telegram_enabled', e.target.checked);
+    refreshTelegramStatus();
+  });
+
+  document.getElementById('save-telegram-btn').onclick = async () => {
+    const msg = document.getElementById('telegram-status-msg');
+    const body = {
+      telegram_owner_chat_id: document.getElementById('telegram-owner-chat-id').value.trim(),
+    };
+    const tokenEl = document.getElementById('telegram-bot-token');
+    if (tokenEl.value.trim()) body.telegram_bot_token = tokenEl.value.trim();
+
+    try {
+      await fetch(`${DAEMON_URL}/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      tokenEl.value = '';
+      msg.className = 'inline-note ok';
+      msg.textContent = 'Saved.';
+      loadSettings();
+    } catch (e) {
+      msg.className = 'inline-note error';
+      msg.textContent = 'Could not save.';
+    }
+  };
+
+  document.getElementById('test-telegram-btn').onclick = async () => {
+    const btn = document.getElementById('test-telegram-btn');
+    const msg = document.getElementById('telegram-status-msg');
+    const typed = document.getElementById('telegram-bot-token').value.trim();
+    btn.disabled = true;
+    btn.textContent = 'Testing…';
+    try {
+      const res = await (await fetch(`${DAEMON_URL}/telegram/test`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bot_token: typed })
+      })).json();
+      msg.className = res.ok ? 'inline-note ok' : 'inline-note error';
+      msg.textContent = res.ok ? `Token works — bot is @${res.username}.` : `Invalid: ${res.error}`;
+    } catch (e) {
+      msg.className = 'inline-note error';
+      msg.textContent = 'Could not reach Mira daemon.';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Test';
+    }
+  };
 
   // ---------- launch at login ----------
   // Backed entirely by the OS's own Login Items list via main.js -- see the
