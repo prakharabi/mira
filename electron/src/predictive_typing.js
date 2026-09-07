@@ -781,10 +781,20 @@ function scheduleNextPoll(category) {
   pollTimer = setTimeout(pollAndSuggest, delay);
 }
 
-function startPredictiveTyping() {
-  stopped = false;
-  pollTimer = setTimeout(pollAndSuggest, POLL_FAST_MS);
+// tab_tap is what actually turns a keystroke into "accept this suggestion" --
+// if it dies (crash, or something on the system killing it by name/pattern)
+// and nothing notices, Tab silently stops doing anything and every other part
+// of predictive typing keeps running looking healthy. That happened for real:
+// an unrelated `pkill -f tab_tap` during a debugging session took down a
+// production Mira instance's own tab_tap with no visible symptom other than
+// "predictive text stopped working." Auto-restart with backoff, capped so a
+// permanently broken cause (e.g. Accessibility permission revoked) doesn't
+// spin forever relaunching a process that will only fail again.
+const TAB_TAP_MAX_RESTARTS = 5;
+const TAB_TAP_RESTART_DELAY_MS = 2000;
+let tabTapRestartCount = 0;
 
+function spawnTabTap() {
   tabTapProcess = spawn(TAB_TAP_PATH, [], { stdio: ['pipe', 'pipe', 'pipe'] });
 
   tabTapProcess.stdout.on('data', (data) => {
@@ -800,10 +810,29 @@ function startPredictiveTyping() {
     console.error('tab_tap error:', data.toString());
   });
 
+  tabTapProcess.on('spawn', () => {
+    tabTapRestartCount = 0; // a clean, longer-lived run resets the backoff budget
+  });
+
   tabTapProcess.on('exit', (code) => {
     console.log('tab_tap exited with code', code);
     tabTapProcess = null;
+
+    if (stopped) return; // a deliberate stopPredictiveTyping() -- not a crash
+    if (tabTapRestartCount >= TAB_TAP_MAX_RESTARTS) {
+      console.error(`tab_tap: giving up after ${TAB_TAP_MAX_RESTARTS} restarts -- Tab-to-accept is now dead until Mira restarts.`);
+      return;
+    }
+    tabTapRestartCount++;
+    setTimeout(() => { if (!stopped) spawnTabTap(); }, TAB_TAP_RESTART_DELAY_MS);
   });
+}
+
+function startPredictiveTyping() {
+  stopped = false;
+  pollTimer = setTimeout(pollAndSuggest, POLL_FAST_MS);
+  tabTapRestartCount = 0;
+  spawnTabTap();
 }
 
 function stopPredictiveTyping() {
