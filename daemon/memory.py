@@ -2,7 +2,7 @@
 
 Two things live here, deliberately in one store:
 
-  * what Mira knows about Prakhar and the business (products, org, pricing,
+  * what Mira knows about her owner and their work (products, org, pricing,
     people, preferences) -- the knowledge base that makes her more than a
     generic LLM wrapper.
   * what she learns from daily conversation, appended over time.
@@ -28,10 +28,10 @@ FACTS_PATH = MEMORY_DIR / "facts.json"
 # Categories are a fixed vocabulary so the model can't invent a hundred
 # near-duplicates ("preference", "preferences", "user_preference"...).
 CATEGORIES = [
-    "identity",     # who Prakhar is, role, contact style
-    "business",     # KrishiVerse / Ouranos: org, pricing, customers, deals
-    "product",      # Dhara, NEER 4G: specs, positioning
-    "preference",   # how he wants Mira to behave / communicate
+    "identity",     # who the owner is, role, contact style
+    "business",     # their company: org, pricing, customers, deals
+    "product",      # their products: specs, positioning
+    "preference",   # how they want Mira to behave / communicate
     "people",       # colleagues, contacts and their context
     "project",      # ongoing work, deadlines, threads
     "fact",         # anything else worth keeping
@@ -92,9 +92,9 @@ def add_fact(text: str, category: str = "fact", source: str = "manual",
     with _lock:
         facts = _load()
 
-        # Near-duplicate guard. Without this, every conversation that mentions
-        # "I run KrishiVerse" would append another copy and slowly crowd the
-        # retrieved context with the same sentence.
+        # Near-duplicate guard. Without this, every conversation that restates
+        # a standing fact ("I run X") would append another copy and slowly
+        # crowd the retrieved context with the same sentence.
         norm = _normalize(text)
         incoming = _tokens(text)
         for existing in facts:
@@ -230,8 +230,9 @@ Reply with ONLY a JSON array. Each item: {{"text": "...", "category": "one of: {
 Rules:
 - Only things that stay true beyond this conversation. Not questions, not
   small talk, not one-off requests, not anything Mira herself said.
-- Write each fact standalone and third-person ("Prakhar prefers ...", not "you
-  prefer ..."), so it still reads correctly months later out of context.
+- Write each fact standalone and third-person ("The user prefers ...", using
+  their name if known -- not "you prefer ..."), so it still reads correctly
+  months later out of context.
 - If there is nothing durable, reply with exactly: []
 - At most 3 facts.
 
@@ -288,14 +289,20 @@ def extract_facts_from_exchange(user_msg: str, assistant_msg: str, llm_call) -> 
 
 # ---------- first-run seeding ----------
 
+# Seeds a brand-new install with facts about MIRA HERSELF only -- deliberately
+# nothing about a specific owner. This file ships in an open-source repo, so
+# hardcoding one person's name, company and products here would hand every
+# other user a memory pre-loaded with a stranger's business. Everything about
+# the actual owner is learned from conversation (or typed into the Memory view)
+# and lives in the gitignored store.
 SEED_FACTS = [
-    ("Prakhar Mani Tripathi is the founder and CEO of KrishiVerse and Ouranos Robotics.", "identity", True),
-    ("Prakhar's products include Dhara and NEER 4G.", "product", True),
-    ("Prakhar is building Mira as a local-first, OS-integrated AI assistant for macOS, "
-     "intended to eventually be open-sourced.", "project", True),
-    ("Prakhar wants direct, no-fluff, step-by-step answers without unnecessary preamble.", "preference", True),
-    ("Mira runs on Prakhar's MacBook Pro (M1 Pro, 16GB RAM); keep local models and "
-     "background work lightweight.", "fact", True),
+    ("Mira is a local-first, OS-integrated AI assistant running on the user's own Mac.",
+     "identity", True),
+    ("Mira can act on the machine directly -- reminders, apps and music, web search, "
+     "Dump Box capture, calendar and mail -- and should use those abilities rather than "
+     "describing them.", "identity", True),
+    ("Mira should keep answers direct and concise, without preamble or filler.",
+     "preference", True),
 ]
 
 

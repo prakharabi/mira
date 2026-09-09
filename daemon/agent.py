@@ -36,7 +36,7 @@ How to behave:
 - If a request is ambiguous in a way that matters, ask one short question instead of guessing."""
 
 
-def build_system_prompt(user_message: str = "", owner: str = "Prakhar",
+def build_system_prompt(user_message: str = "", owner: str = "the user",
                         surface: str = "chat") -> str:
     now = datetime.datetime.now()
     parts = [IDENTITY.format(owner=owner, capabilities=tools.capability_summary())]
@@ -140,7 +140,7 @@ def _normalize_tool_calls(msg: dict) -> list:
 
 def run_agent(history: list, user_message: str, model_pref: str = "auto",
               settings: dict = None, groq_key: str = "", surface: str = "chat",
-              owner: str = "Prakhar"):
+              owner: str = None):
     """Run one turn, tools and all.
 
     `history` is the persisted conversation WITHOUT any system prompt -- the
@@ -151,6 +151,9 @@ def run_agent(history: list, user_message: str, model_pref: str = "auto",
     which tools ran, so the UI can show what actually happened.
     """
     settings = settings or {}
+    # Owner name is configuration, not something to hardcode in a project meant
+    # to be cloned by other people.
+    owner = owner or settings.get("owner_name") or "the user"
     system_prompt = build_system_prompt(user_message, owner=owner, surface=surface)
     messages = [{"role": "system", "content": system_prompt}] + list(history)
 

@@ -124,7 +124,10 @@ DEFAULT_SETTINGS = {
     # choice, not a surprise.
     "proactive_enabled": False,
     "proactive_calendar": True,
-    "proactive_email": False
+    "proactive_email": False,
+    # Shown to Mira so she can address her owner by name. Blank falls back to
+    # "the user" -- this ships in an open-source repo, so it can't be hardcoded.
+    "owner_name": ""
 }
 
 def load_settings():
@@ -180,6 +183,7 @@ def update_settings(
     proactive_enabled: bool = Body(None),
     proactive_calendar: bool = Body(None),
     proactive_email: bool = Body(None),
+    owner_name: str = Body(None),
 ):
     settings = load_settings()
 
@@ -222,6 +226,8 @@ def update_settings(
         settings["reminders_list"] = reminders_list
     if n8n_base_url is not None:
         settings["n8n_base_url"] = n8n_base_url
+    if owner_name is not None:
+        settings["owner_name"] = owner_name
     if proactive_enabled is not None:
         settings["proactive_enabled"] = proactive_enabled
     if proactive_calendar is not None:
