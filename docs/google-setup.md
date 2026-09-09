@@ -46,6 +46,33 @@ you, set the publishing status to **In production**. You will then see an
 **Advanced → Go to \<app name\> (unsafe)** — and after that tokens stop
 expiring. That warning is expected for any unverified personal OAuth client.
 
+Publishing asks you to fill in **Branding** first. Only three fields are
+actually required:
+
+| Field | What to put |
+|---|---|
+| App name | `Mira` |
+| User support email | your own address (pick it from the dropdown) |
+| Developer contact information | the same address |
+
+**Leave the app logo empty.** Uploading one is what turns a quiet unverified
+app into one that needs Google's brand verification review — a multi-week
+process with nothing to gain when you are the only user. The consent screen
+just shows your app name instead of an icon.
+
+Leave **Application home page**, **Privacy policy** and **Terms of service**
+blank too. They are optional while unverified, and filling them in forces you
+to add Authorized domains, which means proving domain ownership in Search
+Console. There is no reason to do that for a client only you will ever use.
+
+After saving, go back to the audience/publishing page and press **Publish app**.
+Google will warn that verification is required for sensitive scopes — that is
+expected. Your own account keeps working; unverified apps are simply capped at
+100 users, which is 99 more than you need.
+
+If none of this appeals, staying in Testing is a perfectly reasonable choice.
+The only cost is reconnecting on the Google tab about once a week.
+
 ## 4. Create the OAuth client
 
 **APIs & Services → Credentials → Create credentials → OAuth client ID**
