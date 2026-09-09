@@ -125,6 +125,7 @@ DEFAULT_SETTINGS = {
     "proactive_enabled": False,
     "proactive_calendar": True,
     "proactive_email": False,
+    "proactive_tasks": True,
     # Shown to Mira so she can address her owner by name. Blank falls back to
     # "the user" -- this ships in an open-source repo, so it can't be hardcoded.
     "owner_name": ""
@@ -183,6 +184,7 @@ def update_settings(
     proactive_enabled: bool = Body(None),
     proactive_calendar: bool = Body(None),
     proactive_email: bool = Body(None),
+    proactive_tasks: bool = Body(None),
     owner_name: str = Body(None),
 ):
     settings = load_settings()
@@ -232,6 +234,8 @@ def update_settings(
         settings["proactive_enabled"] = proactive_enabled
     if proactive_calendar is not None:
         settings["proactive_calendar"] = proactive_calendar
+    if proactive_tasks is not None:
+        settings["proactive_tasks"] = proactive_tasks
     if proactive_email is not None:
         settings["proactive_email"] = proactive_email
     if appearance is not None:
@@ -1637,6 +1641,43 @@ def memory_delete(fact_id: str):
 @app.get("/memory/search")
 def memory_search(query: str = "", limit: int = 12):
     return {"facts": _memory.search_facts(query, limit)}
+
+
+# ---------- Cross-thread task tracking ----------
+import tasks as _tasks
+
+
+@app.get("/tasks")
+def tasks_list(status: str = "open"):
+    return {"tasks": _tasks.list_tasks(status), "stats": _tasks.stats()}
+
+
+@app.post("/tasks")
+def tasks_add(title: str = Body(...), detail: str = Body(""), due: str = Body(""),
+              surface: str = Body("chat")):
+    try:
+        return _tasks.add_task(title, detail=detail, due=due, surface=surface)
+    except ValueError as e:
+        return {"error": str(e)}
+
+
+@app.post("/tasks/{task_id}")
+def tasks_update(task_id: str, title: str = Body(None), detail: str = Body(None),
+                 due: str = Body(None), status: str = Body(None)):
+    try:
+        task = None
+        if status is not None:
+            task = _tasks.set_status(task_id, status)
+        if title is not None or detail is not None or due is not None:
+            task = _tasks.update_task(task_id, title, detail, due)
+        return task or {"error": "nothing to update"}
+    except (KeyError, ValueError) as e:
+        return {"error": str(e)}
+
+
+@app.delete("/tasks/{task_id}")
+def tasks_delete(task_id: str):
+    return {"deleted": _tasks.delete_task(task_id)}
 
 
 # ---------- Action queue (work only Electron can do) ----------

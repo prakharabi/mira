@@ -25,7 +25,17 @@ import json
 import actions
 import app_control
 import memory
+import tasks
 import web
+
+# Which surface the current turn came from. Set by agent.py before a turn runs,
+# so a task raised over Telegram is recorded as such rather than as "chat".
+_CURRENT_SURFACE = {"name": "chat"}
+
+
+def set_surface(name: str):
+    _CURRENT_SURFACE["name"] = name or "chat"
+
 
 # ---------- individual tool implementations ----------
 
@@ -136,6 +146,33 @@ def _tool_set_volume(level: int = 50, **_):
 
 def _tool_now_playing(**_):
     return app_control.now_playing()
+
+
+
+def _tool_track_task(title: str = "", detail: str = "", due_date: str = "", **_):
+    try:
+        task = tasks.add_task(title, detail=detail, due=due_date,
+                              surface=_CURRENT_SURFACE.get("name", "chat"))
+    except ValueError as e:
+        return {"tracked": False, "error": str(e)}
+    return {"tracked": True, "id": task["id"], "title": task["title"],
+            "due": task["due"], "already_tracked": task["mentions"] > 1}
+
+
+def _tool_list_open_tasks(**_):
+    items = tasks.list_tasks("open", limit=25)
+    return {"count": len(items),
+            "tasks": [{"id": t["id"], "title": t["title"], "due": t["due"],
+                       "raised_on": t["surface"]} for t in items]}
+
+
+def _tool_complete_task(task: str = "", **_):
+    match = tasks.find_task(task)
+    if not match:
+        return {"completed": False,
+                "error": f"no open task matching '{task}' -- list them first if unsure"}
+    tasks.set_status(match["id"], "done")
+    return {"completed": True, "title": match["title"]}
 
 
 def _tool_list_automations(**_):
@@ -336,6 +373,42 @@ TOOLS = [
         "description": "Report the currently playing track from Spotify or Music.",
         "parameters": {"type": "object", "properties": {}},
         "fn": _tool_now_playing,
+    },
+    {
+        "name": "track_task",
+        "summary": "remember an open commitment and bring it back up later",
+        "description": ("Track something the user has committed to or still owes, so it "
+                        "stays visible across chat, Telegram and voice until it is done. "
+                        "Use for open loops without a fixed alarm time; use create_reminder "
+                        "instead when they want to be alerted at a specific time."),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "The commitment, e.g. 'Send the pricing deck to Ravi'"},
+                "detail": {"type": "string", "description": "Any useful context"},
+                "due_date": {"type": "string", "description": "YYYY-MM-DD if there is a deadline"},
+            },
+            "required": ["title"],
+        },
+        "fn": _tool_track_task,
+    },
+    {
+        "name": "list_open_tasks",
+        "summary": "list what the user still has open",
+        "description": "List the open commitments being tracked, whichever surface they were raised on.",
+        "parameters": {"type": "object", "properties": {}},
+        "fn": _tool_list_open_tasks,
+    },
+    {
+        "name": "complete_task",
+        "summary": "close out a task the user has finished",
+        "description": "Mark a tracked task done. Matches on a description, not an id.",
+        "parameters": {
+            "type": "object",
+            "properties": {"task": {"type": "string", "description": "Description of the finished task"}},
+            "required": ["task"],
+        },
+        "fn": _tool_complete_task,
     },
     {
         "name": "list_automations",
