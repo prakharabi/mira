@@ -21,6 +21,11 @@ reminder while sitting inside an app that creates reminders.
 preferences — seeded by you, and extended automatically from conversation. You
 can read, pin, edit and delete every fact in the Memory view.
 
+**Tracks open loops.** Say in passing that you still owe someone a deck —
+in the app, on Telegram, or out loud — and it stays on a list you can see,
+gets brought up when relevant, and nudges you when it comes due or goes quiet.
+Separate from Reminders on purpose: these are commitments, not alarms.
+
 **Predictive typing, system-wide.** Inline suggestions in any app, accepted with
 Tab, plus in-word completion and mid-word typo correction. It learns from what
 you actually type, which is also what keeps it fast.
@@ -40,7 +45,7 @@ directly to you — delivered over Telegram so it reaches you with the lid shut.
 ```
 Electron (UI, OS integration)  ⇄  FastAPI daemon (the brain)  ⇄  Ollama / cloud
         │                                    │
-        └── Swift helpers                    └── memory, tools, web, agent
+        └── Swift helpers                    └── memory, tasks, tools, web, agent
             ax_helper    accessibility / text insertion
             tab_tap      global Tab interception
             ocr_helper   Vision-framework OCR

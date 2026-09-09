@@ -17,6 +17,7 @@ import json
 import requests
 
 import memory
+import tasks
 import tools
 
 MAX_TOOL_ROUNDS = 4          # generous enough to search -> read -> answer
@@ -49,6 +50,10 @@ def build_system_prompt(user_message: str = "", owner: str = "the user",
             "What you already know (long-term memory -- treat as established fact, "
             "don't re-ask):\n" + mem
         )
+
+    open_tasks = tasks.build_task_context()
+    if open_tasks:
+        parts.append(open_tasks)
 
     if surface == "telegram":
         parts.append(
@@ -138,6 +143,35 @@ def _normalize_tool_calls(msg: dict) -> list:
     return out
 
 
+
+def _final_text(msg, messages, settings, groq_key, use_cloud, tools_used) -> str:
+    """Get prose out of a message that has finished calling tools.
+
+    Reasoning models (gpt-oss among them) sometimes put everything in a
+    `reasoning` field and leave `content` null, especially on the turn straight
+    after a tool result. That used to come back as an empty reply -- shown as a
+    blank bubble, saved to history, and thereafter rejected by the API, so a
+    single blank answer bricked the conversation. So: ask once more with tools
+    off, and if even that is empty, say what was actually done rather than
+    nothing.
+    """
+    text = (msg.get("content") or "").strip()
+    if text:
+        return text
+
+    retry = _call_cloud(messages, settings, groq_key, with_tools=False)[0] if use_cloud \
+        else _call_local(messages, settings, with_tools=False)[0]
+    text = ((retry or {}).get("content") or "").strip()
+    if text:
+        return text
+
+    # The work already happened -- the tool ran. Confirming it plainly beats
+    # both a blank bubble and a recital of internal tool names.
+    if tools_used:
+        return "Done."
+    return "I didn't get a usable answer back that time. Try rephrasing?"
+
+
 def run_agent(history: list, user_message: str, model_pref: str = "auto",
               settings: dict = None, groq_key: str = "", surface: str = "chat",
               owner: str = None):
@@ -154,8 +188,14 @@ def run_agent(history: list, user_message: str, model_pref: str = "auto",
     # Owner name is configuration, not something to hardcode in a project meant
     # to be cloned by other people.
     owner = owner or settings.get("owner_name") or "the user"
+    tools.set_surface(surface)
     system_prompt = build_system_prompt(user_message, owner=owner, surface=surface)
-    messages = [{"role": "system", "content": system_prompt}] + list(history)
+    # Drop empty assistant turns. A stored "" (see _final_text below for how one
+    # used to get written) makes the cloud API reject the whole request, which
+    # turned one bad reply into a session that could never be used again.
+    clean_history = [m for m in history
+                     if m.get("role") != "assistant" or (m.get("content") or "").strip()]
+    messages = [{"role": "system", "content": system_prompt}] + clean_history
 
     # Local models below ~4B are unreliable at tool calling and will often emit
     # malformed calls or loop. Tools are offered to the cloud model, and to the
@@ -182,9 +222,8 @@ def run_agent(history: list, user_message: str, model_pref: str = "auto",
 
         calls = _normalize_tool_calls(msg)
         if not calls:
-            return (msg.get("content") or "").strip(), {
-                "model_used": used_model, "tools_used": tools_used,
-            }
+            text = _final_text(msg, messages, settings, groq_key, use_cloud, tools_used)
+            return text, {"model_used": used_model, "tools_used": tools_used}
 
         # record the assistant's tool-call turn verbatim so the model sees its
         # own request alongside the result it gets back
@@ -211,7 +250,9 @@ def run_agent(history: list, user_message: str, model_pref: str = "auto",
     else:
         msg, _ = _call_local(messages, settings, with_tools=False)
 
-    text = (msg or {}).get("content", "") if msg else ""
+    text = ((msg or {}).get("content") or "").strip()
+    if not text and tools_used:
+        text = "Done."
     return (text or "I ran out of steps on that one -- could you narrow it down?"), {
         "model_used": used_model, "tools_used": tools_used,
     }

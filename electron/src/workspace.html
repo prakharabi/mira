@@ -747,6 +747,54 @@
   .mem-pin.on { color: #fbbf24; }
   .mem-pin:hover { background: var(--bg-elevated-2); }
 
+  /* ---------- tasks view ---------- */
+  .task-row {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 11px 13px;
+    margin-bottom: 7px;
+    display: flex; align-items: flex-start; gap: 11px;
+  }
+  .task-row.done { opacity: 0.5; }
+  .task-row.done .t-title { text-decoration: line-through; }
+  .task-check {
+    width: 17px; height: 17px; flex-shrink: 0; margin-top: 1px;
+    border: 1.5px solid var(--text-tertiary);
+    border-radius: 5px; background: transparent;
+    cursor: default; padding: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; color: transparent;
+    transition: border-color 140ms ease, background 140ms ease;
+  }
+  .task-check:hover { border-color: var(--text-secondary); }
+  .task-check.on { background: var(--accent-gradient); border-color: transparent; color: #fff; }
+  .task-row .t-body { flex: 1; min-width: 0; }
+  .task-row .t-title { font-size: 12.5px; line-height: 1.5; }
+  .task-row .t-meta { font-size: 10.5px; color: var(--text-tertiary); margin-top: 4px; }
+  .task-due {
+    font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+    padding: 2px 6px; border-radius: 4px; flex-shrink: 0;
+    background: var(--bg-elevated-2); color: var(--text-secondary);
+  }
+  /* Overdue is the only state worth colouring -- if everything is coloured,
+     nothing reads as urgent. */
+  .task-due.overdue { background: rgba(240,68,56,0.18); color: #ff6369; }
+  .task-due.today { background: rgba(251,191,36,0.16); color: #fbbf24; }
+  .task-actions { display: flex; gap: 4px; flex-shrink: 0; }
+  .task-drop {
+    border: none; background: transparent; cursor: default; padding: 3px 5px;
+    border-radius: 4px; font-size: 12px; color: var(--text-tertiary);
+  }
+  .task-drop:hover { background: var(--bg-elevated-2); }
+  #task-filter { display: flex; gap: 6px; margin-bottom: 14px; }
+  .task-tab {
+    font-size: 11.5px; font-weight: 550; padding: 5px 11px; border-radius: 7px;
+    border: 1px solid var(--border); background: transparent;
+    color: var(--text-secondary); cursor: default;
+  }
+  .task-tab.active { background: var(--bg-elevated-2); color: var(--text-primary); }
+
   /* ---------- Settings view ---------- */
   .setting-row {
     background: var(--bg-elevated);
@@ -955,6 +1003,10 @@
           <svg viewBox="0 0 20 20" fill="none"><path d="M11 2.5L4.5 11H9l-1 6.5L15.5 9H11l1-6.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
           <span>Automations</span>
         </div>
+        <div class="nav-item" data-view="tasks">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M3.5 6l2 2 3.5-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M3.5 14l2 2 3.5-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M11.5 6.5h5M11.5 14.5h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <span>Tasks</span>
+        </div>
         <div class="nav-item" data-view="memory">
           <svg viewBox="0 0 20 20" fill="none"><path d="M10 3.5c-1.6 0-2.6 1-2.9 2.2C5.8 5.9 4.7 7 4.7 8.4c0 .6.2 1.1.5 1.5-.5.5-.8 1.1-.8 1.9 0 1.5 1.2 2.7 2.8 2.8.4 1 1.4 1.9 2.8 1.9s2.4-.9 2.8-1.9c1.6-.1 2.8-1.3 2.8-2.8 0-.8-.3-1.4-.8-1.9.3-.4.5-.9.5-1.5 0-1.4-1.1-2.5-2.4-2.7C12.6 4.5 11.6 3.5 10 3.5z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M10 6v10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
           <span>Memory</span>
@@ -1099,6 +1151,31 @@
       </div>
 
       <!-- ---------- MEMORY ---------- -->
+      <div class="view" id="tasks-view">
+        <div class="view-header">
+          <h1 class="view-title">Tasks</h1>
+          <p class="view-subtitle">Open loops Mira is holding for you — raised anywhere, tracked in one place.</p>
+        </div>
+
+        <div class="card" style="padding:14px; margin-bottom:16px;">
+          <div class="field-row">
+            <input type="text" class="rect-field" id="task-input"
+                   placeholder="Something you still owe someone…" style="flex:1;">
+            <input type="date" class="rect-field" id="task-due" style="width:150px; flex:none;">
+            <button class="mini-btn-sm accent" id="task-add-btn">Track</button>
+          </div>
+          <div class="inline-note" id="task-msg"></div>
+        </div>
+
+        <div id="task-filter">
+          <button class="task-tab active" data-status="open">Open</button>
+          <button class="task-tab" data-status="done">Done</button>
+          <button class="task-tab" data-status="all">All</button>
+        </div>
+
+        <div id="task-list"></div>
+      </div>
+
       <div class="view" id="memory-view">
         <div class="view-header">
           <h1 class="view-title">Memory</h1>
@@ -1108,7 +1185,7 @@
         <div class="card" style="padding:14px; margin-bottom:16px;">
           <div class="field-row">
             <input type="text" class="rect-field" id="mem-input"
-                   placeholder="Teach Mira something — e.g. NEER 4G is priced at ..." style="flex:1;">
+                   placeholder="Teach Mira something about you or your work" style="flex:1;">
             <select class="dropdown-select" id="mem-category" style="width:130px; flex:none;"></select>
             <button class="mini-btn-sm accent" id="mem-add-btn">Remember</button>
           </div>
@@ -1168,6 +1245,16 @@
             </div>
             <label class="toggle-switch">
               <input type="checkbox" id="proactive-email-toggle">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="setting-row">
+            <div>
+              <div class="label">Tasks going stale</div>
+              <div class="sublabel">Nudges about open loops that come due or sit untouched</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="proactive-tasks-toggle">
               <span class="toggle-slider"></span>
             </label>
           </div>
@@ -1673,6 +1760,7 @@
     if (activeItem) positionIndicator(activeItem, animateNav);
     if (name === 'settings') loadSettings();
     if (name === 'memory') loadMemory();
+    if (name === 'tasks') loadTasks();
     if (name === 'chat') { loadSessions(); document.getElementById('text-input').focus(); }
     if (name === 'dumpbox') { loadDumpEntries(); document.getElementById('dump-input').focus(); }
     if (name === 'google') refreshGoogleStatus();
@@ -2001,6 +2089,7 @@
       document.getElementById('proactive-toggle').checked = data.proactive_enabled === true;
       document.getElementById('proactive-calendar-toggle').checked = data.proactive_calendar !== false;
       document.getElementById('proactive-email-toggle').checked = data.proactive_email === true;
+      document.getElementById('proactive-tasks-toggle').checked = data.proactive_tasks !== false;
       document.getElementById('appearance-select').value = data.appearance || 'system';
       document.getElementById('keep-alive-select').value = data.local_model_keep_alive || '60s';
       refreshLoadedModels();
@@ -3398,6 +3487,114 @@
     }
   });
 
+  // ==================== tasks ====================
+  let taskFilter = 'open';
+
+  function dueLabel(iso) {
+    if (!iso) return null;
+    const due = new Date(iso);
+    if (isNaN(due)) return null;
+    const today = new Date(); today.setHours(0, 0, 0, 0);
+    const d = new Date(due); d.setHours(0, 0, 0, 0);
+    const days = Math.round((d - today) / 86400000);
+    if (days < 0) return { text: `${Math.abs(days)}d overdue`, cls: 'overdue' };
+    if (days === 0) return { text: 'today', cls: 'today' };
+    if (days === 1) return { text: 'tomorrow', cls: '' };
+    return { text: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), cls: '' };
+  }
+
+  async function loadTasks() {
+    const listEl = document.getElementById('task-list');
+    try {
+      const data = await (await fetch(`${DAEMON_URL}/tasks?status=${taskFilter}`)).json();
+      const items = data.tasks || [];
+      if (!items.length) {
+        listEl.innerHTML = '<div class="empty-state"><div class="big">'
+          + (taskFilter === 'done' ? 'Nothing finished yet' : 'No open loops')
+          + '</div>Mention something you owe someone — in chat, on Telegram, or out loud — and it lands here.</div>';
+        return;
+      }
+      listEl.innerHTML = items.map(t => {
+        const due = dueLabel(t.due);
+        const done = t.status !== 'open';
+        const where = t.surface && t.surface !== 'chat' ? ` · from ${esc(t.surface)}` : '';
+        const seen = t.mentions > 1 ? ` · mentioned ${t.mentions}×` : '';
+        return `
+        <div class="task-row${done ? ' done' : ''}">
+          <button class="task-check${done ? ' on' : ''}" data-toggle="${esc(t.id)}"
+                  data-status="${esc(t.status)}" title="${done ? 'Reopen' : 'Mark done'}">✓</button>
+          <div class="t-body">
+            <div class="t-title">${esc(t.title)}</div>
+            <div class="t-meta">${esc(relativeTime(t.created_at))}${where}${seen}${t.detail ? ' · ' + esc(t.detail) : ''}</div>
+          </div>
+          ${due ? `<span class="task-due ${due.cls}">${esc(due.text)}</span>` : ''}
+          <div class="task-actions">
+            <button class="task-drop" data-drop="${esc(t.id)}" title="Remove">×</button>
+          </div>
+        </div>`;
+      }).join('');
+    } catch (e) {
+      listEl.innerHTML = '<div class="empty-state">Could not reach Mira daemon.</div>';
+    }
+  }
+
+  document.getElementById('task-add-btn').onclick = async () => {
+    const input = document.getElementById('task-input');
+    const dueEl = document.getElementById('task-due');
+    const msg = document.getElementById('task-msg');
+    const title = input.value.trim();
+    if (!title) return;
+    try {
+      const res = await (await fetch(`${DAEMON_URL}/tasks`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, due: dueEl.value || '', surface: 'chat' })
+      })).json();
+      if (res.error) { msg.className = 'inline-note error'; msg.textContent = res.error; return; }
+      input.value = ''; dueEl.value = '';
+      msg.className = 'inline-note ok';
+      msg.textContent = res.mentions > 1 ? 'Already tracking that — updated it.' : 'Tracking it.';
+      if (taskFilter !== 'open') { taskFilter = 'open'; syncTaskTabs(); }
+      loadTasks();
+    } catch (e) {
+      msg.className = 'inline-note error';
+      msg.textContent = 'Could not reach Mira daemon.';
+    }
+  };
+
+  document.getElementById('task-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') document.getElementById('task-add-btn').click();
+  });
+
+  function syncTaskTabs() {
+    document.querySelectorAll('.task-tab').forEach(b =>
+      b.classList.toggle('active', b.dataset.status === taskFilter));
+  }
+
+  document.getElementById('task-filter').addEventListener('click', (e) => {
+    const tab = e.target.closest('.task-tab');
+    if (!tab) return;
+    taskFilter = tab.dataset.status;
+    syncTaskTabs();
+    loadTasks();
+  });
+
+  document.getElementById('task-list').addEventListener('click', async (e) => {
+    const toggle = e.target.closest('[data-toggle]');
+    const drop = e.target.closest('[data-drop]');
+    if (toggle) {
+      await fetch(`${DAEMON_URL}/tasks/${toggle.dataset.toggle}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: toggle.dataset.status === 'open' ? 'done' : 'open' })
+      });
+      loadTasks();
+    } else if (drop) {
+      await fetch(`${DAEMON_URL}/tasks/${drop.dataset.drop}`, { method: 'DELETE' });
+      loadTasks();
+    }
+  });
+
   // ==================== proactive alerts ====================
   document.getElementById('proactive-toggle').addEventListener('change', (e) =>
     updateSetting('proactive_enabled', e.target.checked));
@@ -3405,6 +3602,8 @@
     updateSetting('proactive_calendar', e.target.checked));
   document.getElementById('proactive-email-toggle').addEventListener('change', (e) =>
     updateSetting('proactive_email', e.target.checked));
+  document.getElementById('proactive-tasks-toggle').addEventListener('change', (e) =>
+    updateSetting('proactive_tasks', e.target.checked));
 
   document.getElementById('proactive-check-btn').onclick = async (e) => {
     const btn = e.currentTarget;

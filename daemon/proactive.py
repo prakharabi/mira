@@ -2,7 +2,7 @@
 
 Watches for a few situations worth interrupting about (a meeting about to
 start, mail that looks like it needs an answer) and pushes them out. Delivery
-prefers Telegram because that reaches Prakhar with the laptop shut, which is
+prefers Telegram because that reaches the user with the laptop shut, which is
 exactly when a "your call starts in 10 minutes" alert is worth anything; it
 falls back to a local notification otherwise.
 
@@ -153,6 +153,41 @@ def _check_email(seen: set) -> list:
     return alerts
 
 
+
+def _check_tasks(seen: set) -> list:
+    """Open commitments that have come due or gone quiet.
+
+    Keyed by task id AND nudge day, so a task that stays open can be raised
+    again after the cooloff in tasks.py without the seen-set silencing it
+    forever -- but never twice in the same day.
+    """
+    try:
+        import tasks
+        candidates = tasks.due_or_stale()
+    except Exception as e:
+        log(f"task check failed: {e}")
+        return []
+
+    today = datetime.date.today().isoformat()
+    alerts, nudged = [], []
+
+    for task, line in candidates:
+        key = f"task:{task['id']}:{today}"
+        if key in seen:
+            continue
+        seen.add(key)
+        alerts.append(line)
+        nudged.append(task["id"])
+
+    if nudged:
+        try:
+            tasks.mark_nudged(nudged)
+        except Exception as e:
+            log(f"could not stamp nudged tasks: {e}")
+
+    return alerts
+
+
 def run_checks(force: bool = False) -> dict:
     """One pass. Returns what it found, so this is testable without waiting."""
     from main import load_settings
@@ -168,6 +203,8 @@ def run_checks(force: bool = False) -> dict:
         alerts.extend(_check_calendar(seen))
     if settings.get("proactive_email", False):
         alerts.extend(_check_email(seen))
+    if settings.get("proactive_tasks", True):
+        alerts.extend(_check_tasks(seen))
 
     delivered_via = None
     if alerts:
@@ -214,5 +251,6 @@ def status() -> dict:
         "running": bool(_thread and _thread.is_alive()),
         "calendar": bool(settings.get("proactive_calendar", True)),
         "email": bool(settings.get("proactive_email", False)),
+        "tasks": bool(settings.get("proactive_tasks", True)),
         "interval_seconds": CHECK_INTERVAL_SECONDS,
     }
