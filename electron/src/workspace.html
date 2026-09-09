@@ -3653,15 +3653,21 @@
     }
   }
 
-  document.getElementById('n8n-open-btn').onclick = async () => {
-    const st = await (await fetch(`${DAEMON_URL}/n8n/status`)).json();
-    ipcRenderer.invoke('open-external', st.url);
-  };
+  // open-external can refuse a URL, and both of these ignored that -- so a
+  // rejected open looked exactly like a click that did nothing.
+  async function openN8nUrl(pick) {
+    const sub = document.getElementById('n8n-sub');
+    try {
+      const st = await (await fetch(`${DAEMON_URL}/n8n/status`)).json();
+      const res = await ipcRenderer.invoke('open-external', pick(st));
+      if (res && res.success === false) sub.textContent = res.error || 'Could not open n8n.';
+    } catch (e) {
+      sub.textContent = 'Could not reach Mira daemon.';
+    }
+  }
 
-  document.getElementById('n8n-new-btn').onclick = async () => {
-    const st = await (await fetch(`${DAEMON_URL}/n8n/status`)).json();
-    ipcRenderer.invoke('open-external', st.new_workflow_url);
-  };
+  document.getElementById('n8n-open-btn').onclick = () => openN8nUrl(st => st.url);
+  document.getElementById('n8n-new-btn').onclick = () => openN8nUrl(st => st.new_workflow_url);
 
   document.getElementById('n8n-start-btn').onclick = async (e) => {
     const btn = e.currentTarget;
