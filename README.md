@@ -73,7 +73,9 @@ git clone https://github.com/<you>/mira.git && cd mira
 
 # daemon
 cd daemon
-python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
+python3 -m venv venv
+./venv/bin/pip install --upgrade pip     # stock macOS pip is too old to resolve these
+./venv/bin/pip install -r requirements.txt
 cp .env.example .env          # optional: add GROQ_API_KEY for the cloud model
 cd ..
 ./scripts/install_daemon.sh   # generates the LaunchAgent and starts it

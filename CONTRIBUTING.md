@@ -9,7 +9,8 @@ data — the notes below exist to keep both safe.
 See [README.md](README.md) for the full setup. In short:
 
 ```bash
-cd daemon && python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
+cd daemon && python3 -m venv venv
+./venv/bin/pip install --upgrade pip && ./venv/bin/pip install -r requirements.txt
 cp .env.example .env
 ../scripts/install_daemon.sh
 cd ../electron && npm install && npx electron .
