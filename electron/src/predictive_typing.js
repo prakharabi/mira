@@ -887,7 +887,33 @@ const TAB_TAP_RESTART_DELAY_MS = 2000;
 let tabTapRestartCount = 0;
 
 function spawnTabTap() {
-  tabTapProcess = spawn(TAB_TAP_PATH, [], { stdio: ['pipe', 'pipe', 'pipe'] });
+  const proc = spawn(TAB_TAP_PATH, [], { stdio: ['pipe', 'pipe', 'pipe'] });
+  tabTapProcess = proc;
+
+  // EPIPE on these pipes is EXPECTED whenever tab_tap dies -- it is how the OS
+  // reports that the other end is gone. It cannot be caught around the write:
+  // Node builds the Error synchronously (so the stack points at our
+  // stdin.write) but EMITS it on the stream afterwards, and a stream with no
+  // 'error' listener re-throws it as an uncaught exception. That is what put
+  // the "A JavaScript error occurred in the main process" dialog on screen and
+  // took down all of Mira. Listening here is the fix; the try/catch around the
+  // write only ever covered the rarer synchronous case.
+  //
+  // Nothing to do on error beyond staying quiet: the 'exit' handler below
+  // respawns, and the next spawn re-syncs the active flag anyway.
+  const ignorePipeError = (stream) => {
+    if (stream) stream.on('error', (e) => {
+      if (DEBUG_PREDICTIVE) console.log('[tab_tap] pipe error:', e.code || e.message);
+    });
+  };
+  ignorePipeError(proc.stdin);
+  ignorePipeError(proc.stdout);
+  ignorePipeError(proc.stderr);
+  // Same story for the process handle itself: a spawn failure (binary missing,
+  // Accessibility revoked) emits 'error' rather than throwing.
+  proc.on('error', (e) => {
+    console.error('tab_tap failed to spawn:', e.message);
+  });
 
   tabTapProcess.stdout.on('data', (data) => {
     const lines = data.toString().split('\n').filter(l => l.trim().length > 0);
