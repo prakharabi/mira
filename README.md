@@ -176,6 +176,7 @@ MIRA_DEBUG_PREDICTIVE=1 npx electron .   # verbose predictive-typing logging
 npm run build                            # rebuild Mira.app
 npm run dmg                              # rebuild and package Mira.dmg
 python3 scripts/generate_icon.py         # regenerate the app icon
+python3 scripts/generate_tray_icon.py    # regenerate the menu bar icon
 ```
 
 Settings → Assistant shows predictive typing's live status and can restart it,
