@@ -1,11 +1,12 @@
-const { app, BrowserWindow, screen, ipcMain, globalShortcut, nativeTheme, Tray, Menu, nativeImage } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, globalShortcut, nativeTheme, Tray, Menu, nativeImage, dialog } = require('electron');
 const { clipboard } = require('electron');
 const http = require('http');
 const { exec, spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
-const { startPredictiveTyping, stopPredictiveTyping } = require('./predictive_typing');
+const { startPredictiveTyping, stopPredictiveTyping,
+        restartPredictiveTyping, predictiveStatus } = require('./predictive_typing');
 const { startMeetingRecording, stopMeetingRecording } = require('./meeting_recorder');
 const reminders = require('./reminders');
 
@@ -466,6 +467,85 @@ ipcMain.handle('login-item-set', (event, enabled) => {
 
 // Opens a URL in the user's real browser. Used for the Google consent screen,
 // which must run in a normal browser session rather than an Electron window.
+// ---------- Predictive typing control ----------
+// Exposed because predictive typing can stop working in ways that look like a
+// hang from the outside: tab_tap exhausting its restart budget after an
+// Accessibility grant is revoked, or the binary being swapped under it by a
+// rebuild. Before this, the only cure was quitting and reopening Mira.
+ipcMain.handle('predictive-status', () => predictiveStatus());
+ipcMain.handle('predictive-restart', async () => await restartPredictiveTyping());
+
+// ---------- Custom logo ----------
+// The image lives in userData, never inside the .app: writing into the bundle
+// breaks its code signature, and every rebuild would wipe it anyway.
+const LOGO_DIR = path.join(app.getPath('userData'), 'branding');
+const LOGO_EXTS = ['.png', '.gif', '.jpg', '.jpeg', '.webp'];
+
+function customLogoPath() {
+  for (const ext of LOGO_EXTS) {
+    const p = path.join(LOGO_DIR, `logo${ext}`);
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
+
+ipcMain.handle('logo-get', () => {
+  const p = customLogoPath();
+  // Cache-bust on mtime: the renderer would otherwise keep showing the old
+  // image after a replacement, since the file URL never changes.
+  return p ? `file://${p}?v=${fs.statSync(p).mtimeMs}` : null;
+});
+
+ipcMain.handle('logo-choose', async () => {
+  const { canceled, filePaths } = await dialog.showOpenDialog({
+    title: 'Choose Mira\'s logo',
+    properties: ['openFile'],
+    filters: [{ name: 'Images', extensions: ['png', 'gif', 'jpg', 'jpeg', 'webp'] }],
+  });
+  if (canceled || !filePaths.length) return { ok: false, canceled: true };
+
+  const src = filePaths[0];
+  const ext = path.extname(src).toLowerCase();
+  if (!LOGO_EXTS.includes(ext)) return { ok: false, error: 'Unsupported image type' };
+
+  try {
+    fs.mkdirSync(LOGO_DIR, { recursive: true });
+    // Drop any previous logo first -- otherwise a PNG left behind would still
+    // be found by customLogoPath() ahead of a newly chosen GIF.
+    for (const e of LOGO_EXTS) {
+      const old = path.join(LOGO_DIR, `logo${e}`);
+      if (fs.existsSync(old)) fs.unlinkSync(old);
+    }
+    const dest = path.join(LOGO_DIR, `logo${ext}`);
+    fs.copyFileSync(src, dest);
+    broadcastLogoChange();
+    return { ok: true, path: `file://${dest}?v=${Date.now()}` };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+ipcMain.handle('logo-reset', () => {
+  try {
+    for (const e of LOGO_EXTS) {
+      const p = path.join(LOGO_DIR, `logo${e}`);
+      if (fs.existsSync(p)) fs.unlinkSync(p);
+    }
+    broadcastLogoChange();
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
+});
+
+function broadcastLogoChange() {
+  const p = customLogoPath();
+  const url = p ? `file://${p}?v=${fs.statSync(p).mtimeMs}` : null;
+  for (const w of BrowserWindow.getAllWindows()) {
+    if (!w.isDestroyed()) w.webContents.send('logo-changed', url);
+  }
+}
+
 ipcMain.handle('open-external', (event, url) => {
   if (typeof url !== 'string' || !/^https:\/\//i.test(url)) {
     return { success: false, error: 'Only https URLs can be opened.' };

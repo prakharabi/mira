@@ -36,3 +36,11 @@ electron/electron.log
 
 # macOS
 .DS_Store
+
+# Stale loose helper builds -- the app runs the copies inside the .app bundles
+# (TabTap.app, MicHelper.app, AXHelper.app, AudioHelper.app). Rebuild with the
+# swiftc commands in CONTRIBUTING.md.
+/tab_tap
+/electron/tab_tap
+/electron/mic_helper
+/electron/mic_test_helper

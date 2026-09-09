@@ -826,6 +826,18 @@
   .toggle-switch input:checked + .toggle-slider { background: var(--accent-gradient); }
   .toggle-switch input:checked + .toggle-slider:before { transform: translateX(17px); }
 
+  /* ---------- logo picker ---------- */
+  .logo-preview {
+    width: 46px; height: 46px; flex-shrink: 0;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: var(--bg-elevated-2);
+    object-fit: contain;
+    padding: 3px; box-sizing: border-box;
+  }
+  .logo-row { display: flex; align-items: center; gap: 12px; }
+  .logo-row .grow { flex: 1; min-width: 0; }
+
   /* ---------- Settings: section groups ---------- */
   .settings-section { margin-bottom: 26px; }
   .settings-section-title {
@@ -1283,10 +1295,30 @@
               <option value="dark">Dark</option>
             </select>
           </div>
+          <div class="setting-row">
+            <div class="logo-row grow">
+              <img class="logo-preview" id="logo-preview" src="pet.gif" alt="">
+              <div class="grow">
+                <div class="label">Mira's look</div>
+                <div class="sublabel" id="logo-sublabel">The image shown as the floating assistant</div>
+              </div>
+            </div>
+            <div style="display:flex; gap:6px; flex-shrink:0;">
+              <button class="mini-btn-sm" id="logo-reset-btn" hidden>Reset</button>
+              <button class="mini-btn-sm accent" id="logo-choose-btn">Choose image…</button>
+            </div>
+          </div>
         </div>
 
         <div class="settings-section">
           <div class="settings-section-title">Assistant</div>
+          <div class="setting-row">
+            <div class="grow">
+              <div class="label">Predictive typing</div>
+              <div class="sublabel" id="predictive-status-text">Checking…</div>
+            </div>
+            <button class="mini-btn-sm" id="predictive-restart-btn" style="flex-shrink:0;">Restart</button>
+          </div>
           <div class="setting-row">
             <div>
               <div class="label">Wake word listening</div>
@@ -1758,7 +1790,7 @@
     document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === name + '-view'));
     const activeItem = navItems.find(i => i.dataset.view === name);
     if (activeItem) positionIndicator(activeItem, animateNav);
-    if (name === 'settings') loadSettings();
+    if (name === 'settings') { loadSettings(); refreshPredictiveStatus(); refreshLogo(); }
     if (name === 'memory') loadMemory();
     if (name === 'tasks') loadTasks();
     if (name === 'chat') { loadSessions(); document.getElementById('text-input').focus(); }
@@ -3486,6 +3518,68 @@
       loadMemory();
     }
   });
+
+  // ==================== predictive typing control ====================
+  function describePredictive(st) {
+    if (!st) return 'Could not read status';
+    if (!st.enabled) return 'Turned off';
+    if (st.tabTapGaveUp) return 'Stopped — Tab-to-accept gave up. Check Accessibility, then restart.';
+    if (!st.running) return 'Not running';
+    if (!st.tabTapAlive) return 'Running, but Tab-to-accept is down — try Restart';
+    return 'Running — suggestions and Tab-to-accept are active';
+  }
+
+  async function refreshPredictiveStatus() {
+    const el = document.getElementById('predictive-status-text');
+    try {
+      el.textContent = describePredictive(await ipcRenderer.invoke('predictive-status'));
+    } catch (e) {
+      el.textContent = 'Could not read status';
+    }
+  }
+
+  document.getElementById('predictive-restart-btn').onclick = async (e) => {
+    const btn = e.currentTarget;
+    const el = document.getElementById('predictive-status-text');
+    btn.disabled = true;
+    const label = btn.textContent;
+    btn.textContent = 'Restarting…';
+    el.textContent = 'Restarting…';
+    try {
+      el.textContent = describePredictive(await ipcRenderer.invoke('predictive-restart'));
+    } catch (err) {
+      el.textContent = 'Restart failed: ' + err.message;
+    }
+    btn.disabled = false;
+    btn.textContent = label;
+  };
+
+  // ==================== logo ====================
+  function applyLogoToSettings(url) {
+    document.getElementById('logo-preview').src = url || 'pet.gif';
+    document.getElementById('logo-reset-btn').hidden = !url;
+    document.getElementById('logo-sublabel').textContent = url
+      ? 'Your own image — shown as the floating assistant'
+      : 'The image shown as the floating assistant';
+  }
+
+  async function refreshLogo() {
+    try { applyLogoToSettings(await ipcRenderer.invoke('logo-get')); } catch (e) {}
+  }
+
+  document.getElementById('logo-choose-btn').onclick = async () => {
+    const res = await ipcRenderer.invoke('logo-choose');
+    if (res && res.ok) applyLogoToSettings(res.path);
+    else if (res && res.error) alert(res.error);
+  };
+
+  document.getElementById('logo-reset-btn').onclick = async () => {
+    await ipcRenderer.invoke('logo-reset');
+    applyLogoToSettings(null);
+  };
+
+  // main.js broadcasts on change, so every window stays in step
+  ipcRenderer.on('logo-changed', (event, url) => applyLogoToSettings(url));
 
   // ==================== tasks ====================
   let taskFilter = 'open';
