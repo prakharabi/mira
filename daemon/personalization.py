@@ -311,13 +311,21 @@ def predict_phrase(context_text: str, max_words: int = 4):
     with _lock:
         data = _load()
         for step in range(max(1, max_words)):
-            result = None
+            result, grounded = None, False
             if len(working) >= 2:
                 key = f"{working[-2]} {working[-1]}"
                 result = _phrase_candidate(data["trigram_next"].get(key))
+                grounded = result is not None
             if result is None and working:
                 result = _phrase_candidate(data["bigram_next"].get(working[-1]))
             if result is None:
+                break
+            # Once the trigram chain runs dry, every further word would be
+            # guessed from a single preceding token -- which is how "the
+            # attached quotation for your" used to run on into "...your name".
+            # A ghost that ends wrong is worse than a shorter one that doesn't,
+            # because the whole suggestion is accepted with one Tab.
+            if not grounded and step >= 1:
                 break
 
             word, conf = result
