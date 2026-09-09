@@ -155,7 +155,7 @@ you supply your own, so your data only moves between your machine and your own
 accounts:
 
 - **Cloud model** — any OpenAI-compatible endpoint (Groq by default)
-- **Google** — your own OAuth client (Desktop app type) for Gmail/Calendar/Drive
+- **Google** — your own OAuth client for Gmail/Calendar/Drive ([setup guide](docs/google-setup.md))
 - **Telegram** — your own bot from @BotFather
 - **n8n** — your own webhook URLs
 
