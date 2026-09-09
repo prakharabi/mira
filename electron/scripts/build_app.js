@@ -73,6 +73,19 @@ function main() {
     process.exit(1);
   }
 
+  // Rebuilding while the app is running leaves codesign trying to re-sign a
+  // bundle macOS still has open, which fails with a wall of buffer output that
+  // looks nothing like the actual problem. Quit it first.
+  log('quitting any running instance...');
+  try {
+    execFileSync('/usr/bin/osascript', ['-e', `tell application id "${BUNDLE_ID}" to quit`],
+                 { stdio: 'ignore' });
+  } catch (e) { /* not running */ }
+  try {
+    execFileSync('/usr/bin/pkill', ['-f', `${APP_NAME}.app/Contents/MacOS/${APP_NAME}`],
+                 { stdio: 'ignore' });
+  } catch (e) { /* nothing to kill */ }
+
   log('cleaning previous build...');
   rmrf(DIST_DIR);
   fs.mkdirSync(DIST_DIR, { recursive: true });

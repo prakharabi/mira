@@ -46,6 +46,13 @@ async def lifespan(app: FastAPI):
         print(f"[main] Could not seed memory: {e}", flush=True)
 
     try:
+        from proactive import start_proactive_background
+        start_proactive_background()
+        print("[main] proactive alert loop start call completed", flush=True)
+    except Exception as e:
+        print(f"[main] Could not start proactive alerts: {e}", flush=True)
+
+    try:
         from telegram_bot import start_telegram_bot_background
         start_telegram_bot_background()
         print("[main] telegram bot start call completed", flush=True)
@@ -111,7 +118,13 @@ DEFAULT_SETTINGS = {
     # after the bot's own bootstrap message tells them their chat ID.
     "telegram_enabled": False,
     "telegram_bot_token": "",
-    "telegram_owner_chat_id": ""
+    "telegram_owner_chat_id": "",
+    # Proactive alerts: Mira speaking first when something needs attention.
+    # Off by default -- an assistant that starts pinging unbidden should be a
+    # choice, not a surprise.
+    "proactive_enabled": False,
+    "proactive_calendar": True,
+    "proactive_email": False
 }
 
 def load_settings():
@@ -164,6 +177,9 @@ def update_settings(
     telegram_enabled: bool = Body(None),
     telegram_bot_token: str = Body(None),
     telegram_owner_chat_id: str = Body(None),
+    proactive_enabled: bool = Body(None),
+    proactive_calendar: bool = Body(None),
+    proactive_email: bool = Body(None),
 ):
     settings = load_settings()
 
@@ -206,6 +222,12 @@ def update_settings(
         settings["reminders_list"] = reminders_list
     if n8n_base_url is not None:
         settings["n8n_base_url"] = n8n_base_url
+    if proactive_enabled is not None:
+        settings["proactive_enabled"] = proactive_enabled
+    if proactive_calendar is not None:
+        settings["proactive_calendar"] = proactive_calendar
+    if proactive_email is not None:
+        settings["proactive_email"] = proactive_email
     if appearance is not None:
         settings["appearance"] = appearance
     if local_model_keep_alive is not None:
@@ -1784,3 +1806,18 @@ def complete_midword(partial: str):
             suggestion = None
 
     return midword_decision(partial, suggestion)
+
+
+# ---------- Proactive alerts ----------
+@app.get("/proactive/status")
+def proactive_status():
+    import proactive
+    return proactive.status()
+
+
+@app.post("/proactive/check")
+def proactive_check(force: bool = Body(True, embed=True)):
+    """Run a check right now -- used by the UI's 'Check now' button, and to
+    verify the whole path works without waiting for the interval."""
+    import proactive
+    return proactive.run_checks(force=force)

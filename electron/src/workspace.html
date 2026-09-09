@@ -668,6 +668,85 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
+  /* ---------- chat session rail ---------- */
+  /* Conversations were always persisted but never listed, so every past chat
+     (including everything said over Telegram and by voice) was unreachable. */
+  #chat-body { display: flex; gap: 14px; flex: 1; min-height: 0; }
+
+  #session-rail {
+    width: 210px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 0;
+  }
+  #session-rail .rail-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 2px 2px;
+  }
+  #session-rail .rail-title {
+    font-size: 11px; font-weight: 650; text-transform: uppercase;
+    letter-spacing: 0.05em; color: var(--text-tertiary);
+  }
+  #session-list { overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding-right: 2px; }
+
+  .session-row {
+    padding: 7px 9px;
+    border-radius: var(--radius-sm);
+    cursor: default;
+    display: flex; align-items: center; gap: 7px;
+    transition: background 120ms var(--ease-standard);
+  }
+  .session-row:hover { background: var(--bg-elevated-2); }
+  .session-row.active { background: var(--sidebar-selected); }
+  .session-row .s-main { flex: 1; min-width: 0; }
+  .session-row .s-title {
+    font-size: 12.5px; font-weight: 550;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .session-row .s-meta { font-size: 10.5px; color: var(--text-tertiary); margin-top: 1px; }
+  .session-row .s-del {
+    opacity: 0; border: none; background: transparent; cursor: default;
+    color: var(--text-tertiary); font-size: 14px; line-height: 1; padding: 2px 4px;
+    border-radius: 4px;
+  }
+  .session-row:hover .s-del { opacity: 1; }
+  .session-row .s-del:hover { color: #ff6369; background: rgba(240,68,56,0.14); }
+  .session-badge {
+    font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+    padding: 2px 5px; border-radius: 4px; flex-shrink: 0;
+    background: rgba(139,92,246,0.18); color: #c4b5fd;
+  }
+  .session-badge.voice { background: rgba(6,182,212,0.18); color: #67e8f9; }
+
+  #chat-main { flex: 1; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+
+  /* ---------- memory view ---------- */
+  .mem-row {
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 11px 13px;
+    margin-bottom: 7px;
+    display: flex; align-items: flex-start; gap: 10px;
+  }
+  .mem-row .m-body { flex: 1; min-width: 0; }
+  .mem-row .m-text { font-size: 12.5px; line-height: 1.5; }
+  .mem-row .m-meta { font-size: 10.5px; color: var(--text-tertiary); margin-top: 4px; }
+  .mem-cat {
+    font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+    padding: 2px 6px; border-radius: 4px; flex-shrink: 0;
+    background: var(--bg-elevated-2); color: var(--text-secondary);
+  }
+  .mem-actions { display: flex; gap: 4px; flex-shrink: 0; }
+  .mem-pin {
+    border: none; background: transparent; cursor: default; padding: 3px 5px;
+    border-radius: 4px; font-size: 12px; color: var(--text-tertiary);
+  }
+  .mem-pin.on { color: #fbbf24; }
+  .mem-pin:hover { background: var(--bg-elevated-2); }
+
   /* ---------- Settings view ---------- */
   .setting-row {
     background: var(--bg-elevated);
@@ -876,6 +955,10 @@
           <svg viewBox="0 0 20 20" fill="none"><path d="M11 2.5L4.5 11H9l-1 6.5L15.5 9H11l1-6.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
           <span>Automations</span>
         </div>
+        <div class="nav-item" data-view="memory">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M10 3.5c-1.6 0-2.6 1-2.9 2.2C5.8 5.9 4.7 7 4.7 8.4c0 .6.2 1.1.5 1.5-.5.5-.8 1.1-.8 1.9 0 1.5 1.2 2.7 2.8 2.8.4 1 1.4 1.9 2.8 1.9s2.4-.9 2.8-1.9c1.6-.1 2.8-1.3 2.8-2.8 0-.8-.3-1.4-.8-1.9.3-.4.5-.9.5-1.5 0-1.4-1.1-2.5-2.4-2.7C12.6 4.5 11.6 3.5 10 3.5z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M10 6v10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+          <span>Memory</span>
+        </div>
         <div class="nav-item" data-view="settings">
           <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="2.6" stroke="currentColor" stroke-width="1.5"/><path d="M10 3v2M10 15v2M17 10h-2M5 10H3M14.9 5.1l-1.4 1.4M6.5 13.5l-1.4 1.4M14.9 14.9l-1.4-1.4M6.5 6.5L5.1 5.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           <span>Settings</span>
@@ -957,16 +1040,28 @@
           </div>
         </div>
 
-        <div id="messages"></div>
+        <div id="chat-body">
+          <div id="session-rail">
+            <div class="rail-head">
+              <span class="rail-title">History</span>
+              <button class="mini-btn-sm" id="new-chat-btn" title="Start a new chat">New</button>
+            </div>
+            <div id="session-list"></div>
+          </div>
 
-        <div id="chat-input-bar">
+          <div id="chat-main">
+            <div id="messages"></div>
+
+            <div id="chat-input-bar">
           <button class="icon-btn" id="mic-btn" title="Hold to talk">
             <svg viewBox="0 0 20 20" fill="none"><rect x="7" y="2.5" width="6" height="10" rx="3" stroke="currentColor" stroke-width="1.5"/><path d="M4.5 9.5a5.5 5.5 0 0011 0M10 15v2.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           </button>
           <input class="text-field" id="text-input" type="text" placeholder="Message Mira…" />
           <button class="btn-primary" id="send-btn" title="Send">
-            <svg viewBox="0 0 20 20" fill="none"><path d="M3 10h14M11 4l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          </button>
+                <svg viewBox="0 0 20 20" fill="none"><path d="M3 10h14M11 4l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1003,6 +1098,26 @@
         </div>
       </div>
 
+      <!-- ---------- MEMORY ---------- -->
+      <div class="view" id="memory-view">
+        <div class="view-header">
+          <h1 class="view-title">Memory</h1>
+          <p class="view-subtitle">What Mira knows about you. Pinned facts travel with every conversation.</p>
+        </div>
+
+        <div class="card" style="padding:14px; margin-bottom:16px;">
+          <div class="field-row">
+            <input type="text" class="rect-field" id="mem-input"
+                   placeholder="Teach Mira something — e.g. NEER 4G is priced at ..." style="flex:1;">
+            <select class="dropdown-select" id="mem-category" style="width:130px; flex:none;"></select>
+            <button class="mini-btn-sm accent" id="mem-add-btn">Remember</button>
+          </div>
+          <div class="inline-note" id="mem-msg"></div>
+        </div>
+
+        <div id="mem-list"></div>
+      </div>
+
       <!-- ---------- SETTINGS ---------- -->
       <div class="view" id="settings-view">
         <div class="view-header">
@@ -1021,6 +1136,50 @@
               <input type="checkbox" id="login-item-toggle">
               <span class="toggle-slider"></span>
             </label>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <div class="settings-section-title">Proactive</div>
+          <div class="setting-row">
+            <div>
+              <div class="label">Alert me without being asked</div>
+              <div class="sublabel">Sends to Telegram when linked, so it reaches you with the laptop shut</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="proactive-toggle">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="setting-row">
+            <div>
+              <div class="label">Upcoming meetings</div>
+              <div class="sublabel">A heads-up 15 minutes before a calendar event</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="proactive-calendar-toggle">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="setting-row">
+            <div>
+              <div class="label">Mail addressed to me</div>
+              <div class="sublabel">Unread mail sent directly to you — not newsletters or CCs</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="proactive-email-toggle">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="setting-block">
+            <div class="setting-block-row">
+              <div>
+                <div class="label">Check now</div>
+                <div class="sublabel">Run a pass immediately instead of waiting for the next one</div>
+              </div>
+              <button class="mini-btn-sm" id="proactive-check-btn">Check</button>
+            </div>
+            <div class="inline-note" id="proactive-msg"></div>
           </div>
         </div>
 
@@ -1457,7 +1616,7 @@
 <script>
   const { ipcRenderer } = require('electron');
   const DAEMON_URL = 'http://localhost:11200';
-  const SESSION_ID = 'main_chat';
+  let SESSION_ID = 'main_chat'; // mutable: the history rail switches conversations
 
   // ---------- tiny spring engine (critically damped by default) ----------
   function makeSpring(damping = 1, response = 0.32) {
@@ -1513,7 +1672,8 @@
     const activeItem = navItems.find(i => i.dataset.view === name);
     if (activeItem) positionIndicator(activeItem, animateNav);
     if (name === 'settings') loadSettings();
-    if (name === 'chat') document.getElementById('text-input').focus();
+    if (name === 'memory') loadMemory();
+    if (name === 'chat') { loadSessions(); document.getElementById('text-input').focus(); }
     if (name === 'dumpbox') { loadDumpEntries(); document.getElementById('dump-input').focus(); }
     if (name === 'google') refreshGoogleStatus();
     if (name === 'automations') loadAutomations();
@@ -1662,7 +1822,11 @@
       if (data.error) { addMessage('system', 'Error: ' + JSON.stringify(data.error)); return; }
 
       addMessage('assistant', data.response);
-      if (data.model_used) addMessage('system', `(${data.model_used})`);
+      const used = (data.tools_used && data.tools_used.length)
+        ? `${data.model_used} · used ${[...new Set(data.tools_used)].join(', ')}`
+        : data.model_used;
+      if (used) addMessage('system', `(${used})`);
+      loadSessions();
       speakText(data.response);
     } catch (e) {
       thinking.remove();
@@ -1834,6 +1998,9 @@
         data.telegram_bot_token_set ? 'Saved — enter to replace' : 'Enter to set';
       document.getElementById('telegram-owner-chat-id').value = data.telegram_owner_chat_id || '';
       refreshTelegramStatus();
+      document.getElementById('proactive-toggle').checked = data.proactive_enabled === true;
+      document.getElementById('proactive-calendar-toggle').checked = data.proactive_calendar !== false;
+      document.getElementById('proactive-email-toggle').checked = data.proactive_email === true;
       document.getElementById('appearance-select').value = data.appearance || 'system';
       document.getElementById('keep-alive-select').value = data.local_model_keep_alive || '60s';
       refreshLoadedModels();
@@ -3070,6 +3237,199 @@
     const base = document.getElementById('n8n-base-url').value.trim();
     if (base) el.value = base.replace(/\/$/, '') + '/webhook/';
   });
+
+  // ==================== chat history rail ====================
+  // Telegram and voice conversations are stored as sessions too, so the same
+  // rail surfaces them -- previously everything said over Telegram or out loud
+  // was recorded but had nowhere to be read back.
+  async function loadSessions() {
+    const listEl = document.getElementById('session-list');
+    if (!listEl) return;
+    try {
+      const data = await (await fetch(`${DAEMON_URL}/sessions`)).json();
+      const sessions = data.sessions || [];
+      if (!sessions.length) {
+        listEl.innerHTML = '<div class="inline-note" style="padding:6px 2px;">No conversations yet.</div>';
+        return;
+      }
+
+      listEl.innerHTML = sessions.map(sn => {
+        const badge = sn.id === 'telegram' ? '<span class="session-badge">TG</span>'
+                    : sn.id === 'wakeword_voice' ? '<span class="session-badge voice">Voice</span>'
+                    : '';
+        const active = sn.id === SESSION_ID ? ' active' : '';
+        return `
+          <div class="session-row${active}" data-session="${esc(sn.id)}">
+            <div class="s-main">
+              <div class="s-title">${esc(sn.title)}</div>
+              <div class="s-meta">${sn.message_count} messages · ${esc(relativeTime(sn.updated_at))}</div>
+            </div>
+            ${badge}
+            <button class="s-del" data-delete-session="${esc(sn.id)}" title="Delete">×</button>
+          </div>`;
+      }).join('');
+    } catch (e) {
+      listEl.innerHTML = '<div class="inline-note">Could not reach Mira daemon.</div>';
+    }
+  }
+
+  async function openSession(sessionId) {
+    SESSION_ID = sessionId;
+    messagesEl.innerHTML = '';
+    try {
+      const data = await (await fetch(`${DAEMON_URL}/sessions/${encodeURIComponent(sessionId)}`)).json();
+      for (const m of data.messages || []) {
+        if (m.role === 'user' || m.role === 'assistant') addMessage(m.role, m.content || '');
+      }
+      if (!(data.messages || []).length) {
+        addMessage('system', 'New conversation — say something.');
+      }
+    } catch (e) {
+      addMessage('system', 'Could not load that conversation.');
+    }
+    loadSessions();
+  }
+
+  document.getElementById('session-list').addEventListener('click', async (e) => {
+    const del = e.target.closest('[data-delete-session]');
+    if (del) {
+      e.stopPropagation();
+      const id = del.dataset.deleteSession;
+      await fetch(`${DAEMON_URL}/sessions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      // deleting the open conversation would leave the transcript orphaned
+      if (id === SESSION_ID) { SESSION_ID = 'main_chat'; openSession(SESSION_ID); }
+      else loadSessions();
+      return;
+    }
+    const row = e.target.closest('[data-session]');
+    if (row) openSession(row.dataset.session);
+  });
+
+  document.getElementById('new-chat-btn').onclick = () => {
+    // a timestamped id keeps conversations genuinely separate rather than
+    // appending everything to one ever-growing thread
+    SESSION_ID = 'chat_' + Date.now().toString(36);
+    messagesEl.innerHTML = '';
+    addMessage('system', 'New conversation — say something.');
+    loadSessions();
+    document.getElementById('text-input').focus();
+  };
+
+  // ==================== memory ====================
+  async function loadMemory() {
+    const listEl = document.getElementById('mem-list');
+    const catSel = document.getElementById('mem-category');
+    try {
+      const data = await (await fetch(`${DAEMON_URL}/memory`)).json();
+
+      if (catSel && !catSel.options.length) {
+        catSel.innerHTML = (data.categories || []).map(c =>
+          `<option value="${esc(c)}">${esc(c)}</option>`).join('');
+        catSel.value = 'fact';
+      }
+
+      const facts = data.facts || [];
+      if (!facts.length) {
+        listEl.innerHTML = '<div class="empty-state"><div class="big">Nothing remembered yet</div>'
+                         + 'Tell Mira something above, or just talk to her — she picks things up.</div>';
+        return;
+      }
+
+      // pinned first: they're the facts that travel with every conversation
+      facts.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+
+      listEl.innerHTML = facts.map(f => `
+        <div class="mem-row">
+          <div class="m-body">
+            <div class="m-text">${esc(f.text)}</div>
+            <div class="m-meta">${esc(f.source)} · ${esc(relativeTime(f.updated_at))}${f.pinned ? ' · always included' : ''}</div>
+          </div>
+          <span class="mem-cat">${esc(f.category)}</span>
+          <div class="mem-actions">
+            <button class="mem-pin${f.pinned ? ' on' : ''}" data-pin="${esc(f.id)}"
+                    data-pinned="${f.pinned ? '1' : '0'}" title="${f.pinned ? 'Unpin' : 'Pin — always include'}">★</button>
+            <button class="mem-pin" data-forget="${esc(f.id)}" title="Forget">×</button>
+          </div>
+        </div>`).join('');
+    } catch (e) {
+      listEl.innerHTML = '<div class="empty-state">Could not reach Mira daemon.</div>';
+    }
+  }
+
+  document.getElementById('mem-add-btn').onclick = async () => {
+    const input = document.getElementById('mem-input');
+    const msg = document.getElementById('mem-msg');
+    const text = input.value.trim();
+    if (!text) return;
+    try {
+      const res = await (await fetch(`${DAEMON_URL}/memory`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, category: document.getElementById('mem-category').value, pinned: false })
+      })).json();
+      if (res.error) { msg.className = 'inline-note error'; msg.textContent = res.error; return; }
+      input.value = '';
+      msg.className = 'inline-note ok';
+      msg.textContent = 'Remembered.';
+      loadMemory();
+    } catch (e) {
+      msg.className = 'inline-note error';
+      msg.textContent = 'Could not reach Mira daemon.';
+    }
+  };
+
+  document.getElementById('mem-input').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') document.getElementById('mem-add-btn').click();
+  });
+
+  document.getElementById('mem-list').addEventListener('click', async (e) => {
+    const pin = e.target.closest('[data-pin]');
+    const forget = e.target.closest('[data-forget]');
+    if (pin) {
+      await fetch(`${DAEMON_URL}/memory/${pin.dataset.pin}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pinned: pin.dataset.pinned !== '1' })
+      });
+      loadMemory();
+    } else if (forget) {
+      await fetch(`${DAEMON_URL}/memory/${forget.dataset.forget}`, { method: 'DELETE' });
+      loadMemory();
+    }
+  });
+
+  // ==================== proactive alerts ====================
+  document.getElementById('proactive-toggle').addEventListener('change', (e) =>
+    updateSetting('proactive_enabled', e.target.checked));
+  document.getElementById('proactive-calendar-toggle').addEventListener('change', (e) =>
+    updateSetting('proactive_calendar', e.target.checked));
+  document.getElementById('proactive-email-toggle').addEventListener('change', (e) =>
+    updateSetting('proactive_email', e.target.checked));
+
+  document.getElementById('proactive-check-btn').onclick = async (e) => {
+    const btn = e.currentTarget;
+    const msg = document.getElementById('proactive-msg');
+    btn.disabled = true;
+    msg.className = 'inline-note';
+    msg.innerHTML = '<span class="spinner-inline"></span>Checking…';
+    try {
+      const res = await (await fetch(`${DAEMON_URL}/proactive/check`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force: true })
+      })).json();
+      const count = (res.alerts || []).length;
+      msg.className = count ? 'inline-note ok' : 'inline-note';
+      msg.textContent = count
+        ? `Sent ${count} alert${count > 1 ? 's' : ''} via ${res.delivered_via}.`
+        : 'Nothing needs your attention right now.';
+    } catch (err) {
+      msg.className = 'inline-note error';
+      msg.textContent = 'Could not reach Mira daemon.';
+    } finally {
+      btn.disabled = false;
+    }
+  };
 </script>
 </body>
 </html>
