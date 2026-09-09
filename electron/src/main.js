@@ -1,4 +1,4 @@
-const { app, BrowserWindow, screen, ipcMain, globalShortcut, nativeTheme, Tray, Menu, nativeImage, dialog } = require('electron');
+const { app, BrowserWindow, screen, ipcMain, globalShortcut, nativeTheme, Tray, Menu, nativeImage, dialog, systemPreferences } = require('electron');
 const { clipboard } = require('electron');
 const http = require('http');
 const { exec, spawn } = require('child_process');
@@ -472,7 +472,20 @@ ipcMain.handle('login-item-set', (event, enabled) => {
 // hang from the outside: tab_tap exhausting its restart budget after an
 // Accessibility grant is revoked, or the binary being swapped under it by a
 // rebuild. Before this, the only cure was quitting and reopening Mira.
-ipcMain.handle('predictive-status', () => predictiveStatus());
+ipcMain.handle('predictive-status', () => ({
+  ...predictiveStatus(),
+  // The grant macOS actually checks is Mira.app's, not TabTap.app's: a child
+  // process inherits its parent's TCC identity, so granting the helper alone
+  // does nothing. Passing false checks without prompting.
+  accessibilityTrusted: systemPreferences.isTrustedAccessibilityClient(false),
+}));
+
+// Prompting is what puts Mira.app into the Accessibility list under the right
+// identity. Far more reliable than telling someone to find and add it by hand,
+// which is also how people end up adding TabTap.app instead.
+ipcMain.handle('predictive-request-accessibility', () => ({
+  trusted: systemPreferences.isTrustedAccessibilityClient(true),
+}));
 
 // Ad-hoc signed builds get a new code hash on every rebuild, and macOS keys
 // Accessibility grants to that hash -- so rebuilding silently revokes
@@ -482,7 +495,10 @@ ipcMain.handle('open-accessibility-settings', () => {
   return require('electron').shell.openExternal(
     'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility');
 });
-ipcMain.handle('predictive-restart', async () => await restartPredictiveTyping());
+ipcMain.handle('predictive-restart', async () => ({
+  ...(await restartPredictiveTyping()),
+  accessibilityTrusted: systemPreferences.isTrustedAccessibilityClient(false),
+}));
 
 // ---------- Custom logo ----------
 // The image lives in userData, never inside the .app: writing into the bundle

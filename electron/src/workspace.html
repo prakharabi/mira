@@ -417,10 +417,18 @@
   .segmented button.active { color: white; }
 
   /* ---------- Chat view ---------- */
-  #chat-view { padding-bottom: 0; }
+  /* Chat is the one view that must NOT scroll as a whole. .view sets
+     overflow-y: auto, which made the entire pane one scroll container -- so
+     scrolling the messages carried the header and the session rail up with
+     them. Chat scrolls in two independent places instead: the message list and
+     the history rail. */
+  #chat-view { padding-bottom: 0; overflow: hidden; }
   #chat-view .view-header { display: flex; align-items: flex-start; justify-content: space-between; }
   #messages {
     flex: 1;
+    min-height: 0;          /* without this a flex child refuses to shrink, so
+                               it grows past the pane instead of scrolling */
+    overflow-y: auto;
     display: flex;
     flex-direction: column;
     gap: 12px;
@@ -689,7 +697,7 @@
     font-size: 11px; font-weight: 650; text-transform: uppercase;
     letter-spacing: 0.05em; color: var(--text-tertiary);
   }
-  #session-list { overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding-right: 2px; }
+  #session-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; padding-right: 2px; }
 
   .session-row {
     padding: 7px 9px;
@@ -1440,13 +1448,13 @@
             <div class="setting-block-row">
               <div>
                 <div class="label">Live web search</div>
-                <div class="sublabel">Lets Mira look up current events, news, and other real-time info via Tavily</div>
+                <div class="sublabel">Already working — no key required. Mira searches DuckDuckGo, then Wikipedia.</div>
               </div>
             </div>
             <div class="setting-block-body">
               <div>
-                <span class="field-label">Tavily API key</span>
-                <input class="rect-field" id="tavily-api-key" type="password" placeholder="Leave blank to disable web search" style="width:100%;" />
+                <span class="field-label">Tavily API key (optional)</span>
+                <input class="rect-field" id="tavily-api-key" type="password" placeholder="Optional — adds a fallback provider" style="width:100%;" />
                 <div class="sublabel" id="tavily-key-status" style="margin-top:5px;"></div>
               </div>
               <div class="field-row">
@@ -1454,7 +1462,7 @@
                 <button class="mini-btn" id="test-tavily-btn">Test connection</button>
               </div>
               <div class="inline-status" id="tavily-test-status"></div>
-              <div class="sublabel">Mira always knows the current date and time regardless of this setting — this only affects live news/search lookups. Get a free key at <span style="color:var(--text-secondary);">tavily.com</span>.</div>
+              <div class="sublabel">Search runs without any key at all. A Tavily key is only tried when the free providers fail or return nothing — useful, but never required. Free key at <span style="color:var(--text-secondary);">tavily.com</span>.</div>
             </div>
           </div>
         </div>
@@ -3526,17 +3534,27 @@
   function describePredictive(st) {
     if (!st) return 'Could not read status';
     if (!st.enabled) return 'Turned off';
-    if (st.tabTapGaveUp) return 'Tab-to-accept gave up — Mira likely lost Accessibility permission (every rebuild revokes it). Re-grant it, then Restart.';
+    // Permission is the cause of nearly every failure here, so it is checked
+    // before the symptoms it produces.
+    if (st.accessibilityTrusted === false) {
+      return 'Mira does not have Accessibility permission — grant it to Mira '
+           + 'itself (not TabTap), then Restart.';
+    }
+    if (st.tabTapGaveUp) return 'Tab-to-accept gave up after repeated failures — try Restart';
     if (!st.running) return 'Not running';
-    if (!st.tabTapAlive) return 'Suggestions are running, but Tab-to-accept is down — check Accessibility, then Restart';
+    if (!st.tabTapAlive) return 'Suggestions are running, but Tab-to-accept is down — try Restart';
     return 'Running — suggestions and Tab-to-accept are active';
   }
 
   function renderPredictive(st) {
     document.getElementById('predictive-status-text').textContent = describePredictive(st);
     // Only offer the permissions route when the symptom actually points there.
-    document.getElementById('predictive-access-btn').hidden =
-      !st || !st.enabled || (st.tabTapAlive && !st.tabTapGaveUp);
+    const needsPermission = st && st.enabled
+      && (st.accessibilityTrusted === false || st.tabTapGaveUp || !st.tabTapAlive);
+    const btn = document.getElementById('predictive-access-btn');
+    btn.hidden = !needsPermission;
+    btn.textContent = st && st.accessibilityTrusted === false
+      ? 'Grant Accessibility…' : 'Open Accessibility…';
   }
 
   async function refreshPredictiveStatus() {
@@ -3547,8 +3565,14 @@
     }
   }
 
-  document.getElementById('predictive-access-btn').onclick = () =>
-    ipcRenderer.invoke('open-accessibility-settings');
+  document.getElementById('predictive-access-btn').onclick = async () => {
+    // Ask macOS for the grant first: its own prompt registers Mira under the
+    // identity TCC actually checks. Only fall back to opening the pane when
+    // the prompt cannot help (already listed but switched off).
+    const res = await ipcRenderer.invoke('predictive-request-accessibility');
+    if (!res.trusted) await ipcRenderer.invoke('open-accessibility-settings');
+    setTimeout(refreshPredictiveStatus, 800);
+  };
 
   document.getElementById('predictive-restart-btn').onclick = async (e) => {
     const btn = e.currentTarget;
