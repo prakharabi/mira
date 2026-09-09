@@ -8,6 +8,21 @@ const path = require('path');
 // file continuously for no benefit.
 const DEBUG_PREDICTIVE = process.env.MIRA_DEBUG_PREDICTIVE === '1';
 
+// When Mira is launched normally (Finder, Login Items) its console output goes
+// nowhere, so a tab_tap that dies on a missing Accessibility grant fails
+// completely silently -- which is exactly the case people need to debug. These
+// few lines go to a real file regardless of how the app was started.
+const DIAG_LOG = path.join(
+  require('electron').app.getPath('userData'), 'predictive-typing.log');
+
+function diag(message) {
+  const line = `[${new Date().toISOString()}] ${message}\n`;
+  try {
+    require('fs').appendFileSync(DIAG_LOG, line);
+  } catch (e) { /* logging must never be the thing that breaks typing */ }
+  if (DEBUG_PREDICTIVE) console.log(message.trim());
+}
+
 // Universal: active in every app except this short blocklist. Tab is only ever
 // intercepted globally while a suggestion pill is actively showing (see
 // tab_tap.swift's `suggestionActive` flag) -- it behaves completely normally
@@ -884,6 +899,8 @@ function scheduleNextPoll(category) {
 // spin forever relaunching a process that will only fail again.
 const TAB_TAP_MAX_RESTARTS = 5;
 const TAB_TAP_RESTART_DELAY_MS = 2000;
+// A run shorter than this never counts as healthy.
+const TAB_TAP_HEALTHY_MS = 20000;
 let tabTapRestartCount = 0;
 
 function spawnTabTap() {
@@ -912,7 +929,7 @@ function spawnTabTap() {
   // Same story for the process handle itself: a spawn failure (binary missing,
   // Accessibility revoked) emits 'error' rather than throwing.
   proc.on('error', (e) => {
-    console.error('tab_tap failed to spawn:', e.message);
+    diag(`tab_tap failed to spawn: ${e.message}`);
   });
 
   proc.stdout.on('data', (data) => {
@@ -925,15 +942,20 @@ function spawnTabTap() {
   });
 
   proc.stderr.on('data', (data) => {
-    console.error('tab_tap error:', data.toString());
+    diag(`tab_tap stderr: ${data.toString().trim()}`);
   });
 
+  const spawnedAt = Date.now();
   proc.on('spawn', () => {
-    tabTapRestartCount = 0; // a clean, longer-lived run resets the backoff budget
+    diag(`tab_tap spawned (pid ${proc.pid})`);
+    // Deliberately NOT resetting the restart budget here. 'spawn' only means
+    // the process was created -- tab_tap with no Accessibility grant spawns
+    // perfectly well and then exits 20ms later. Resetting on spawn made the
+    // cap unreachable, so Mira respawned it every 2s forever.
   });
 
   proc.on('exit', (code) => {
-    console.log('tab_tap exited with code', code);
+    diag(`tab_tap exited with code ${code}`);
     // A restart may already have replaced this process. Without this guard the
     // dying process's handler clears the reference to its own REPLACEMENT and
     // then spawns a third -- so "Restart" would leave two tab_taps fighting
@@ -942,8 +964,16 @@ function spawnTabTap() {
     tabTapProcess = null;
 
     if (stopped) return; // a deliberate stopPredictiveTyping() -- not a crash
+
+    // Only a run that actually lasted refills the budget. Anything shorter is
+    // a crash loop, and a crash loop must not be able to fund itself.
+    if (Date.now() - spawnedAt >= TAB_TAP_HEALTHY_MS) tabTapRestartCount = 0;
+
     if (tabTapRestartCount >= TAB_TAP_MAX_RESTARTS) {
-      console.error(`tab_tap: giving up after ${TAB_TAP_MAX_RESTARTS} restarts -- Tab-to-accept is now dead until Mira restarts.`);
+      diag(`tab_tap: giving up after ${TAB_TAP_MAX_RESTARTS} restarts. This almost `
+         + `always means Mira.app lacks Accessibility permission -- macOS attributes `
+         + `a child process's grant to the app that spawned it, so the grant has to `
+         + `be on Mira.app itself, not on TabTap.app.`);
       return;
     }
     tabTapRestartCount++;
@@ -952,6 +982,7 @@ function spawnTabTap() {
 }
 
 function startPredictiveTyping() {
+  diag('--- predictive typing starting ---');
   stopped = false;
   pollTimer = setTimeout(pollAndSuggest, POLL_FAST_MS);
   tabTapRestartCount = 0;
