@@ -1317,7 +1317,10 @@
               <div class="label">Predictive typing</div>
               <div class="sublabel" id="predictive-status-text">Checking…</div>
             </div>
-            <button class="mini-btn-sm" id="predictive-restart-btn" style="flex-shrink:0;">Restart</button>
+            <div style="display:flex; gap:6px; flex-shrink:0;">
+              <button class="mini-btn-sm" id="predictive-access-btn" hidden>Open Accessibility…</button>
+              <button class="mini-btn-sm" id="predictive-restart-btn">Restart</button>
+            </div>
           </div>
           <div class="setting-row">
             <div>
@@ -3523,20 +3526,29 @@
   function describePredictive(st) {
     if (!st) return 'Could not read status';
     if (!st.enabled) return 'Turned off';
-    if (st.tabTapGaveUp) return 'Stopped — Tab-to-accept gave up. Check Accessibility, then restart.';
+    if (st.tabTapGaveUp) return 'Tab-to-accept gave up — Mira likely lost Accessibility permission (every rebuild revokes it). Re-grant it, then Restart.';
     if (!st.running) return 'Not running';
-    if (!st.tabTapAlive) return 'Running, but Tab-to-accept is down — try Restart';
+    if (!st.tabTapAlive) return 'Suggestions are running, but Tab-to-accept is down — check Accessibility, then Restart';
     return 'Running — suggestions and Tab-to-accept are active';
   }
 
+  function renderPredictive(st) {
+    document.getElementById('predictive-status-text').textContent = describePredictive(st);
+    // Only offer the permissions route when the symptom actually points there.
+    document.getElementById('predictive-access-btn').hidden =
+      !st || !st.enabled || (st.tabTapAlive && !st.tabTapGaveUp);
+  }
+
   async function refreshPredictiveStatus() {
-    const el = document.getElementById('predictive-status-text');
     try {
-      el.textContent = describePredictive(await ipcRenderer.invoke('predictive-status'));
+      renderPredictive(await ipcRenderer.invoke('predictive-status'));
     } catch (e) {
-      el.textContent = 'Could not read status';
+      document.getElementById('predictive-status-text').textContent = 'Could not read status';
     }
   }
+
+  document.getElementById('predictive-access-btn').onclick = () =>
+    ipcRenderer.invoke('open-accessibility-settings');
 
   document.getElementById('predictive-restart-btn').onclick = async (e) => {
     const btn = e.currentTarget;
@@ -3546,7 +3558,7 @@
     btn.textContent = 'Restarting…';
     el.textContent = 'Restarting…';
     try {
-      el.textContent = describePredictive(await ipcRenderer.invoke('predictive-restart'));
+      renderPredictive(await ipcRenderer.invoke('predictive-restart'));
     } catch (err) {
       el.textContent = 'Restart failed: ' + err.message;
     }

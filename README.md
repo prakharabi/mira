@@ -116,6 +116,13 @@ Accessibility, which predictive typing depends on:
 | Screen Recording | OCR, meeting system audio |
 | Automation (Reminders) | creating reminders |
 
+**Rebuilding revokes permissions.** Builds are signed ad-hoc, so macOS keys
+each grant to a code hash that changes every time you run `build_app.js`. After
+a rebuild, predictive typing usually stops because `tab_tap` can no longer
+create its event tap. Settings → Assistant shows this and links straight to the
+Accessibility pane; re-grant, then press Restart. A real Developer ID signature
+would make grants stick across builds.
+
 ### Optional integrations
 
 All are off until you configure them, and **Mira ships no shared API keys** —

@@ -473,6 +473,15 @@ ipcMain.handle('login-item-set', (event, enabled) => {
 // Accessibility grant is revoked, or the binary being swapped under it by a
 // rebuild. Before this, the only cure was quitting and reopening Mira.
 ipcMain.handle('predictive-status', () => predictiveStatus());
+
+// Ad-hoc signed builds get a new code hash on every rebuild, and macOS keys
+// Accessibility grants to that hash -- so rebuilding silently revokes
+// tab_tap's permission and Tab-to-accept dies with no visible cause. Give the
+// user a direct route to the pane instead of "find it in System Settings".
+ipcMain.handle('open-accessibility-settings', () => {
+  return require('electron').shell.openExternal(
+    'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility');
+});
 ipcMain.handle('predictive-restart', async () => await restartPredictiveTyping());
 
 // ---------- Custom logo ----------
