@@ -22,6 +22,27 @@ PORT=5678
 LABEL="com.mira.n8n"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 
+# Find Node even when PATH is bare. This script is also invoked by the Mira
+# daemon, which launchd starts with PATH=/usr/bin:/bin:/usr/sbin:/sbin -- so a
+# Node installed by nvm or Homebrew is invisible, and the script would exit
+# with "npm not found" while the UI still showed a spinner. Anything already
+# on PATH keeps priority.
+hydrate_path() {
+  local candidates=()
+  # newest nvm version first
+  if [ -d "$HOME/.nvm/versions/node" ]; then
+    while IFS= read -r d; do candidates+=("$d/bin"); done < <(
+      find "$HOME/.nvm/versions/node" -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sort -Vr
+    )
+  fi
+  candidates+=(/opt/homebrew/bin /usr/local/bin)
+  for d in "${candidates[@]}"; do
+    [ -x "$d/node" ] && case ":$PATH:" in *":$d:"*) ;; *) PATH="$PATH:$d" ;; esac
+  done
+  export PATH
+}
+hydrate_path
+
 # Bind to loopback, not n8n's default 0.0.0.0, which would put the editor on
 # the local network -- including before an owner account exists.
 export N8N_LISTEN_ADDRESS=127.0.0.1

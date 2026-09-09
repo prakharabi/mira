@@ -1574,6 +1574,9 @@ N8N_URL = "http://127.0.0.1:5678"
 _N8N_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "n8n.sh"
 
 
+_N8N_START_LOG = Path.home() / ".n8n" / "mira-start.log"
+
+
 @app.get("/n8n/status")
 def n8n_status():
     running = False
@@ -1581,11 +1584,24 @@ def n8n_status():
         running = requests.get(N8N_URL, timeout=2).status_code < 500
     except requests.RequestException:
         pass
+
+    # When it is not running, whatever the last start attempt said is the only
+    # useful thing to show. Without this a failed start looked identical to a
+    # start that had simply not finished yet.
+    last_error = ""
+    if not running and _N8N_START_LOG.exists():
+        try:
+            tail = _N8N_START_LOG.read_text().strip().splitlines()
+            last_error = tail[-1][:300] if tail else ""
+        except OSError:
+            pass
+
     return {
         "running": running,
         "url": N8N_URL,
         "new_workflow_url": f"{N8N_URL}/workflow/new",
         "manageable": _N8N_SCRIPT.exists(),
+        "last_error": last_error,
     }
 
 
@@ -1598,12 +1614,16 @@ def n8n_start():
     """
     if not _N8N_SCRIPT.exists():
         return {"started": False, "error": "scripts/n8n.sh not found"}
+    _N8N_START_LOG.parent.mkdir(parents=True, exist_ok=True)
     try:
-        subprocess.Popen([str(_N8N_SCRIPT), "autostart"],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Output goes to a file rather than DEVNULL so a failure has somewhere
+        # to be read from -- this runs detached, so its exit code is never seen.
+        with open(_N8N_START_LOG, "w") as log:
+            subprocess.Popen([str(_N8N_SCRIPT), "autostart"],
+                             stdout=log, stderr=subprocess.STDOUT)
     except (subprocess.SubprocessError, OSError) as e:
         return {"started": False, "error": str(e)}
-    return {"started": True}
+    return {"started": True, "log": str(_N8N_START_LOG)}
 
 
 @app.post("/n8n/stop")

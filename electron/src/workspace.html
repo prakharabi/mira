@@ -3619,9 +3619,15 @@
       title.textContent = 'n8n is not running';
       // Naming the consequence beats naming the state: an automation whose
       // webhook goes nowhere looks like a broken workflow, not a stopped app.
-      sub.textContent = st.manageable
-        ? 'Automations will fail until it starts.'
-        : 'Start it yourself, or point automations at a remote n8n.';
+      // A failed start reads exactly like one still in progress unless the
+      // reason is shown, which is how a broken PATH looked like a hang.
+      if (st.last_error) {
+        sub.textContent = st.last_error;
+      } else {
+        sub.textContent = st.manageable
+          ? 'Automations will fail until it starts.'
+          : 'Start it yourself, or point automations at a remote n8n.';
+      }
     }
 
     show('n8n-open-btn', st.running);
