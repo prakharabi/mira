@@ -262,3 +262,146 @@ def bootstrap_from_chat_history(force: bool = False):
         data = _load()
         data["bootstrapped"] = True
         _save()
+
+
+# ---------- instant local prediction ----------
+# The LLM round-trip is the reason suggestions lag behind typing. Most of what
+# anyone writes is repetitive -- their own names, products, stock phrases -- so
+# the n-gram model learned from their real typing can answer a large share of
+# predictions with a dictionary lookup instead, in well under a millisecond.
+# The model then only has to cover the genuinely novel cases.
+
+# Lower bar than MIN_CONFIDENT_COUNT above: that threshold governs OVERRIDING
+# the LLM's answer, which deserves caution. Here we're offering a suggestion
+# the user can simply ignore, so a weaker signal is still worth showing if it
+# means showing it instantly.
+PHRASE_MIN_COUNT = 2
+PHRASE_MIN_RATIO = 0.34
+
+_recent_ingest_hashes = set()
+_MAX_RECENT_HASHES = 400
+
+
+def _phrase_candidate(counts, min_count=PHRASE_MIN_COUNT, min_ratio=PHRASE_MIN_RATIO):
+    if not counts:
+        return None
+    total = sum(counts.values())
+    word, count = max(counts.items(), key=lambda kv: kv[1])
+    if count < min_count or (count / total) < min_ratio:
+        return None
+    return word, count / total
+
+
+def predict_phrase(context_text: str, max_words: int = 4):
+    """Predict several words ahead, walking the n-gram chain.
+
+    Returns (words, confidence). Each successive word is predicted from the
+    context extended by the previous prediction, and the walk stops as soon as
+    confidence drops -- so a well-worn phrase completes in full while a weak
+    one yields a single word or nothing.
+    """
+    tokens = tokenize(context_text)
+    if not tokens:
+        return [], 0.0
+
+    words = []
+    first_conf = 0.0
+    working = list(tokens)
+
+    with _lock:
+        data = _load()
+        for step in range(max(1, max_words)):
+            result = None
+            if len(working) >= 2:
+                key = f"{working[-2]} {working[-1]}"
+                result = _phrase_candidate(data["trigram_next"].get(key))
+            if result is None and working:
+                result = _phrase_candidate(data["bigram_next"].get(working[-1]))
+            if result is None:
+                break
+
+            word, conf = result
+            if step == 0:
+                first_conf = conf
+            # a phrase that starts repeating itself has stopped being a
+            # prediction and become a loop
+            if word in words[-2:]:
+                break
+            words.append(word)
+            working.append(word)
+            # each step compounds uncertainty; stop before it turns into noise
+            if conf < 0.5 and step >= 1:
+                break
+
+    return words, first_conf
+
+
+def record_typed_text(text: str) -> bool:
+    """Learn from something the user actually wrote.
+
+    Called with whole finished sentences from the typing watcher. Deduplicated
+    by content hash because the watcher sees cumulative text on every poll, and
+    without this a single sentence left on screen would be counted hundreds of
+    times and dominate the model.
+    """
+    text = (text or "").strip()
+    if len(text) < 12:
+        return False
+
+    key = hash(text)
+    with _lock:
+        if key in _recent_ingest_hashes:
+            return False
+        _recent_ingest_hashes.add(key)
+        if len(_recent_ingest_hashes) > _MAX_RECENT_HASHES:
+            _recent_ingest_hashes.clear()
+
+    ingest_text(text)
+    return True
+
+
+# ---------- mid-word: unfinished word, or typo? ----------
+# "enviro" is an unfinished "environment"; "teh" is a broken "the". Both are
+# non-words that a prefix search happily completes -- "teh" completes to
+# "tehran", and "recieve" completes to "recieved" because the personal model
+# LEARNED that misspelling from its owner's typing. So "has no completion"
+# cannot tell the two apart.
+#
+# Word frequency can. If the spelling correction is far more common in real
+# English than the best prefix completion, the user meant the correction.
+CORRECTION_FREQ_MARGIN = 1.0  # zipf points; 1.0 == roughly 10x more common
+
+
+def midword_decision(partial: str, spell_suggestion: str = None):
+    """Decide whether a half-typed word should be completed or corrected.
+
+    Returns {"mode": "complete"|"correct"|"none", ...}.
+    """
+    partial = (partial or "").strip()
+    if not partial:
+        return {"mode": "none"}
+
+    completion = complete_word(partial)
+    completed_word = (partial + completion) if completion else None
+
+    if not spell_suggestion:
+        return ({"mode": "complete", "suffix": completion}
+                if completion else {"mode": "none"})
+
+    try:
+        from wordfreq import zipf_frequency
+    except ImportError:
+        # no frequency data -- fall back to the old rule
+        return ({"mode": "complete", "suffix": completion}
+                if completion else {"mode": "correct", "suggestion": spell_suggestion})
+
+    suggestion_freq = zipf_frequency(spell_suggestion.lower(), "en")
+    completion_freq = zipf_frequency(completed_word.lower(), "en") if completed_word else 0.0
+
+    if not completion:
+        return {"mode": "correct", "suggestion": spell_suggestion}
+
+    if suggestion_freq - completion_freq >= CORRECTION_FREQ_MARGIN:
+        return {"mode": "correct", "suggestion": spell_suggestion}
+
+    return {"mode": "complete", "suffix": completion}

@@ -1,40 +1,120 @@
 <!DOCTYPE html>
 <html>
 <head>
+<meta charset="utf-8">
 <style>
-  body { margin:0; background:transparent; font-family:sans-serif; }
+  :root { color-scheme: light dark; }
+
+  html, body {
+    margin: 0;
+    background: transparent;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* The window carries a macOS vibrancy material, so nothing here paints an
+     opaque background -- doing so would cover the material entirely. */
   #bar {
-    display:flex; gap:5px; background:#1e1e1e; padding:8px;
-    border-radius:20px; align-items:center; flex-wrap:wrap; width:280px;
-    box-sizing:border-box;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 6px;
+    height: 100%;
+    box-sizing: border-box;
+    animation: rise 160ms cubic-bezier(0.16, 1, 0.3, 1);
   }
+  @keyframes rise {
+    from { opacity: 0; transform: translateY(4px) scale(0.97); }
+    to   { opacity: 1; transform: none; }
+  }
+
   button {
-    background:#333; color:white; border:none; border-radius:14px;
-    padding:6px 9px; font-size:11px; cursor:pointer; white-space:nowrap;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    padding: 7px 10px;
+    font: inherit;
+    font-size: 12px;
+    font-weight: 550;
+    color: var(--fg, rgba(255,255,255,0.92));
+    cursor: default;
+    white-space: nowrap;
+    transition: background 120ms ease;
   }
-  button:hover { background:#7c3aed; }
+  button:hover { background: rgba(127,127,127,0.22); }
+  button:active { transform: scale(0.97); }
+  button svg { width: 13px; height: 13px; opacity: 0.75; }
+
+  .sep {
+    width: 1px;
+    height: 18px;
+    background: rgba(127,127,127,0.3);
+    margin: 0 3px;
+    flex-shrink: 0;
+  }
+
+  /* The pill had no way to dismiss it except waiting for the timeout, which is
+     the main thing that made it feel like it was stuck on screen. */
+  #close {
+    padding: 7px 9px;
+    color: rgba(127,127,127,0.9);
+  }
+  #close:hover { background: rgba(240,68,56,0.18); color: #ff6369; }
+  #close svg { width: 11px; height: 11px; opacity: 1; }
+
+  @media (prefers-color-scheme: light) {
+    button { color: rgba(0,0,0,0.85); }
+  }
 </style>
 </head>
 <body>
   <div id="bar">
-    <button onclick="doAction('search')">Search</button>
-    <button onclick="doAction('summarize')">Summarize</button>
-    <button onclick="doAction('remind')">Remind</button>
-    <button onclick="doAction('translate')">Hindi</button>
-    <button onclick="doAction('call')">Call</button>
+    <button data-action="search" title="Search this">
+      <svg viewBox="0 0 20 20" fill="none"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6"/><path d="M13.5 13.5L17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      Search
+    </button>
+    <button data-action="summarize" title="Summarize this">
+      <svg viewBox="0 0 20 20" fill="none"><path d="M4 5.5h12M4 10h12M4 14.5h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      Summarize
+    </button>
+    <button data-action="remind" title="Create a reminder">
+      <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="M10 6.5V10l2.5 1.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      Remind
+    </button>
+    <button data-action="translate" title="Translate to Hindi">
+      <svg viewBox="0 0 20 20" fill="none"><path d="M3 5h7M6.5 5v1.5c0 3-1.5 5.5-3.5 6.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M5 9.5c1 2 2.6 3.2 4.5 3.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M11 17l3.2-8 3.3 8M12.3 14.5h4.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      Hindi
+    </button>
+    <div class="sep"></div>
+    <button id="close" title="Dismiss (esc)">
+      <svg viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
   </div>
+
   <script>
     const { ipcRenderer } = require('electron');
     window.selectedText = '';
 
-    ipcRenderer.on('selected-text', (event, text) => {
-      window.selectedText = text;
+    ipcRenderer.on('selected-text', (event, text) => { window.selectedText = text; });
+
+    document.querySelectorAll('button[data-action]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        ipcRenderer.send('pill-action', { action: btn.dataset.action, text: window.selectedText });
+        ipcRenderer.send('close-pill');
+      });
     });
 
-    function doAction(action) {
-      ipcRenderer.send('pill-action', { action: action, text: window.selectedText });
+    document.getElementById('close').addEventListener('click', () => {
       ipcRenderer.send('close-pill');
-    }
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') ipcRenderer.send('close-pill');
+    });
   </script>
 </body>
 </html>
