@@ -1521,8 +1521,8 @@
           <div class="setting-block">
             <div class="setting-block-row">
               <div>
-                <div class="label">Speech recognition engine</div>
-                <div class="sublabel">Which engine is tried first (the other is used as a fallback)</div>
+                <div class="label">Whisper: local or cloud</div>
+                <div class="sublabel">Only applies when Whisper is used — for meetings, and for dictation if the engine above is set to Whisper</div>
               </div>
               <div class="segmented" id="stt-prefer-segmented">
                 <div class="seg-indicator" id="stt-seg-indicator"></div>
@@ -1612,13 +1612,13 @@
           <div class="setting-block">
             <div class="setting-block-row">
               <div>
-                <div class="label">n8n instance</div>
-                <div class="sublabel">Optional — prefills webhook URLs when adding automations</div>
+                <div class="label">Remote n8n instance</div>
+                <div class="sublabel">Only if you use an n8n elsewhere — the local one is used automatically</div>
               </div>
             </div>
             <div class="setting-block-body">
               <div class="field-row">
-                <input type="text" class="rect-field" id="n8n-base-url" placeholder="https://n8n.example.com" style="flex:1;">
+                <input type="text" class="rect-field" id="n8n-base-url" placeholder="Leave blank to use the local n8n Mira runs" style="flex:1;">
                 <button class="mini-btn" id="save-n8n-btn">Save</button>
               </div>
             </div>
@@ -2197,6 +2197,7 @@
       document.getElementById('proactive-tasks-toggle').checked = data.proactive_tasks !== false;
       document.getElementById('dictation-engine-select').value = data.dictation_engine || 'apple';
       document.getElementById('dictation-locale-select').value = data.dictation_locale || 'en-IN';
+      syncWhisperSubSetting();
       document.getElementById('appearance-select').value = data.appearance || 'system';
       document.getElementById('keep-alive-select').value = data.local_model_keep_alive || '60s';
       refreshLoadedModels();
@@ -3430,7 +3431,15 @@
   document.getElementById('auto-url').addEventListener('focus', async () => {
     const el = document.getElementById('auto-url');
     if (el.value) return;
-    const base = document.getElementById('n8n-base-url').value.trim();
+    let base = document.getElementById('n8n-base-url').value.trim();
+    // Fall back to the local instance Mira manages. Making someone type the
+    // address of an n8n that Mira just started for them is busywork.
+    if (!base) {
+      try {
+        const st = await (await fetch(`${DAEMON_URL}/n8n/status`)).json();
+        if (st.running) base = st.url;
+      } catch (e) { /* leave it blank */ }
+    }
     if (base) el.value = base.replace(/\/$/, '') + '/webhook/';
   });
 
@@ -3685,8 +3694,21 @@
   };
 
   // ==================== dictation engine ====================
-  document.getElementById('dictation-engine-select').addEventListener('change', (e) =>
-    updateSetting('dictation_engine', e.target.value));
+  // The Whisper local/cloud choice sits right below this one and reads like a
+  // competing answer to the same question. Dimming it when Apple is selected
+  // shows the actual relationship: it is a sub-setting of Whisper, still
+  // meaningful because meetings always use Whisper.
+  function syncWhisperSubSetting() {
+    const usingApple = document.getElementById('dictation-engine-select').value === 'apple';
+    const row = document.getElementById('stt-prefer-segmented')?.closest('.setting-block-row')
+             || document.getElementById('stt-prefer-segmented')?.parentElement;
+    if (row) row.style.opacity = usingApple ? '0.55' : '1';
+  }
+
+  document.getElementById('dictation-engine-select').addEventListener('change', (e) => {
+    updateSetting('dictation_engine', e.target.value);
+    syncWhisperSubSetting();
+  });
   document.getElementById('dictation-locale-select').addEventListener('change', (e) =>
     updateSetting('dictation_locale', e.target.value));
 

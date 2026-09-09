@@ -630,7 +630,17 @@ ipcMain.handle('speech-transcribe', async (event, { buffer, locale }) => {
 // inspected during development without clicking through the UI to reach it.
 //   MIRA_OPEN_VIEW=automations electron/dist/Mira.app/Contents/MacOS/Mira
 if (process.env.MIRA_OPEN_VIEW) {
-  app.whenReady().then(() => setTimeout(() => openWorkspaceAt(process.env.MIRA_OPEN_VIEW), 2500));
+  app.whenReady().then(() => setTimeout(() => {
+    openWorkspaceAt(process.env.MIRA_OPEN_VIEW);
+    // MIRA_SCROLL_TO takes a CSS selector and scrolls it into view, so a
+    // section below the fold can be inspected without synthetic scrolling.
+    if (process.env.MIRA_SCROLL_TO && chatWindow && !chatWindow.isDestroyed()) {
+      const sel = JSON.stringify(process.env.MIRA_SCROLL_TO);
+      setTimeout(() => chatWindow.webContents.executeJavaScript(
+        `document.querySelector(${sel})?.scrollIntoView({block:'start'})`
+      ).catch(() => {}), 1200);
+    }
+  }, 2500));
 }
 
 // ---------- Custom logo ----------
