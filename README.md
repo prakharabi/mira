@@ -157,7 +157,7 @@ accounts:
 - **Cloud model** — any OpenAI-compatible endpoint (Groq by default)
 - **Google** — your own OAuth client for Gmail/Calendar/Drive ([setup guide](docs/google-setup.md))
 - **Telegram** — your own bot from @BotFather
-- **n8n** — your own webhook URLs
+- **n8n** — your own webhook URLs (`./scripts/n8n.sh` runs one locally)
 
 Web search needs no key at all.
 
