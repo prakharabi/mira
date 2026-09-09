@@ -626,6 +626,13 @@ ipcMain.handle('speech-transcribe', async (event, { buffer, locale }) => {
   }
 });
 
+// Opens the workspace at a named view on launch. Exists so a view can be
+// inspected during development without clicking through the UI to reach it.
+//   MIRA_OPEN_VIEW=automations electron/dist/Mira.app/Contents/MacOS/Mira
+if (process.env.MIRA_OPEN_VIEW) {
+  app.whenReady().then(() => setTimeout(() => openWorkspaceAt(process.env.MIRA_OPEN_VIEW), 2500));
+}
+
 // ---------- Custom logo ----------
 // The image lives in userData, never inside the .app: writing into the bundle
 // breaks its code signature, and every rebuild would wipe it anyway.

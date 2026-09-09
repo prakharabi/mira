@@ -1567,6 +1567,56 @@ def google_drive_list(query: str = "", max_results: int = 20):
 import automations as _automations
 
 
+# ---------- n8n process control ----------
+# The daemon does this rather than Electron because the script lives in the
+# repo next to this file, and a packaged Mira.app has no copy of it.
+N8N_URL = "http://127.0.0.1:5678"
+_N8N_SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "n8n.sh"
+
+
+@app.get("/n8n/status")
+def n8n_status():
+    running = False
+    try:
+        running = requests.get(N8N_URL, timeout=2).status_code < 500
+    except requests.RequestException:
+        pass
+    return {
+        "running": running,
+        "url": N8N_URL,
+        "new_workflow_url": f"{N8N_URL}/workflow/new",
+        "manageable": _N8N_SCRIPT.exists(),
+    }
+
+
+@app.post("/n8n/start")
+def n8n_start():
+    """Start n8n in the background. Returns immediately; poll /n8n/status.
+
+    First run compiles a native SQLite addon and can take minutes, so this
+    must not block the request -- the UI polls instead of hanging on a spinner.
+    """
+    if not _N8N_SCRIPT.exists():
+        return {"started": False, "error": "scripts/n8n.sh not found"}
+    try:
+        subprocess.Popen([str(_N8N_SCRIPT), "autostart"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except (subprocess.SubprocessError, OSError) as e:
+        return {"started": False, "error": str(e)}
+    return {"started": True}
+
+
+@app.post("/n8n/stop")
+def n8n_stop():
+    if not _N8N_SCRIPT.exists():
+        return {"stopped": False, "error": "scripts/n8n.sh not found"}
+    try:
+        subprocess.run([str(_N8N_SCRIPT), "stop"], capture_output=True, timeout=30)
+    except (subprocess.SubprocessError, OSError) as e:
+        return {"stopped": False, "error": str(e)}
+    return {"stopped": True}
+
+
 @app.get("/automations")
 def automations_list():
     return {"automations": _automations.list_automations()}
