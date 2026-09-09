@@ -259,8 +259,18 @@ function createGhostWindow() {
 }
 
 function setTabTapActive(active) {
-  if (tabTapProcess && !tabTapProcess.killed) {
-    tabTapProcess.stdin.write((active ? 'ACTIVE' : 'INACTIVE') + '\n');
+  // The pipe can be gone while the reference still looks alive: tab_tap dies,
+  // its stdin closes, and 'exit' hasn't fired yet -- so a write here throws
+  // EPIPE synchronously. That crashed the whole main process with an "Uncaught
+  // Exception" dialog. During the auto-restart window this is an entirely
+  // expected state, not an error worth surfacing: the next spawn re-syncs the
+  // flag anyway, since showGhost/hideGhostText set it on every change.
+  const stdin = tabTapProcess && tabTapProcess.stdin;
+  if (!stdin || !stdin.writable || tabTapProcess.killed) return;
+  try {
+    stdin.write((active ? 'ACTIVE' : 'INACTIVE') + '\n');
+  } catch (e) {
+    if (DEBUG_PREDICTIVE) console.log('[tab_tap] state write failed:', e.code || e.message);
   }
 }
 

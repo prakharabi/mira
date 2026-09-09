@@ -106,10 +106,10 @@ def handle_wake_detected(pa: pyaudio.PyAudio, chime: bool = False):
     # load time would create a circular import. Safe to import here since this
     # function only runs after main.py has fully finished loading.
     from main import (
-        transcribe_smart, has_internet,
-        load_history, save_history, call_local_model, call_cloud_model,
-        needs_cloud, load_settings, build_context_message
+        transcribe_smart, load_history, save_history, load_settings,
+        remember_exchange_async, GROQ_API_KEY,
     )
+    import agent
 
     text, _engine_used, _err = transcribe_smart(audio_path)
 
@@ -122,18 +122,24 @@ def handle_wake_detected(pa: pyaudio.PyAudio, chime: bool = False):
     history = load_history(WAKEWORD_SESSION_ID)
     history.append({"role": "user", "content": text})
 
-    context_message = build_context_message(text)
-    messages_for_model = [{"role": "system", "content": context_message}] + history
-
-    if needs_cloud(text) and has_internet():
-        reply, error = call_cloud_model(messages_for_model)
-        if reply is None:
-            reply = call_local_model(messages_for_model)
-    else:
-        reply = call_local_model(messages_for_model)
+    # Same agent as chat and Telegram, so spoken requests can create reminders,
+    # search the web or control music too -- previously voice was the only
+    # surface with no access to any of Mira's actual capabilities. The "voice"
+    # surface tells it to answer in short spoken prose rather than markdown.
+    reply, meta = agent.run_agent(
+        history=history,
+        user_message=text,
+        model_pref="auto",
+        settings=load_settings(),
+        groq_key=GROQ_API_KEY,
+        surface="voice",
+    )
+    if not reply:
+        reply = "Sorry, I couldn't work that one out."
 
     history.append({"role": "assistant", "content": reply})
     save_history(WAKEWORD_SESSION_ID, history)
+    remember_exchange_async(text, reply)
 
     log(f"[wakeword] Reply: {reply}")
 

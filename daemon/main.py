@@ -38,6 +38,14 @@ async def lifespan(app: FastAPI):
         print(f"[main] Could not bootstrap personalization: {e}", flush=True)
 
     try:
+        import memory as _mem_boot
+        seeded = _mem_boot.seed_if_empty()
+        if seeded:
+            print(f"[main] seeded {seeded} baseline memory facts", flush=True)
+    except Exception as e:
+        print(f"[main] Could not seed memory: {e}", flush=True)
+
+    try:
         from telegram_bot import start_telegram_bot_background
         start_telegram_bot_background()
         print("[main] telegram bot start call completed", flush=True)
@@ -581,7 +589,7 @@ def maybe_run_automation(message: str):
     return f"Couldn't run \"{match['name']}\": {result.get('error') or 'HTTP ' + str(result.get('status_code'))}"
 
 
-# ---------- Groq/local routed chatbot endpoint ----------
+# ---------- Routed chatbot endpoint (tool-calling agent) ----------
 @app.post("/chat")
 def chat(session_id: str = Body(...), message: str = Body(...), model: str = Body("auto")):
     automation_reply = maybe_run_automation(message)
@@ -595,40 +603,28 @@ def chat(session_id: str = Body(...), message: str = Body(...), model: str = Bod
     history = load_history(session_id)
     history.append({"role": "user", "content": message})
 
-    # current date/time (+ live search results, if configured) go in as a system
-    # message for the model only -- never saved into the persisted conversation
-    context_message = build_context_message(message)
-    messages_for_model = [{"role": "system", "content": context_message}] + history
+    import agent
+    reply, meta = agent.run_agent(
+        history=history,
+        user_message=message,
+        model_pref=model,
+        settings=load_settings(),
+        groq_key=GROQ_API_KEY,
+        surface="chat",
+    )
 
-    used_model = "local"
-    reply = None
-
-    if model == "local":
-        reply = call_local_model(messages_for_model)
-        used_model = "local"
-
-    elif model == "cloud":
-        reply, error = call_cloud_model(messages_for_model)
-        if reply is None:
-            return {"error": error}
-        used_model = "cloud"
-
-    else:  # auto
-        if needs_cloud(message) and has_internet():
-            reply, error = call_cloud_model(messages_for_model)
-            if reply is not None:
-                used_model = "cloud"
-            else:
-                reply = call_local_model(messages_for_model)
-                used_model = "local"
-        else:
-            reply = call_local_model(messages_for_model)
-            used_model = "local"
+    if reply is None:
+        return {"error": meta.get("error", "model unavailable")}
 
     history.append({"role": "assistant", "content": reply})
     save_history(session_id, history)
+    remember_exchange_async(message, reply)
 
-    return {"response": reply, "model_used": used_model}
+    return {
+        "response": reply,
+        "model_used": meta.get("model_used", "local"),
+        "tools_used": meta.get("tools_used", []),
+    }
 
 
 # ---------- NEW: long-file transcription with local fallback ----------
@@ -1553,3 +1549,192 @@ def telegram_test(bot_token: str = Body("", embed=True)):
 
     bot_info = data.get("result", {})
     return {"ok": True, "username": bot_info.get("username", "")}
+
+
+# ---------- Long-term memory ----------
+import memory as _memory
+import actions as _actions
+
+
+def remember_exchange_async(user_msg: str, assistant_msg: str):
+    """Extract durable facts from an exchange, in the background.
+
+    Runs on the LOCAL model deliberately: it happens after every message, so
+    putting it on the cloud model would double API spend for a background
+    nicety -- and memory extraction reads the user's private conversation,
+    which is exactly the kind of thing that should stay on-device.
+    """
+    import threading
+
+    def work():
+        try:
+            _memory.extract_facts_from_exchange(
+                user_msg, assistant_msg,
+                lambda prompt: route_prompt(prompt, "local")[0],
+            )
+        except Exception as e:
+            print(f"[memory] extraction failed: {e}", flush=True)
+
+    threading.Thread(target=work, daemon=True).start()
+
+
+@app.get("/memory")
+def memory_list():
+    return {"facts": _memory.all_facts(), "categories": _memory.CATEGORIES}
+
+
+@app.post("/memory")
+def memory_add(text: str = Body(...), category: str = Body("fact"),
+               pinned: bool = Body(False)):
+    try:
+        return _memory.add_fact(text, category, source="manual", pinned=pinned)
+    except ValueError as e:
+        return {"error": str(e)}
+
+
+@app.post("/memory/{fact_id}")
+def memory_update(fact_id: str, text: str = Body(None), category: str = Body(None),
+                  pinned: bool = Body(None)):
+    try:
+        return _memory.update_fact(fact_id, text, category, pinned)
+    except KeyError:
+        return {"error": "not found"}
+
+
+@app.delete("/memory/{fact_id}")
+def memory_delete(fact_id: str):
+    return {"deleted": _memory.delete_fact(fact_id)}
+
+
+@app.get("/memory/search")
+def memory_search(query: str = "", limit: int = 12):
+    return {"facts": _memory.search_facts(query, limit)}
+
+
+# ---------- Action queue (work only Electron can do) ----------
+@app.get("/actions/pending")
+def actions_pending():
+    return {"actions": _actions.pending()}
+
+
+@app.post("/actions/{action_id}/result")
+def actions_result(action_id: str, result: dict = Body(..., embed=True)):
+    return {"accepted": _actions.complete(action_id, result)}
+
+
+# ---------- Capability introspection ----------
+@app.get("/capabilities")
+def capabilities():
+    import tools as _tools
+    return {
+        "capabilities": [
+            {"name": t["name"], "summary": t["summary"], "description": t["description"]}
+            for t in _tools.TOOLS
+        ]
+    }
+
+
+# ---------- Web search / fetch (also exposed directly for the UI) ----------
+@app.get("/web/search")
+def web_search_endpoint(query: str, max_results: int = 5):
+    import web as _web
+    key = load_settings().get("tavily_api_key", "")
+    return _web.search(query, max_results, tavily_key=key)
+
+
+@app.get("/web/fetch")
+def web_fetch_endpoint(url: str):
+    import web as _web
+    return _web.fetch_page(url)
+
+
+# ---------- Chat sessions (sidebar history) ----------
+# Conversations were always persisted per session id, but nothing ever listed
+# them, so every past chat was effectively invisible and unreachable from the UI.
+SESSION_META_PATH = HISTORY_DIR / "_sessions.json"
+
+# Sessions Mira creates for herself. They're real conversations and worth
+# reading, but they aren't things the user started from the chat view, so the
+# UI labels them rather than showing a raw id.
+SYSTEM_SESSIONS = {
+    "telegram": "Telegram",
+    "wakeword_voice": "Voice",
+    "main_chat": "Chat",
+    "gmail_drafts": "Gmail drafts",
+}
+
+
+def _load_session_meta() -> dict:
+    if not SESSION_META_PATH.exists():
+        return {}
+    try:
+        return json.loads(SESSION_META_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_session_meta(meta: dict):
+    SESSION_META_PATH.write_text(json.dumps(meta, indent=2))
+
+
+def _derive_title(messages: list) -> str:
+    for m in messages:
+        if m.get("role") == "user" and m.get("content"):
+            text = " ".join(str(m["content"]).split())
+            return text[:60] + ("…" if len(text) > 60 else "")
+    return "New chat"
+
+
+@app.get("/sessions")
+def sessions_list():
+    meta = _load_session_meta()
+    out = []
+    for path in HISTORY_DIR.glob("*.json"):
+        if path.name.startswith("_"):
+            continue
+        session_id = path.stem
+        try:
+            messages = json.loads(path.read_text())
+        except (json.JSONDecodeError, OSError):
+            continue
+        if not isinstance(messages, list):
+            continue
+
+        entry = meta.get(session_id, {})
+        out.append({
+            "id": session_id,
+            "title": entry.get("title") or SYSTEM_SESSIONS.get(session_id) or _derive_title(messages),
+            "kind": "system" if session_id in SYSTEM_SESSIONS else "chat",
+            "message_count": len(messages),
+            "updated_at": datetime.datetime.fromtimestamp(path.stat().st_mtime).isoformat(timespec="seconds"),
+            "preview": _derive_title(messages),
+        })
+
+    out.sort(key=lambda s: s["updated_at"], reverse=True)
+    return {"sessions": out}
+
+
+@app.get("/sessions/{session_id}")
+def session_get(session_id: str):
+    return {"id": session_id, "messages": load_history(session_id)}
+
+
+@app.post("/sessions/{session_id}/rename")
+def session_rename(session_id: str, title: str = Body(..., embed=True)):
+    meta = _load_session_meta()
+    meta.setdefault(session_id, {})["title"] = (title or "").strip()[:80]
+    _save_session_meta(meta)
+    return {"id": session_id, "title": meta[session_id]["title"]}
+
+
+@app.delete("/sessions/{session_id}")
+def session_delete(session_id: str):
+    path = HISTORY_DIR / f"{session_id}.json"
+    existed = path.exists()
+    if existed:
+        path.unlink()
+    meta = _load_session_meta()
+    if session_id in meta:
+        meta.pop(session_id)
+        _save_session_meta(meta)
+    return {"deleted": existed}

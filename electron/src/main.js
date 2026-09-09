@@ -358,6 +358,58 @@ ipcMain.handle('reminders-lists', () => reminders.listLists());
 
 ipcMain.handle('reminders-add', (event, item) => reminders.addReminder(item));
 
+// ---------- Action queue: work the daemon can't do itself ----------
+// Creating a reminder needs Apple Events, and the daemon is a headless
+// LaunchAgent that can't get an Automation consent grant -- its osascript call
+// would hang on a dialog nobody sees. So when Mira decides in conversation to
+// create a reminder, the daemon queues it here and this poller executes it as
+// the foreground app, then reports back so the model can confirm truthfully
+// rather than claiming success it never had.
+const ACTION_POLL_MS = 2000;
+let actionPollTimer = null;
+
+async function runQueuedAction(action) {
+  if (action.type === 'create_reminder') {
+    const p = action.params || {};
+    return reminders.addReminder({
+      title: p.title,
+      note: p.note || '',
+      due: p.due || null,
+      listName: '',
+    });
+  }
+  return { success: false, error: `unknown action type: ${action.type}` };
+}
+
+function postActionResult(actionId, result) {
+  const body = JSON.stringify({ result });
+  const req = http.request(
+    `http://localhost:11200/actions/${actionId}/result`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } },
+    (res) => { res.on('data', () => {}); }
+  );
+  req.on('error', () => {});
+  req.write(body);
+  req.end();
+}
+
+function pollActions() {
+  http.get('http://localhost:11200/actions/pending', { timeout: 4000 }, (res) => {
+    let data = '';
+    res.on('data', (c) => { data += c; });
+    res.on('end', async () => {
+      try {
+        const parsed = JSON.parse(data);
+        for (const action of parsed.actions || []) {
+          const result = await runQueuedAction(action);
+          postActionResult(action.id, result);
+        }
+      } catch (e) { /* daemon restarting or mid-write -- next tick retries */ }
+    });
+  }).on('error', () => {})
+    .on('timeout', function () { this.destroy(); });
+}
+
 // Appearance override. macOS apps are expected to follow the system setting by
 // default while still letting the user pin light or dark, so 'system' hands
 // control back to nativeTheme rather than freezing whatever is current.
@@ -607,6 +659,8 @@ app.whenReady().then(() => {
 
   buildTray();
 
+  actionPollTimer = setInterval(pollActions, ACTION_POLL_MS);
+
   setInterval(() => {
     const current = clipboard.readText();
     if (current && current !== lastClipboard) {
@@ -621,6 +675,7 @@ app.on('before-quit', () => {
 });
 
 app.on('will-quit', () => {
+  if (actionPollTimer) clearInterval(actionPollTimer);
   globalShortcut.unregisterAll();
   stopPredictiveTyping();
 });
