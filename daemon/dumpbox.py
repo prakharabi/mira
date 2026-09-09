@@ -95,6 +95,9 @@ PROCESS_PROMPT = """You turn a freeform brain-dump into a structured action plan
 
 Today is {today} ({weekday}).
 
+The next seven days, so you never have to work a weekday out yourself:
+{date_table}
+
 Read the dump below and reply with ONLY a JSON object, no prose before or after,
 in exactly this shape:
 
@@ -112,7 +115,8 @@ Rules:
 - "title" must be short and imperative ("Email Ravi the invoice"), not a sentence
   copied from the dump.
 - Set "due" only when the dump actually implies a date or deadline. Resolve
-  relative dates ("tomorrow", "next Friday") against today's date above. Otherwise null.
+  relative dates by COPYING the matching date from the table above rather than
+  counting days yourself. Otherwise null.
 - key_points should be at most 6 items. Omit filler.
 
 DUMP:
@@ -192,9 +196,22 @@ def process_entry(entry_id: str, llm_call) -> dict:
         raise KeyError(entry_id)
 
     now = datetime.datetime.now()
+    # Spelling the week out beats asking a small model to do calendar
+    # arithmetic: given only "today is Wednesday", they routinely resolve
+    # "by Friday" to a Sunday. That mattered little while a human reviewed
+    # every item, and matters a lot now that these file themselves.
+    date_table = "\n".join(
+        "  {} = {}{}".format(
+            (now + datetime.timedelta(days=d)).strftime("%A"),
+            (now + datetime.timedelta(days=d)).strftime("%Y-%m-%d"),
+            " (tomorrow)" if d == 1 else (" (today)" if d == 0 else ""),
+        )
+        for d in range(8)
+    )
     prompt = PROCESS_PROMPT.format(
         today=now.strftime("%Y-%m-%d"),
         weekday=now.strftime("%A"),
+        date_table=date_table,
         text=entry["text"],
     )
 
@@ -321,31 +338,39 @@ def reminders_lists() -> list:
 
 
 def push_to_reminders(title: str, note: str = "", due: str = None, list_name: str = "") -> dict:
-    offset = _due_to_offset_seconds(due)
-    try:
-        result = subprocess.run(
-            ["osascript", "-e", _ADD_REMINDER_SCRIPT, "--",
-             title, note or "", offset, list_name or ""],
-            capture_output=True, text=True, timeout=20,
-        )
-    except (subprocess.SubprocessError, OSError) as e:
-        return {"success": False, "error": str(e)}
+    """Create one reminder, by asking Electron to do it.
 
-    if result.returncode != 0:
-        err = (result.stderr or "").strip()
-        # -1743 is macOS's "user has not granted Automation permission" error.
-        # Surfacing this specifically matters because the failure is a one-time
-        # consent dialog, not a bug the user can fix by retrying blindly.
-        if "-1743" in err or "Not authorized" in err:
+    This used to run osascript directly. It could not work: the daemon is a
+    headless LaunchAgent, and macOS will not show one an Automation consent
+    prompt -- the call either fails with -1743 or hangs on a dialog nobody can
+    see. So the write is queued for Electron, which as a foreground app can get
+    consent. It is the same path the create_reminder tool uses.
+    """
+    import actions
+
+    action_id = actions.enqueue("create_reminder", {
+        "title": title,
+        "note": note or "",
+        "due": due or None,
+        "list_name": list_name or "",
+    })
+    # Generous, because the very first reminder of a session may sit behind the
+    # user answering the Automation consent dialog.
+    result = actions.wait_for(action_id, timeout=30)
+
+    if result is None:
+        return {"success": False,
+                "error": "Queued, but the Mira app did not confirm. Is Mira running?"}
+    if not result.get("success"):
+        err = result.get("error", "could not create reminder")
+        if "-1743" in str(err) or "Not authorized" in str(err):
             return {
                 "success": False,
-                "error": "Mira needs permission to control Reminders. "
-                         "Grant it in System Settings > Privacy & Security > Automation, "
-                         "then try again.",
+                "error": "Mira needs permission to control Reminders. Grant it in "
+                         "System Settings > Privacy & Security > Automation, then try again.",
                 "needs_permission": True,
             }
-        return {"success": False, "error": err or "osascript failed"}
-
+        return {"success": False, "error": err}
     return {"success": True}
 
 

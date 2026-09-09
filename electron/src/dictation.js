@@ -1,3 +1,5 @@
+const { ipcRenderer } = require('electron');
+
 // Shared voice-to-text for capture fields (Dump Box view and Quick Capture).
 //
 // Toggle-based rather than the chat mic's press-and-hold: a dump is often a
@@ -23,6 +25,16 @@ function createDictation({ onText, onStateChange, onError }) {
   let chunks = [];
   let recording = false;
   let transcribing = false;
+
+// Settings are read per-dictation rather than cached: switching engine in
+// Settings should take effect on the very next press, not after a restart.
+async function fetchSettings() {
+  try {
+    return await (await fetch('http://localhost:11200/settings')).json();
+  } catch (e) {
+    return {};
+  }
+}
   let audioContext = null;
   let levelTimer = null;
   let speechMs = 0;
@@ -96,16 +108,40 @@ function createDictation({ onText, onStateChange, onError }) {
       setState('transcribing');
 
       try {
-        const form = new FormData();
-        form.append('audio', blob, 'dictation.webm');
-        const res = await fetch('http://localhost:11200/transcribe', { method: 'POST', body: form });
-        const data = await res.json();
+        let text = null;
 
-        if (data.error) {
-          onError && onError('Could not transcribe that.');
-        } else if (data.text && data.text.trim()) {
-          onText && onText(data.text.trim());
+        // Apple's recognizer first when chosen: it runs on this Mac, needs no
+        // API key and answers a short clip faster than the round trip to a
+        // cloud Whisper. Whisper stays the fallback rather than being removed,
+        // because Apple's engine can be unavailable (permission refused, a
+        // locale with no model) and dictation failing outright is worse than
+        // dictation being a second slower.
+        const settings = await fetchSettings();
+        if ((settings.dictation_engine || 'apple') === 'apple') {
+          const buffer = await blob.arrayBuffer();
+          const res = await ipcRenderer.invoke('speech-transcribe', {
+            buffer, locale: settings.dictation_locale || 'en-IN',
+          });
+          if (res && !res.error && typeof res.text === 'string') {
+            text = res.text;
+          } else if (res && res.error) {
+            console.warn('[dictation] Apple engine unavailable, using Whisper:', res.error);
+          }
         }
+
+        if (text === null) {
+          const form = new FormData();
+          form.append('audio', blob, 'dictation.webm');
+          const res = await fetch('http://localhost:11200/transcribe', { method: 'POST', body: form });
+          const data = await res.json();
+          if (data.error) {
+            onError && onError('Could not transcribe that.');
+          } else {
+            text = data.text || '';
+          }
+        }
+
+        if (text && text.trim()) onText && onText(text.trim());
       } catch (e) {
         onError && onError('Could not reach Mira daemon.');
       } finally {

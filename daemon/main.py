@@ -6,6 +6,7 @@ import requests
 import os
 import json
 import subprocess
+import threading
 import uuid
 import time
 import datetime
@@ -126,6 +127,10 @@ DEFAULT_SETTINGS = {
     "proactive_calendar": True,
     "proactive_email": False,
     "proactive_tasks": True,
+    "dumpbox_auto_process": True,
+    "dumpbox_auto_reminders": True,
+    "dictation_engine": "apple",
+    "dictation_locale": "en-IN",
     # Shown to Mira so she can address her owner by name. Blank falls back to
     # "the user" -- this ships in an open-source repo, so it can't be hardcoded.
     "owner_name": ""
@@ -185,6 +190,10 @@ def update_settings(
     proactive_calendar: bool = Body(None),
     proactive_email: bool = Body(None),
     proactive_tasks: bool = Body(None),
+    dumpbox_auto_process: bool = Body(None),
+    dumpbox_auto_reminders: bool = Body(None),
+    dictation_engine: str = Body(None),
+    dictation_locale: str = Body(None),
     owner_name: str = Body(None),
 ):
     settings = load_settings()
@@ -236,6 +245,14 @@ def update_settings(
         settings["proactive_calendar"] = proactive_calendar
     if proactive_tasks is not None:
         settings["proactive_tasks"] = proactive_tasks
+    if dumpbox_auto_process is not None:
+        settings["dumpbox_auto_process"] = dumpbox_auto_process
+    if dumpbox_auto_reminders is not None:
+        settings["dumpbox_auto_reminders"] = dumpbox_auto_reminders
+    if dictation_engine is not None:
+        settings["dictation_engine"] = dictation_engine
+    if dictation_locale is not None:
+        settings["dictation_locale"] = dictation_locale
     if proactive_email is not None:
         settings["proactive_email"] = proactive_email
     if appearance is not None:
@@ -296,9 +313,14 @@ MEETINGS_DIR = Path.home() / "Mira" / "daemon" / "meetings"
 MEETINGS_DIR.mkdir(parents=True, exist_ok=True)
 
 # ---------- whisper.cpp paths (EDIT THESE if your paths differ) ----------
-WHISPER_CLI = Path.home() / "Mira" / "whisper.cpp" / "build" / "bin" / "whisper-cli"
-WHISPER_MODEL = Path.home() / "Mira" / "whisper.cpp" / "models" / "ggml-small.bin"
-WHISPER_VAD_MODEL = Path.home() / "Mira" / "whisper.cpp" / "models" / "ggml-silero-v6.2.0.bin"
+# Resolved from this file's location, not a hardcoded ~/Mira: the repo can be
+# cloned anywhere, and whisper.cpp is an optional extra that many installs will
+# not have at all (it is gitignored). MIRA_WHISPER_DIR overrides.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+_WHISPER_DIR = Path(os.getenv("MIRA_WHISPER_DIR") or (_REPO_ROOT / "whisper.cpp"))
+WHISPER_CLI = _WHISPER_DIR / "build" / "bin" / "whisper-cli"
+WHISPER_MODEL = _WHISPER_DIR / "models" / "ggml-small.bin"
+WHISPER_VAD_MODEL = _WHISPER_DIR / "models" / "ggml-silero-v6.2.0.bin"
 
 # ffmpeg's full path -- LaunchAgent daemons run with a minimal PATH that does NOT
 # include Homebrew's /opt/homebrew/bin, so "ffmpeg" alone is not found. Confirm this
@@ -1315,12 +1337,60 @@ def dumpbox_list():
     return {"entries": _dumpbox.list_entries()}
 
 
+def _autoprocess_dumpbox_entry(entry_id: str):
+    """Summarize a captured thought and file its action items, unattended.
+
+    A brain-dump that then waits for you to come back, press Process, tick
+    boxes and press Send is not capture -- it is a queue of chores about your
+    chores. This runs the whole chain in the background so the capture is the
+    only action the user takes.
+
+    Everything here is best-effort and swallowed on failure: the entry is
+    already saved, and the manual buttons remain as the fallback.
+    """
+    settings = load_settings()
+    if not settings.get("dumpbox_auto_process", True):
+        return
+
+    def llm_call(prompt: str) -> str:
+        return route_prompt(prompt, "auto")[0]
+
+    try:
+        entry = _dumpbox.process_entry(entry_id, llm_call)
+    except Exception as e:
+        print(f"[dumpbox] auto-process failed for {entry_id}: {e}", flush=True)
+        return
+
+    if not settings.get("dumpbox_auto_reminders", True):
+        return
+    if not entry.get("action_items"):
+        return
+
+    try:
+        result = _dumpbox.push_action_items(
+            entry_id, None, settings.get("reminders_list", ""))
+        pushed = len(result.get("pushed", []))
+        if pushed:
+            print(f"[dumpbox] auto-filed {pushed} reminder(s) from {entry_id}", flush=True)
+        for f in result.get("failures", []):
+            print(f"[dumpbox] reminder failed: {f.get('error')}", flush=True)
+    except Exception as e:
+        print(f"[dumpbox] auto-reminders failed for {entry_id}: {e}", flush=True)
+
+
 @app.post("/dumpbox")
 def dumpbox_add(text: str = Body(..., embed=True)):
     try:
-        return _dumpbox.add_entry(text)
+        entry = _dumpbox.add_entry(text)
     except ValueError as e:
         return {"error": str(e)}
+
+    # Off the request thread: processing is a model call, and Quick Capture
+    # must close the moment you hit return rather than sit there spinning.
+    threading.Thread(
+        target=_autoprocess_dumpbox_entry, args=(entry["id"],), daemon=True
+    ).start()
+    return entry
 
 
 @app.get("/dumpbox/{entry_id}")

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.mira.speechhelper</string>
+    <key>CFBundleName</key>
+    <string>SpeechHelper</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Mira uses speech recognition to turn your dictation into text on this Mac.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Mira uses the microphone for voice dictation.</string>
+</dict>
+</plist>
