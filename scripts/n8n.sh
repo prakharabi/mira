@@ -68,6 +68,7 @@ case "${1:-docker}" in
       # the container being recreated on an n8n upgrade.
       docker volume create "$DATA_VOLUME" >/dev/null
       docker run -d --name "$CONTAINER" \
+        --restart unless-stopped \
         -p "$PORT:5678" \
         -v "$DATA_VOLUME:/home/node/.n8n" \
         -e GENERIC_TIMEZONE="$(readlink /etc/localtime | sed 's|.*/zoneinfo/||')" \
@@ -95,6 +96,11 @@ for _ in $(seq 1 60); do
     echo "     The description is what voice and chat match against, so write it"
     echo "     the way you would ask for it (\"send the daily standup summary\")."
     echo "  3. Mira POSTs JSON including source and triggered_at."
+    echo
+    echo "n8n has to be running to receive a webhook. The container restarts"
+    echo "with Docker (--restart unless-stopped), so the only manual step is"
+    echo "Docker itself -- turn on Docker Desktop > Settings > General >"
+    echo "\"Start Docker Desktop when you sign in\" to remove that too."
     exit 0
   fi
   printf "."
