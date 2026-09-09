@@ -1,14 +1,24 @@
 {
-  "name": "electron",
+  "name": "mira",
+  "productName": "Mira",
   "version": "1.0.0",
-  "description": "",
+  "description": "Mira — a CEO's personal AI assistant for Mac",
   "main": "src/main.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "electron .",
+    "build": "node scripts/build_app.js",
+    "dmg": "node scripts/build_app.js && ../scripts/make_dmg.sh"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "keywords": [
+    "ai-assistant",
+    "macos",
+    "local-first",
+    "electron",
+    "ollama",
+    "productivity"
+  ],
+  "author": "Prakhar Mani Tripathi",
+  "license": "MIT",
   "type": "commonjs",
   "devDependencies": {
     "electron": "^43.1.0"
