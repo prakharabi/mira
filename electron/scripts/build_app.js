@@ -38,10 +38,11 @@ const INCLUDE = [
   'MicHelper.app',
   'AudioHelper.app',
   'TabTap.app',
+  // Loose binaries the code actually resolves via __dirname/.. -- the rest of
+  // the helpers run from their .app bundles above, which is what carries their
+  // TCC identity.
   'ocr_helper',
-  'mic_helper',
   'system_audio_helper',
-  'tab_tap',
   'package.json',
 ];
 

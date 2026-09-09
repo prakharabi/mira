@@ -915,7 +915,7 @@ function spawnTabTap() {
     console.error('tab_tap failed to spawn:', e.message);
   });
 
-  tabTapProcess.stdout.on('data', (data) => {
+  proc.stdout.on('data', (data) => {
     const lines = data.toString().split('\n').filter(l => l.trim().length > 0);
     for (const line of lines) {
       if (line.trim() === 'TAB_PRESSED') {
@@ -924,16 +924,21 @@ function spawnTabTap() {
     }
   });
 
-  tabTapProcess.stderr.on('data', (data) => {
+  proc.stderr.on('data', (data) => {
     console.error('tab_tap error:', data.toString());
   });
 
-  tabTapProcess.on('spawn', () => {
+  proc.on('spawn', () => {
     tabTapRestartCount = 0; // a clean, longer-lived run resets the backoff budget
   });
 
-  tabTapProcess.on('exit', (code) => {
+  proc.on('exit', (code) => {
     console.log('tab_tap exited with code', code);
+    // A restart may already have replaced this process. Without this guard the
+    // dying process's handler clears the reference to its own REPLACEMENT and
+    // then spawns a third -- so "Restart" would leave two tab_taps fighting
+    // over the same Tab key.
+    if (tabTapProcess !== proc) return;
     tabTapProcess = null;
 
     if (stopped) return; // a deliberate stopPredictiveTyping() -- not a crash
@@ -962,4 +967,36 @@ function stopPredictiveTyping() {
   hideGhostText();
 }
 
-module.exports = { startPredictiveTyping, stopPredictiveTyping };
+// Predictive typing can die in ways the user notices but Mira doesn't report:
+// tab_tap exhausts its restart budget (Accessibility revoked, binary replaced
+// by a rebuild), or ax_helper starts failing. Rather than make "quit and
+// reopen Mira" the only cure, expose an explicit restart and a status the
+// Settings view can show.
+function restartPredictiveTyping() {
+  stopPredictiveTyping();
+  // Let the SIGKILL actually land before spawning a replacement, so the two
+  // never overlap on the Tab tap.
+  return new Promise((resolve) => {
+    setTimeout(() => {
+      startPredictiveTyping();
+      setTimeout(() => resolve(predictiveStatus()), 400);
+    }, 250);
+  });
+}
+
+function predictiveStatus() {
+  return {
+    running: !stopped,
+    tabTapAlive: !!(tabTapProcess && !tabTapProcess.killed),
+    tabTapGaveUp: tabTapRestartCount >= TAB_TAP_MAX_RESTARTS,
+    restartCount: tabTapRestartCount,
+    enabled,
+  };
+}
+
+module.exports = {
+  startPredictiveTyping,
+  stopPredictiveTyping,
+  restartPredictiveTyping,
+  predictiveStatus,
+};

@@ -69,22 +69,38 @@ Requirements: macOS (Apple Silicon tested), Python 3.11+, Node 18+,
 [Ollama](https://ollama.com), and `ffmpeg` (`brew install ffmpeg`).
 
 ```bash
+git clone https://github.com/<you>/mira.git && cd mira
+
 # daemon
 cd daemon
 python3 -m venv venv && ./venv/bin/pip install -r requirements.txt
 cp .env.example .env          # optional: add GROQ_API_KEY for the cloud model
+cd ..
+./scripts/install_daemon.sh   # generates the LaunchAgent and starts it
 
-# local models
+# local model
 ollama pull qwen3:1.7b
 
 # app
-cd ../electron && npm install
+cd electron && npm install
 node scripts/build_app.js     # produces dist/Mira.app
 open dist/Mira.app
 ```
 
 The daemon runs on port 11200 as a LaunchAgent (`com.mira.daemon`); Ollama uses
-its own 11434.
+its own 11434. `./scripts/uninstall_daemon.sh` removes the agent and leaves
+your data alone.
+
+### A note on Gatekeeper
+
+Builds are signed ad-hoc, not with an Apple Developer ID, so a copy downloaded
+from the internet is quarantined by macOS. Building it yourself with the steps
+above avoids this entirely. If you do download a build, right-click the app and
+choose **Open** the first time, or:
+
+```bash
+xattr -d com.apple.quarantine /Applications/Mira.app
+```
 
 ### Permissions
 
@@ -127,11 +143,21 @@ node scripts/build_app.js                # rebuild Mira.app
 python3 scripts/generate_icon.py         # regenerate the app icon
 ```
 
+Settings → Assistant shows predictive typing's live status and can restart it,
+which is usually faster than relaunching when tab_tap has exhausted its restart
+budget after a permission change.
+
 `workspace.html` carries one large inline script with no build step, so nothing
 catches a syntax error before runtime — and a syntax error there takes down the
 entire renderer, which presents as a window stuck on "Checking…". After editing
 it, extract the script and run `node --check` on it.
 
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). The short version: new capabilities go
+in `daemon/tools.py` so they reach chat, Telegram and voice at once, and
+anything needing Apple Events must be queued through `daemon/actions.py`.
+
 ## License
 
-Not yet chosen — to be settled before public release.
+[MIT](LICENSE).

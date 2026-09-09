@@ -1,0 +1,21 @@
+# Web layer
+fastapi==0.139.0
+uvicorn==0.51.0
+python-multipart==0.0.32
+python-dotenv==1.2.2
+requests==2.34.2
+
+# Web search (DuckDuckGo; handles the anti-bot token handshake)
+ddgs==9.16.0
+
+# Predictive typing: real-world word frequencies, used to tell a typo apart
+# from a half-typed word
+wordfreq==3.1.1
+
+# Wake word ("Hey Mira")
+openwakeword==0.6.0
+onnxruntime==1.28.0
+PyAudio==0.2.14
+numpy==2.5.2
+scipy==1.18.0
+scikit-learn==1.9.0

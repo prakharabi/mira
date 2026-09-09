@@ -41,6 +41,14 @@
     function openChat() {
       ipcRenderer.send('open-chat');
     }
+
+    // A logo chosen in Settings replaces the default sprite. Applied on load
+    // and again whenever Settings changes it, so the pet updates without a
+    // restart.
+    const pet = document.getElementById('pet');
+    function applyLogo(url) { pet.src = url || 'pet.gif'; }
+    ipcRenderer.invoke('logo-get').then(applyLogo).catch(() => {});
+    ipcRenderer.on('logo-changed', (event, url) => applyLogo(url));
   </script>
 </body>
 </html>

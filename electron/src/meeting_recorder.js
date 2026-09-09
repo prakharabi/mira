@@ -15,8 +15,15 @@ const fs = require('fs');
 // solved there via a code-signed entitlement (com.apple.security.device.audio-input)
 // on the daemon's Python interpreter -- no runtime prompt needed for that one.
 
-const SYSTEM_AUDIO_HELPER_PATH = path.join(os.homedir(), 'Mira', 'electron', 'system_audio_helper');
-const MEETINGS_DIR = path.join(os.homedir(), 'Mira', 'daemon', 'meetings');
+// Resolved relative to this file, not to a hardcoded ~/Mira -- that only
+// worked on a checkout living at exactly that path, and never in the packaged
+// app, where the helper ships inside Contents/Resources/app.
+const SYSTEM_AUDIO_HELPER_PATH = path.join(__dirname, '..', 'system_audio_helper');
+
+// Recordings go where the daemon looks for them. MIRA_HOME lets a checkout
+// somewhere other than ~/Mira point at its own daemon directory.
+const MIRA_HOME = process.env.MIRA_HOME || path.join(os.homedir(), 'Mira');
+const MEETINGS_DIR = path.join(MIRA_HOME, 'daemon', 'meetings');
 
 let systemAudioProcess = null;
 let currentSystemAudioFile = null;
