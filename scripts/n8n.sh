@@ -66,12 +66,25 @@ case "${1:-docker}" in
     else
       # Named volume, not a bind mount: workflows and credentials must survive
       # the container being recreated on an n8n upgrade.
+      #
+      # Bound to 127.0.0.1, not 0.0.0.0: Docker's default publishes to every
+      # interface, which put an unauthenticated-until-you-set-it-up n8n editor
+      # on the local network. This instance only ever needs to answer Mira on
+      # the same machine.
+      #
+      # N8N_SECURE_COOKIE=false because n8n marks its auth cookie Secure, and
+      # browsers drop that over plain HTTP. Chrome and Firefox make an
+      # exception for localhost; Safari does not, so the login simply refuses.
+      # Turning it off is safe here precisely BECAUSE of the bind above -- the
+      # cookie never crosses a network. It would not be safe on an exposed
+      # instance; put TLS in front of it if you ever expose this.
       docker volume create "$DATA_VOLUME" >/dev/null
       docker run -d --name "$CONTAINER" \
         --restart unless-stopped \
-        -p "$PORT:5678" \
+        -p "127.0.0.1:$PORT:5678" \
         -v "$DATA_VOLUME:/home/node/.n8n" \
         -e GENERIC_TIMEZONE="$(readlink /etc/localtime | sed 's|.*/zoneinfo/||')" \
+        -e N8N_SECURE_COOKIE=false \
         docker.n8n.io/n8nio/n8n >/dev/null
       echo "Created $CONTAINER."
     fi
