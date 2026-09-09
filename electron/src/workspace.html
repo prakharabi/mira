@@ -834,6 +834,24 @@
   .toggle-switch input:checked + .toggle-slider { background: var(--accent-gradient); }
   .toggle-switch input:checked + .toggle-slider:before { transform: translateX(17px); }
 
+  /* ---------- n8n panel ---------- */
+  #n8n-panel {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 13px 15px;
+    margin-bottom: 14px;
+  }
+  #n8n-panel .grow { flex: 1; min-width: 0; }
+  .n8n-dot {
+    width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
+    background: var(--text-tertiary);
+  }
+  .n8n-dot.on { background: #22c55e; }
+  .n8n-dot.off { background: rgba(240,68,56,0.85); }
+  #n8n-actions { display: flex; gap: 6px; flex-shrink: 0; }
+
   /* ---------- logo picker ---------- */
   .logo-preview {
     width: 46px; height: 46px; flex-shrink: 0;
@@ -1745,6 +1763,20 @@
           <p class="view-subtitle">Fire your n8n workflows — from here, or by asking Mira.</p>
         </div>
 
+        <div id="n8n-panel">
+          <span class="n8n-dot" id="n8n-dot"></span>
+          <div class="grow">
+            <div class="label" id="n8n-title">Checking n8n…</div>
+            <div class="sublabel" id="n8n-sub">The workflow engine your automations run in</div>
+          </div>
+          <div id="n8n-actions">
+            <button class="mini-btn-sm" id="n8n-start-btn" hidden>Start n8n</button>
+            <button class="mini-btn-sm" id="n8n-stop-btn" hidden>Stop</button>
+            <button class="mini-btn-sm" id="n8n-new-btn" hidden>New workflow</button>
+            <button class="mini-btn-sm accent" id="n8n-open-btn" hidden>Open n8n</button>
+          </div>
+        </div>
+
         <div class="card" style="padding:16px; margin-bottom:18px;">
           <div class="setting-block-body" style="margin-top:0;">
             <div class="field-row">
@@ -1837,7 +1869,7 @@
     if (name === 'chat') { loadSessions(); document.getElementById('text-input').focus(); }
     if (name === 'dumpbox') { loadDumpEntries(); document.getElementById('dump-input').focus(); }
     if (name === 'google') refreshGoogleStatus();
-    if (name === 'automations') loadAutomations();
+    if (name === 'automations') { loadAutomations(); refreshN8n(); }
   }
 
   navItems.forEach(item => item.addEventListener('click', () => switchView(item.dataset.view)));
@@ -3561,6 +3593,90 @@
       loadMemory();
     }
   });
+
+  // ==================== n8n ====================
+  let n8nPollTimer = null;
+
+  function renderN8n(st) {
+    const dot = document.getElementById('n8n-dot');
+    const title = document.getElementById('n8n-title');
+    const sub = document.getElementById('n8n-sub');
+    const show = (id, on) => { document.getElementById(id).hidden = !on; };
+
+    if (!st) {
+      dot.className = 'n8n-dot';
+      title.textContent = 'Could not reach Mira daemon';
+      sub.textContent = '';
+      ['n8n-start-btn', 'n8n-stop-btn', 'n8n-new-btn', 'n8n-open-btn'].forEach(i => show(i, false));
+      return;
+    }
+
+    dot.className = 'n8n-dot ' + (st.running ? 'on' : 'off');
+    if (st.running) {
+      title.textContent = 'n8n is running';
+      sub.textContent = st.url.replace('http://', '');
+    } else {
+      title.textContent = 'n8n is not running';
+      // Naming the consequence beats naming the state: an automation whose
+      // webhook goes nowhere looks like a broken workflow, not a stopped app.
+      sub.textContent = st.manageable
+        ? 'Automations will fail until it starts.'
+        : 'Start it yourself, or point automations at a remote n8n.';
+    }
+
+    show('n8n-open-btn', st.running);
+    show('n8n-new-btn', st.running);
+    show('n8n-stop-btn', st.running && st.manageable);
+    show('n8n-start-btn', !st.running && st.manageable);
+  }
+
+  async function refreshN8n() {
+    try {
+      renderN8n(await (await fetch(`${DAEMON_URL}/n8n/status`)).json());
+    } catch (e) {
+      renderN8n(null);
+    }
+  }
+
+  document.getElementById('n8n-open-btn').onclick = async () => {
+    const st = await (await fetch(`${DAEMON_URL}/n8n/status`)).json();
+    ipcRenderer.invoke('open-external', st.url);
+  };
+
+  document.getElementById('n8n-new-btn').onclick = async () => {
+    const st = await (await fetch(`${DAEMON_URL}/n8n/status`)).json();
+    ipcRenderer.invoke('open-external', st.new_workflow_url);
+  };
+
+  document.getElementById('n8n-start-btn').onclick = async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    document.getElementById('n8n-title').textContent = 'Starting n8n…';
+    // The first ever start compiles a native SQLite addon, which takes
+    // minutes. Poll rather than block, and say so, so the wait reads as
+    // progress instead of a hang.
+    document.getElementById('n8n-sub').textContent =
+      'First run builds its database driver — this can take a few minutes.';
+    await fetch(`${DAEMON_URL}/n8n/start`, { method: 'POST' });
+
+    if (n8nPollTimer) clearInterval(n8nPollTimer);
+    const started = Date.now();
+    n8nPollTimer = setInterval(async () => {
+      const st = await (await fetch(`${DAEMON_URL}/n8n/status`)).json().catch(() => null);
+      if ((st && st.running) || Date.now() - started > 420000) {
+        clearInterval(n8nPollTimer); n8nPollTimer = null;
+        btn.disabled = false;
+        renderN8n(st);
+      }
+    }, 3000);
+  };
+
+  document.getElementById('n8n-stop-btn').onclick = async (e) => {
+    e.currentTarget.disabled = true;
+    await fetch(`${DAEMON_URL}/n8n/stop`, { method: 'POST' });
+    e.currentTarget.disabled = false;
+    refreshN8n();
+  };
 
   // ==================== dictation engine ====================
   document.getElementById('dictation-engine-select').addEventListener('change', (e) =>

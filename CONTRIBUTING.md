@@ -76,6 +76,14 @@ import re; print(re.findall(r'<script(?![^>]*src=)[^>]*>(.*?)</script>', open('w
 " > /tmp/ws.js && node --check /tmp/ws.js
 ```
 
+**Checking a view without clicking through to it.** `MIRA_OPEN_VIEW` opens the
+workspace straight at a named view on launch, which is how to look at one
+without driving synthetic clicks:
+
+```bash
+MIRA_OPEN_VIEW=automations electron/dist/Mira.app/Contents/MacOS/Mira
+```
+
 **Test against a real permission state.** Predictive typing, OCR and audio all
 fail in ways that look like bugs when a TCC grant is missing. Settings →
 Assistant shows predictive typing's live status and has a Restart button.

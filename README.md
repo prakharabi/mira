@@ -42,6 +42,10 @@ any region of the screen.
 **Meetings.** Records mic + system audio, transcribes (locally or via cloud),
 and generates minutes.
 
+**Runs your workflows.** Fires named n8n webhooks by voice or chat, matched
+against how you describe them. The Automations view shows whether n8n is
+actually running, and starts it — no Docker required.
+
 **Proactive.** Optionally speaks first — a meeting starting soon, mail addressed
 directly to you — delivered over Telegram so it reaches you with the lid shut.
 
