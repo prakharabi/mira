@@ -84,6 +84,16 @@ without driving synthetic clicks:
 MIRA_OPEN_VIEW=automations electron/dist/Mira.app/Contents/MacOS/Mira
 ```
 
+`MIRA_SCROLL_TO` takes a CSS selector and scrolls it into view; `MIRA_CLICK`
+clicks one and logs whether it was found, hidden, or clicked. Between them a
+control's whole handler chain can be exercised the way a user would, without
+driving synthetic input across the screen:
+
+```bash
+MIRA_OPEN_VIEW=automations MIRA_CLICK='#n8n-open-btn' \
+  electron/dist/Mira.app/Contents/MacOS/Mira
+```
+
 **Test against a real permission state.** Predictive typing, OCR and audio all
 fail in ways that look like bugs when a TCC grant is missing. Settings →
 Assistant shows predictive typing's live status and has a Restart button.

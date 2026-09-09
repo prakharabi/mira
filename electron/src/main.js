@@ -634,6 +634,15 @@ if (process.env.MIRA_OPEN_VIEW) {
     openWorkspaceAt(process.env.MIRA_OPEN_VIEW);
     // MIRA_SCROLL_TO takes a CSS selector and scrolls it into view, so a
     // section below the fold can be inspected without synthetic scrolling.
+    // MIRA_CLICK fires a real click on a selector after the view loads, so a
+    // button's whole handler chain can be exercised the way a user would.
+    if (process.env.MIRA_CLICK && chatWindow && !chatWindow.isDestroyed()) {
+      const sel = JSON.stringify(process.env.MIRA_CLICK);
+      setTimeout(() => chatWindow.webContents.executeJavaScript(
+        `(()=>{const el=document.querySelector(${sel}); if(!el) return 'NOT FOUND';
+               if(el.hidden) return 'HIDDEN'; el.click(); return 'CLICKED';})()`
+      ).then(r => console.log('[MIRA_CLICK]', r)).catch(e => console.log('[MIRA_CLICK] err', e.message)), 3000);
+    }
     if (process.env.MIRA_SCROLL_TO && chatWindow && !chatWindow.isDestroyed()) {
       const sel = JSON.stringify(process.env.MIRA_SCROLL_TO);
       setTimeout(() => chatWindow.webContents.executeJavaScript(
@@ -714,10 +723,32 @@ function broadcastLogoChange() {
   }
 }
 
+// https only, with one exception: loopback over plain http. Locally hosted
+// tools -- n8n at 127.0.0.1:5678 among them -- have no certificate and never
+// will, and the reason this check exists is to stop arbitrary schemes and
+// remote URLs reaching shell.openExternal, not to block the user's own
+// machine. Loopback is matched by host, so an http:// URL anywhere else is
+// still refused.
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+
 ipcMain.handle('open-external', (event, url) => {
-  if (typeof url !== 'string' || !/^https:\/\//i.test(url)) {
-    return { success: false, error: 'Only https URLs can be opened.' };
+  if (typeof url !== 'string') {
+    return { success: false, error: 'No URL given.' };
   }
+
+  let parsed;
+  try {
+    parsed = new URL(url);
+  } catch (e) {
+    return { success: false, error: `Not a valid URL: ${url}` };
+  }
+
+  const isHttps = parsed.protocol === 'https:';
+  const isLocalHttp = parsed.protocol === 'http:' && LOOPBACK_HOSTS.has(parsed.hostname);
+  if (!isHttps && !isLocalHttp) {
+    return { success: false, error: `Refused to open ${parsed.protocol}//${parsed.hostname}` };
+  }
+
   require('electron').shell.openExternal(url);
   return { success: true };
 });
