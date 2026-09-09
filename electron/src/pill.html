@@ -45,6 +45,10 @@
     white-space: nowrap;
     transition: background 120ms ease;
   }
+  /* The author `display: flex` above beats the UA stylesheet's
+     `[hidden] { display: none }`, so without this the Call button would show
+     on every copy regardless of the attribute. */
+  button[hidden] { display: none; }
   button:hover { background: rgba(127,127,127,0.22); }
   button:active { transform: scale(0.97); }
   button svg { width: 13px; height: 13px; opacity: 0.75; }
@@ -89,6 +93,10 @@
       <svg viewBox="0 0 20 20" fill="none"><path d="M3 5h7M6.5 5v1.5c0 3-1.5 5.5-3.5 6.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M5 9.5c1 2 2.6 3.2 4.5 3.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M11 17l3.2-8 3.3 8M12.3 14.5h4.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
       Hindi
     </button>
+    <button data-action="call" id="call-btn" hidden title="Call this number">
+      <svg viewBox="0 0 20 20" fill="none"><path d="M6.5 3.5l2 3-1.6 1.6a10 10 0 004.9 4.9L13.5 11l3 2-1 2.5c-.3.7-1 1.1-1.8 1C8.4 15.7 4.3 11.6 3.5 6.3c-.1-.8.3-1.5 1-1.8L6.5 3.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+      Call
+    </button>
     <div class="sep"></div>
     <button id="close" title="Dismiss (esc)">
       <svg viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
@@ -99,7 +107,16 @@
     const { ipcRenderer } = require('electron');
     window.selectedText = '';
 
-    ipcRenderer.on('selected-text', (event, text) => { window.selectedText = text; });
+    // Same pattern main.js uses to pull a number out of the text -- kept in
+    // step with extractPhoneNumber() there. Call only appears when there is
+    // actually something to call; a permanently visible Call button that
+    // answers "No phone number found" is worse than no button.
+    const PHONE_RE = /(\+?\d[\d\s\-\(\)]{7,}\d)/;
+
+    ipcRenderer.on('selected-text', (event, text) => {
+      window.selectedText = text;
+      document.getElementById('call-btn').hidden = !PHONE_RE.test(text || '');
+    });
 
     document.querySelectorAll('button[data-action]').forEach((btn) => {
       btn.addEventListener('click', () => {

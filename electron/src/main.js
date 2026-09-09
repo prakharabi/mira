@@ -558,8 +558,13 @@ function showPill(text) {
     }
   }
 
+  // The pill shows a Call button only when the copied text holds a phone
+  // number (see pill.html), so the window has to be wide enough for it --
+  // a fixed width clipped either the Call button or, without it, left a gap.
+  const hasPhone = !!extractPhoneNumber(text || '');
+
   const thisPill = new BrowserWindow({
-    width: 396,
+    width: hasPhone ? 462 : 396,
     height: 44,
     frame: false,
     vibrancy: 'hud',
