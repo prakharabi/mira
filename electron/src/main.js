@@ -285,19 +285,67 @@ function buildTray() {
 
   tray = new Tray(icon);
   tray.setToolTip('Mira');
+  refreshTrayMenu();
+
+  // The assistant's visibility is shown as a checkbox, so the menu has to be
+  // rebuilt whenever it changes -- by the shortcut, by the menu itself, or by
+  // the pill borrowing it. Cheap, and the alternative is a checkbox that lies.
+  if (win && !win.isDestroyed()) {
+    win.on('show', refreshTrayMenu);
+    win.on('hide', refreshTrayMenu);
+  }
+}
+
+function refreshTrayMenu() {
+  if (!tray || tray.isDestroyed()) return;
+
+  const assistantVisible = !!(win && !win.isDestroyed() && win.isVisible());
+
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Quick Capture…', accelerator: 'Command+Shift+D', click: showQuickCapture },
+    { label: `Mira ${app.getVersion()}`, enabled: false },
+    { type: 'separator' },
+
+    // Actions. Every accelerator below is a real globalShortcut registration
+    // (see app.whenReady), so showing it here is accurate rather than
+    // decorative -- a tray menu's accelerator does not itself bind anything.
     { label: 'Ask Mira', accelerator: 'Command+Shift+L', click: triggerWakewordManually },
+    { label: 'Quick Capture…', accelerator: 'Command+Shift+D', click: showQuickCapture },
     { label: 'Capture Text (OCR)', accelerator: 'Command+Shift+O', click: runOCR },
     { type: 'separator' },
+
     { label: 'Open Mira', accelerator: 'Control+Space', click: () => {
         if (chatWindow && !chatWindow.isDestroyed()) { chatWindow.show(); chatWindow.focus(); }
         else toggleChatWindow();
       } },
-    { label: 'Dump Box', click: () => openWorkspaceAt('dumpbox') },
-    { label: 'Settings', click: () => openWorkspaceAt('settings') },
+    {
+      label: 'Show Assistant',
+      type: 'checkbox',
+      checked: assistantVisible,
+      accelerator: 'Command+Shift+M',
+      click: togglePet,
+    },
     { type: 'separator' },
-    { label: 'Quit Mira', accelerator: 'Command+Q', click: () => { isQuitting = true; app.quit(); } },
+
+    // The workspace has nine views and the tray used to reach two of them.
+    // These are the ones worth a single click; the rest are one nav away.
+    { label: 'Tasks', click: () => openWorkspaceAt('tasks') },
+    { label: 'Dump Box', click: () => openWorkspaceAt('dumpbox') },
+    { label: 'Memory', click: () => openWorkspaceAt('memory') },
+    { label: 'Meetings', click: () => openWorkspaceAt('meetings') },
+    {
+      label: 'More',
+      submenu: [
+        { label: 'Google', click: () => openWorkspaceAt('google') },
+        { label: 'Automations', click: () => openWorkspaceAt('automations') },
+      ],
+    },
+    { type: 'separator' },
+
+    { label: 'Settings…', click: () => openWorkspaceAt('settings') },
+    // No accelerator on Quit: Mira is an LSUIElement with no application menu,
+    // so nothing binds Command+Q. Displaying it promised a shortcut that did
+    // nothing at all.
+    { label: 'Quit Mira', click: () => { isQuitting = true; app.quit(); } },
   ]));
 }
 
