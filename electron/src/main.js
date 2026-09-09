@@ -445,7 +445,9 @@ async function runQueuedAction(action) {
       title: p.title,
       note: p.note || '',
       due: p.due || null,
-      listName: '',
+      // The queued action carries the configured list; hardcoding '' here sent
+      // everything to the default list and silently ignored the setting.
+      listName: p.list_name || '',
     });
   }
   return { success: false, error: `unknown action type: ${action.type}` };
@@ -547,6 +549,82 @@ ipcMain.handle('predictive-restart', async () => ({
   ...(await restartPredictiveTyping()),
   accessibilityTrusted: systemPreferences.isTrustedAccessibilityClient(false),
 }));
+
+// ---------- Apple speech recognition ----------
+// Runs from here, not the daemon: Speech Recognition is TCC-gated and a
+// headless LaunchAgent can never be granted it. Spawned as a child of Mira so
+// TCC reads Mira's own usage description (see build_app.js).
+const SPEECH_HELPER_PATH = path.join(
+  __dirname, '..', 'SpeechHelper.app', 'Contents', 'MacOS', 'speech_helper');
+const FFMPEG_CANDIDATES = ['/opt/homebrew/bin/ffmpeg', '/usr/local/bin/ffmpeg', 'ffmpeg'];
+
+function ffmpegPath() {
+  return FFMPEG_CANDIDATES.find(p => p === 'ffmpeg' || fs.existsSync(p)) || 'ffmpeg';
+}
+
+const SPEECH_HELPER_APP = path.join(__dirname, '..', 'SpeechHelper.app');
+
+// Launched through LaunchServices, never spawned directly. A plain subprocess
+// of a background app cannot raise the Speech Recognition consent prompt --
+// macOS aborts it outright, or blocks it on a dialog that never appears. As a
+// real foreground app it can ask properly, at the cost of losing stdout, so
+// the helper writes its JSON to a file we poll for.
+function runSpeechHelper(args, timeoutMs = 130000) {
+  return new Promise((resolve) => {
+    const outPath = path.join(os.tmpdir(), `mira-speech-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+    const full = args[0] === 'transcribe'
+      ? ['transcribe', args[1], outPath, ...args.slice(2)]
+      : [...args, outPath];
+
+    execFile('/usr/bin/open', ['-a', SPEECH_HELPER_APP, '--args', ...full],
+      { timeout: 15000 }, (err) => {
+        if (err) { resolve({ error: `could not launch speech helper: ${err.message}` }); return; }
+
+        const started = Date.now();
+        const poll = setInterval(() => {
+          if (fs.existsSync(outPath)) {
+            clearInterval(poll);
+            let parsed;
+            try { parsed = JSON.parse(fs.readFileSync(outPath, 'utf8')); }
+            catch (e) { parsed = { error: 'unreadable speech helper output' }; }
+            try { fs.unlinkSync(outPath); } catch (e) {}
+            resolve(parsed);
+          } else if (Date.now() - started > timeoutMs) {
+            clearInterval(poll);
+            resolve({ error: 'speech helper timed out' });
+          }
+        }, 120);
+      });
+  });
+}
+
+ipcMain.handle('speech-check', (event, locale) =>
+  runSpeechHelper(['check', locale || 'en-IN'], 130000));
+
+ipcMain.handle('speech-transcribe', async (event, { buffer, locale }) => {
+  if (!fs.existsSync(SPEECH_HELPER_APP)) return { error: 'speech helper not installed' };
+
+  // The recorder produces webm/opus, which AVFoundation cannot read at all --
+  // so this is a conversion step, not an optimisation.
+  const stamp = Date.now();
+  const inPath = path.join(os.tmpdir(), `mira-dictation-${stamp}.webm`);
+  const wavPath = path.join(os.tmpdir(), `mira-dictation-${stamp}.wav`);
+
+  try {
+    fs.writeFileSync(inPath, Buffer.from(buffer));
+    await new Promise((resolve, reject) => {
+      execFile(ffmpegPath(), ['-y', '-i', inPath, '-ar', '16000', '-ac', '1', wavPath],
+        { timeout: 30000 }, (err) => err ? reject(err) : resolve());
+    });
+    return await runSpeechHelper(['transcribe', wavPath, locale || 'en-IN']);
+  } catch (e) {
+    return { error: `audio conversion failed: ${e.message}` };
+  } finally {
+    for (const f of [inPath, wavPath]) {
+      try { if (fs.existsSync(f)) fs.unlinkSync(f); } catch (_) {}
+    }
+  }
+});
 
 // ---------- Custom logo ----------
 // The image lives in userData, never inside the .app: writing into the bundle

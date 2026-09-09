@@ -35,6 +35,7 @@ const INCLUDE = [
   'src',
   'assets',
   'AXHelper.app',
+  'SpeechHelper.app',
   'MicHelper.app',
   'AudioHelper.app',
   'TabTap.app',
@@ -132,6 +133,12 @@ function main() {
     'Mira uses the microphone for voice dictation and the "Hey Mira" wake word.']);
   plistSet(plistPath, ['NSAppleEventsUsageDescription', '-string',
     'Mira uses Apple Events to create reminders from the Dump Box.']);
+  // Speech Recognition aborts a process outright if TCC cannot find this
+  // string -- and it looks it up on the RESPONSIBLE process, which for a
+  // helper Mira spawns is Mira itself. Without it here, speech_helper dies
+  // with SIGABRT no matter what its own plist says.
+  plistSet(plistPath, ['NSSpeechRecognitionUsageDescription', '-string',
+    'Mira uses speech recognition to turn your dictation into text on this Mac.']);
 
   log('copying app source into Resources/app...');
   const appDir = path.join(resources, 'app');

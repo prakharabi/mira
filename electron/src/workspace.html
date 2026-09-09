@@ -1473,6 +1473,36 @@
           <div class="setting-block">
             <div class="setting-block-row">
               <div>
+                <div class="label">Dictation engine</div>
+                <div class="sublabel">What turns your speech into text</div>
+              </div>
+              <select class="dropdown-select" id="dictation-engine-select" style="width:190px; flex:none;">
+                <option value="apple">Apple (on-device)</option>
+                <option value="whisper">Whisper (via daemon)</option>
+              </select>
+            </div>
+            <div class="setting-block-body">
+              <div>
+                <span class="field-label">Recognition language</span>
+                <select class="dropdown-select" id="dictation-locale-select" style="width:100%;">
+                  <option value="en-IN">English (India)</option>
+                  <option value="en-US">English (US)</option>
+                  <option value="en-GB">English (UK)</option>
+                  <option value="hi-IN">Hindi</option>
+                  <option value="hi-Latn">Hinglish (Hindi in Latin script)</option>
+                </select>
+              </div>
+              <div class="field-row">
+                <button class="mini-btn" id="test-speech-btn">Test engine</button>
+              </div>
+              <div class="inline-status" id="speech-test-status"></div>
+              <div class="sublabel">Apple runs on this Mac, needs no API key and is fastest for short dictation — the first use asks for Speech Recognition permission. Whisper is slower but better on long or technical audio, and is always used for meeting transcripts regardless of this setting.</div>
+            </div>
+          </div>
+
+          <div class="setting-block">
+            <div class="setting-block-row">
+              <div>
                 <div class="label">Speech recognition engine</div>
                 <div class="sublabel">Which engine is tried first (the other is used as a fallback)</div>
               </div>
@@ -2133,6 +2163,8 @@
       document.getElementById('proactive-calendar-toggle').checked = data.proactive_calendar !== false;
       document.getElementById('proactive-email-toggle').checked = data.proactive_email === true;
       document.getElementById('proactive-tasks-toggle').checked = data.proactive_tasks !== false;
+      document.getElementById('dictation-engine-select').value = data.dictation_engine || 'apple';
+      document.getElementById('dictation-locale-select').value = data.dictation_locale || 'en-IN';
       document.getElementById('appearance-select').value = data.appearance || 'system';
       document.getElementById('keep-alive-select').value = data.local_model_keep_alive || '60s';
       refreshLoadedModels();
@@ -3529,6 +3561,38 @@
       loadMemory();
     }
   });
+
+  // ==================== dictation engine ====================
+  document.getElementById('dictation-engine-select').addEventListener('change', (e) =>
+    updateSetting('dictation_engine', e.target.value));
+  document.getElementById('dictation-locale-select').addEventListener('change', (e) =>
+    updateSetting('dictation_locale', e.target.value));
+
+  document.getElementById('test-speech-btn').onclick = async (e) => {
+    const btn = e.currentTarget;
+    const out = document.getElementById('speech-test-status');
+    const locale = document.getElementById('dictation-locale-select').value;
+    btn.disabled = true;
+    out.className = 'inline-status';
+    out.textContent = 'Checking… macOS may ask for Speech Recognition permission.';
+    try {
+      const res = await ipcRenderer.invoke('speech-check', locale);
+      if (res.error) {
+        out.className = 'inline-status error';
+        out.textContent = res.error;
+      } else {
+        const ok = res.authorization === 'authorized' && res.available;
+        out.className = 'inline-status ' + (ok ? 'ok' : 'error');
+        out.textContent = ok
+          ? `Ready — ${locale}${res.supportsOnDevice ? ', on-device' : ', server-based'}.`
+          : `Not usable: authorization ${res.authorization}, available ${res.available}.`;
+      }
+    } catch (err) {
+      out.className = 'inline-status error';
+      out.textContent = err.message;
+    }
+    btn.disabled = false;
+  };
 
   // ==================== predictive typing control ====================
   function describePredictive(st) {
