@@ -1,11 +1,16 @@
-# Mira
+# Mira — a CEO's personal AI assistant for Mac
 
-A local-first, OS-integrated AI assistant for macOS.
+Local-first, OS-integrated, and built to actually run your day rather than
+chat about it.
 
 Mira runs on your own machine, keeps your data there by default, and can
 actually *do* things on it — create reminders, open apps, control playback,
 search the web, capture notes, transcribe meetings, read your mail and
 calendar — rather than only talking about them.
+
+Built for the kind of day where the same commitment gets raised in three
+different places and none of them talk to each other: mention something on
+Telegram, ask about it out loud, and close it out in the app.
 
 ## What it does
 
@@ -69,7 +74,7 @@ Requirements: macOS (Apple Silicon tested), Python 3.11+, Node 18+,
 [Ollama](https://ollama.com), and `ffmpeg` (`brew install ffmpeg`).
 
 ```bash
-git clone https://github.com/<you>/mira.git && cd mira
+git clone https://github.com/<your-username>/mira.git && cd mira
 
 # daemon
 cd daemon
@@ -93,16 +98,36 @@ The daemon runs on port 11200 as a LaunchAgent (`com.mira.daemon`); Ollama uses
 its own 11434. `./scripts/uninstall_daemon.sh` removes the agent and leaves
 your data alone.
 
+### Installing from the DMG instead
+
+```bash
+cd electron && node scripts/build_app.js
+../scripts/make_dmg.sh          # produces electron/dist/Mira.dmg
+```
+
+Drag Mira onto Applications, then follow the Gatekeeper note below. You still
+need the daemon and Ollama from the steps above — the DMG only carries the app.
+
 ### A note on Gatekeeper
 
-Builds are signed ad-hoc, not with an Apple Developer ID, so a copy downloaded
-from the internet is quarantined by macOS. Building it yourself with the steps
-above avoids this entirely. If you do download a build, right-click the app and
-choose **Open** the first time, or:
+Mira is signed ad-hoc, not with a paid Apple Developer ID. **Building it
+yourself avoids this section entirely** — locally built apps are never
+quarantined. But a copy *downloaded* from the internet is, and Gatekeeper will
+refuse to launch it.
+
+To allow it, open Mira once (macOS refuses), then go to **System Settings →
+Privacy & Security**, scroll to Security, and click **Open Anyway**. On macOS 15
+and later, right-clicking and choosing Open no longer works for this — Apple
+removed that bypass, so Privacy & Security is the only GUI route.
+
+Or from a terminal:
 
 ```bash
 xattr -d com.apple.quarantine /Applications/Mira.app
 ```
+
+None of this is a sign that anything is wrong with the download; it is what
+macOS does with any app whose developer it cannot verify.
 
 ### Permissions
 
@@ -146,9 +171,10 @@ extraction always runs locally.
 ## Development
 
 ```bash
-cd electron && npx electron .            # run unpackaged
+cd electron && npm start                 # run unpackaged
 MIRA_DEBUG_PREDICTIVE=1 npx electron .   # verbose predictive-typing logging
-node scripts/build_app.js                # rebuild Mira.app
+npm run build                            # rebuild Mira.app
+npm run dmg                              # rebuild and package Mira.dmg
 python3 scripts/generate_icon.py         # regenerate the app icon
 ```
 
