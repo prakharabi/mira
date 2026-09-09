@@ -21,7 +21,11 @@ import tasks
 import tools
 
 MAX_TOOL_ROUNDS = 4          # generous enough to search -> read -> answer
-TOOL_RESULT_CHAR_LIMIT = 4000
+# Sized against the free Groq tier's 8000 tokens/minute: at 4000 chars a single
+# search-then-read turn spent the whole minute's budget and got rate-limited,
+# which pushed every web answer onto the slower local model. Five search
+# snippets still fit comfortably here.
+TOOL_RESULT_CHAR_LIMIT = 2500
 
 IDENTITY = """You are Mira, {owner}'s personal AI assistant. You run locally on their Mac and are deeply integrated with it.
 
@@ -83,7 +87,7 @@ def _call_cloud(messages, settings, groq_key, with_tools=True):
     if not api_key:
         return None, {"error": "no cloud API key configured"}
 
-    payload = {"model": model, "messages": messages}
+    payload = {"model": model, "messages": _shape_messages(messages, as_string=True)}
     if with_tools:
         payload["tools"] = tools.openai_tool_schemas()
         payload["tool_choice"] = "auto"
@@ -107,7 +111,7 @@ def _call_local(messages, settings, with_tools=True):
     model = settings.get("local_chat_model") or "batiai/gemma4-e2b:q4"
     payload = {
         "model": model,
-        "messages": messages,
+        "messages": _shape_messages(messages, as_string=False),
         "stream": False,
         "think": False,
         "keep_alive": settings.get("local_model_keep_alive") or "60s",
@@ -127,7 +131,12 @@ def _call_local(messages, settings, with_tools=True):
 
 
 def _normalize_tool_calls(msg: dict) -> list:
-    """Cloud and Ollama describe tool calls slightly differently."""
+    """Cloud and Ollama describe tool calls slightly differently.
+
+    The difference that matters is `arguments`: the OpenAI wire format sends a
+    JSON *string*, Ollama sends an object. Everything downstream works in
+    objects, and _shape_tool_calls converts back on the way out.
+    """
     calls = msg.get("tool_calls") or []
     out = []
     for i, c in enumerate(calls):
@@ -135,11 +144,49 @@ def _normalize_tool_calls(msg: dict) -> list:
         name = fn.get("name")
         if not name:
             continue
-        out.append({
-            "id": c.get("id") or f"call_{i}",
-            "name": name,
-            "arguments": fn.get("arguments", {}),
+        args = fn.get("arguments", {})
+        if isinstance(args, str):
+            try:
+                args = json.loads(args) if args.strip() else {}
+            except json.JSONDecodeError:
+                args = {}
+        if not isinstance(args, dict):
+            args = {}
+        out.append({"id": c.get("id") or f"call_{i}", "name": name, "arguments": args})
+    return out
+
+
+def _shape_tool_calls(calls: list, as_string: bool) -> list:
+    """Render normalized calls in whichever dialect the provider expects.
+
+    Replaying a cloud tool call verbatim into Ollama used to send `arguments`
+    as a JSON string, which Ollama rejects while parsing the request -- so any
+    fallback from cloud to local *after* a tool had run died with a parse error
+    instead of answering. That is the exact path a rate-limited free tier takes,
+    which made it the common case rather than an edge one.
+    """
+    shaped = []
+    for c in calls:
+        args = c["arguments"]
+        shaped.append({
+            "id": c["id"],
+            "type": "function",
+            "function": {
+                "name": c["name"],
+                "arguments": json.dumps(args, ensure_ascii=False) if as_string else args,
+            },
         })
+    return shaped
+
+
+def _shape_messages(messages: list, as_string: bool) -> list:
+    out = []
+    for m in messages:
+        if m.get("role") == "assistant" and m.get("_calls"):
+            out.append({"role": "assistant", "content": m.get("content") or "",
+                        "tool_calls": _shape_tool_calls(m["_calls"], as_string)})
+        else:
+            out.append({k: v for k, v in m.items() if k != "_calls"})
     return out
 
 
@@ -230,7 +277,7 @@ def run_agent(history: list, user_message: str, model_pref: str = "auto",
         messages.append({
             "role": "assistant",
             "content": msg.get("content") or "",
-            "tool_calls": msg.get("tool_calls"),
+            "_calls": calls,
         })
 
         for call in calls:
