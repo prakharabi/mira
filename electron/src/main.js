@@ -74,12 +74,19 @@ function showResultWindow(text, x, y) {
   resultWindow = null;
 
   const thisResult = new BrowserWindow({
-    width: 320,
-    height: 180,
+    width: 380,
+    height: 260,
+    minWidth: 300,
+    minHeight: 160,
     frame: false,
-    transparent: true,
+    // vibrancy needs transparent:false -- the two are mutually exclusive, and
+    // setting both silently yields a flat window with no material at all
+    vibrancy: 'hud',
+    visualEffectState: 'active',
+    backgroundColor: '#00000000',
+    roundedCorners: true,
     alwaysOnTop: true,
-    resizable: false,
+    resizable: true,          // long answers were previously clipped with no recourse
     hasShadow: true,
     skipTaskbar: true,
     show: false,
@@ -92,9 +99,15 @@ function showResultWindow(text, x, y) {
   thisResult.loadFile('src/result.html');
 
   thisResult.once('ready-to-show', () => {
-    thisResult.setPosition(x, y);
-    thisResult.show();
-    thisResult.setPosition(x, y);
+    const [w, h] = thisResult.getSize();
+    const { workArea } = screen.getDisplayNearestPoint({ x, y });
+    // Clamp into the visible work area. Opening at the cursor near a screen
+    // edge used to push the window (and its close button) off-screen, which is
+    // how a result could end up stuck with no way to dismiss it.
+    const px = Math.min(Math.max(x, workArea.x + 8), workArea.x + workArea.width - w - 8);
+    const py = Math.min(Math.max(y, workArea.y + 8), workArea.y + workArea.height - h - 8);
+    thisResult.setPosition(Math.round(px), Math.round(py));
+    thisResult.showInactive();
   });
 
   thisResult.webContents.once('did-finish-load', () => {
@@ -112,6 +125,7 @@ function toggleChatWindow() {
     if (chatWindow.isVisible()) {
       chatWindow.hide();
     } else {
+      app.focus({ steal: true });
       chatWindow.show();
       chatWindow.focus();
     }
@@ -149,6 +163,7 @@ function toggleChatWindow() {
   chatWindow.loadFile('src/workspace.html');
 
   chatWindow.once('ready-to-show', () => {
+    app.focus({ steal: true });
     chatWindow.show();
     chatWindow.focus();
   });
@@ -226,6 +241,12 @@ function showQuickCapture() {
   );
 
   quickCaptureWindow.webContents.send('quick-capture-reset');
+  // A background app (LSUIElement) is not the active app, and showing a window
+  // does not make it one -- so the panel appeared without keyboard focus, and
+  // its own blur handler then hid it again the moment anything else was
+  // clicked. It looked like the shortcut simply didn't work. Stealing focus is
+  // exactly what Spotlight-style panels do, and is required here.
+  app.focus({ steal: true });
   quickCaptureWindow.show();
   quickCaptureWindow.focus();
 }
@@ -538,13 +559,16 @@ function showPill(text) {
   }
 
   const thisPill = new BrowserWindow({
-    width: 300,
-    height: 90,
+    width: 396,
+    height: 44,
     frame: false,
-    transparent: true,
+    vibrancy: 'hud',
+    visualEffectState: 'active',
+    backgroundColor: '#00000000',
+    roundedCorners: true,
     alwaysOnTop: true,
     resizable: false,
-    hasShadow: false,
+    hasShadow: true,
     skipTaskbar: true,
     show: false,
     center: false,
@@ -556,15 +580,20 @@ function showPill(text) {
   thisPill.loadFile('src/pill.html');
 
   thisPill.once('ready-to-show', () => {
-    thisPill.setPosition(x, y);
-    thisPill.show();
-    thisPill.setPosition(x, y);
+    const [w, h] = thisPill.getSize();
+    const { workArea } = screen.getDisplayNearestPoint({ x, y });
+    // Same clamp as the result window: appearing at the cursor near a screen
+    // edge used to push part of the pill (including its controls) off-screen.
+    const px = Math.min(Math.max(x, workArea.x + 8), workArea.x + workArea.width - w - 8);
+    const py = Math.min(Math.max(y, workArea.y + 8), workArea.y + workArea.height - h - 8);
+    thisPill.setPosition(Math.round(px), Math.round(py));
+    // showInactive: taking focus from whatever the user just selected text in
+    // would deselect it, which is the one thing the pill must not do.
+    thisPill.showInactive();
 
     setTimeout(() => {
-      if (!thisPill.isDestroyed()) {
-        thisPill.close();
-      }
-    }, 5000);
+      if (!thisPill.isDestroyed()) thisPill.close();
+    }, 6000);
   });
 
   thisPill.webContents.once('did-finish-load', () => {

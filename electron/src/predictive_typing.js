@@ -52,8 +52,8 @@ const TAB_TAP_PATH = path.join(__dirname, '..', 'TabTap.app', 'Contents', 'MacOS
 //    laggy first suggestion when the user resumes typing is exactly the
 //    "not matching my typing speed" complaint this whole feature exists to
 //    avoid. Any real text change resets straight back to fast, either way.
-const POLL_FAST_MS = 500;
-const POLL_PAUSED_MS = 900;
+const POLL_FAST_MS = 120;
+const POLL_PAUSED_MS = 700;
 const POLL_NO_CONTEXT_MS = 3000;
 const PAUSED_TICKS_BEFORE_BACKOFF = 10; // ~5s of no change while still focused in a field
 const NO_CONTEXT_TICKS_BEFORE_BACKOFF = 2; // ~1s -- nothing to lose by backing off fast
@@ -66,7 +66,7 @@ let idleTickCount = 0;
 // at all) and gives the model a fuller, more coherent chunk of context to
 // work with (the last several words of an actual finished thought, not a
 // half-typed fragment). Any further typing during the wait resets the timer.
-const NEXT_WORD_DEBOUNCE_MS = 1200;
+const NEXT_WORD_DEBOUNCE_MS = 250;
 const CONTEXT_WORD_COUNT = 8; // "at least 4-8 words" of context for next-word prediction
 // Next-word prediction is the ONLY thing here that runs a language model, and
 // running it after the first word or two is both the least useful (almost no
@@ -76,8 +76,8 @@ const CONTEXT_WORD_COUNT = 8; // "at least 4-8 words" of context for next-word p
 // suggestions that do appear. In-word completion and spellcheck are unaffected:
 // they're local lookups with no model behind them, so they stay instant from
 // the first keystroke.
-const MIN_WORDS_BEFORE_PREDICT = 4;
-const MIN_PARTIAL_WORD_LEN = 3; // shorter than this, in-word completion is too noisy to be useful
+const MIN_WORDS_BEFORE_PREDICT = 2;
+const MIN_PARTIAL_WORD_LEN = 3;
 
 let ghostWindow = null;
 let lastTextBeforeCursor = '';
@@ -100,6 +100,7 @@ let lastCaretH = 0;           // line height at the caret; 0 = unknown
 let lastHasTextAfterCaret = false; // inline would overlap the app's own text
 let lastCaretBundleId = null; // which app the anchor actually belongs to
 let lastShownSuggestion = '';
+let lastRecordedLength = 0; // how much of the current field has been learned from
 let pollTimer = null;
 let nextWordDebounceTimer = null;
 let enabled = true;
@@ -170,6 +171,39 @@ function spellcheckViaDaemon(word, callback) {
       } catch (e) {
         callback(null);
       }
+    });
+  }).on('error', () => callback(null))
+    .on('timeout', function () { this.destroy(); callback(null); });
+}
+
+// Personal n-grams answer in under a millisecond, where the LLM takes seconds.
+// Asking here first is what lets a suggestion appear while the user is still
+// typing rather than a beat after they stop.
+function localPredictViaDaemon(context, callback) {
+  const url = `http://localhost:11200/complete/local?context=${encodeURIComponent(context)}&max_words=4`;
+  http.get(url, { timeout: 1200 }, (res) => {
+    let data = '';
+    res.on('data', (c) => { data += c; });
+    res.on('end', () => {
+      try { callback(JSON.parse(data)); } catch (e) { callback(null); }
+    });
+  }).on('error', () => callback(null))
+    .on('timeout', function () { this.destroy(); callback(null); });
+}
+
+// Feeds finished sentences back into the personal model, so Mira's suggestions
+// get more accurate the more its owner writes.
+function recordTypedText(text) {
+  postFireAndForget('/typing/record', { text });
+}
+
+function midwordDecisionViaDaemon(partial, callback) {
+  const url = `http://localhost:11200/complete/midword?partial=${encodeURIComponent(partial)}`;
+  http.get(url, { timeout: 2000 }, (res) => {
+    let data = '';
+    res.on('data', (c) => { data += c; });
+    res.on('end', () => {
+      try { callback(JSON.parse(data)); } catch (e) { callback(null); }
     });
   }).on('error', () => callback(null))
     .on('timeout', function () { this.destroy(); callback(null); });
@@ -581,16 +615,35 @@ function handleMidWord(partialWord) {
     return;
   }
 
-  completeWordViaDaemon(partialWord, (result) => {
-    console.log('[in-word] partial:', partialWord, '-> result:', JSON.stringify(result));
-    if (!result || !result.suffix) {
-      hideGhostText();
+  // One call decides between "finish this word" and "you mistyped it". The
+  // client used to infer that from two separate signals -- a missing
+  // completion meant a typo -- which was wrong: "teh" completes to "tehran"
+  // and "recieve" to "recieved", because the personal model learns its owner's
+  // misspellings. The daemon now compares real-world word frequency instead.
+  midwordDecisionViaDaemon(partialWord, (decision) => {
+    if (DEBUG_PREDICTIVE) console.log('[in-word]', partialWord, '->', JSON.stringify(decision));
+    if (!decision) { hideGhostText(); return; }
+
+    if (decision.mode === 'complete' && decision.suffix) {
+      suggestionMode = 'in-word';
+      currentInWordSuffix = decision.suffix;
+      currentInWordFullWord = partialWord + decision.suffix;
+      showGhost({ mode: 'in-word', suffix: decision.suffix });
       return;
     }
-    suggestionMode = 'in-word';
-    currentInWordSuffix = result.suffix;
-    currentInWordFullWord = partialWord + result.suffix;
-    showGhost({ mode: 'in-word', suffix: result.suffix });
+
+    if (decision.mode === 'correct' && decision.suggestion) {
+      suggestionMode = 'correction';
+      currentCorrection = {
+        wrong: partialWord,
+        correct: decision.suggestion,
+        trailingWhitespace: '',
+      };
+      showGhost({ mode: 'correction', wrong: partialWord, correct: decision.suggestion });
+      return;
+    }
+
+    hideGhostText();
   });
 }
 
@@ -610,6 +663,22 @@ function handleWordBoundary(lastCompletedWord, tokens, rawTextBeforeCursor, trai
 
   const proceedToNextWord = () => {
     clearNextWordDebounce();
+
+    // Instant path first: if the user's own writing already predicts what comes
+    // next, show it now rather than making them wait on a model round-trip.
+    if (tokens.length >= MIN_WORDS_BEFORE_PREDICT) {
+      const contextTail = tokens.slice(-CONTEXT_WORD_COUNT).join(' ');
+      localPredictViaDaemon(contextTail, (local) => {
+        if (local && local.words && local.words.length && suggestionMode === null) {
+          suggestionMode = 'next-word';
+          currentSuggestionWords = local.words.slice();
+          showGhost({ mode: 'next-word', words: local.words });
+        }
+      });
+    }
+
+    // The model still runs, and replaces the local guess if it has something
+    // better -- the local model only knows phrases this user has typed before.
     nextWordDebounceTimer = setTimeout(() => {
       requestNextWordSuggestion(tokens, rawTextBeforeCursor);
     }, NEXT_WORD_DEBOUNCE_MS);
@@ -744,6 +813,19 @@ function pollAndSuggest() {
     // Tab, or accepted it and we're resyncing) — clear the stale pill
     if (suggestionMode) {
       hideGhostText();
+    }
+
+    // Learn from finished sentences. Triggered on terminal punctuation so we
+    // capture real, complete thoughts rather than half-typed fragments, and
+    // only the newly-written part -- the AX read returns the whole field every
+    // tick, so re-sending all of it would count the same sentence hundreds of
+    // times and swamp the personal model.
+    const typed = context.textBeforeCursor;
+    if (typed.length < lastRecordedLength) lastRecordedLength = 0; // field cleared or switched
+    if (/[.!?\n]\s*$/.test(typed) && typed.length > lastRecordedLength) {
+      const fresh = typed.slice(lastRecordedLength).trim();
+      if (fresh.length >= 12) recordTypedText(fresh);
+      lastRecordedLength = typed.length;
     }
 
     lastTextBeforeCursor = context.textBeforeCursor;

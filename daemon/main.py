@@ -1738,3 +1738,49 @@ def session_delete(session_id: str):
         meta.pop(session_id)
         _save_session_meta(meta)
     return {"deleted": existed}
+
+
+# ---------- Instant local prediction + typing memory ----------
+@app.get("/complete/local")
+def complete_local(context: str = "", max_words: int = 4):
+    """Predict ahead from the user's own writing, with no model call.
+
+    This is what makes suggestions keep up with typing: the LLM round-trip is
+    the latency, and a large share of what anyone writes is repetitive enough
+    that their personal n-grams can answer instantly. The model is only needed
+    for genuinely novel text.
+    """
+    from personalization import predict_phrase
+    words, confidence = predict_phrase(context, max_words)
+    return {"words": words, "confidence": confidence}
+
+
+@app.post("/typing/record")
+def typing_record(text: str = Body(..., embed=True)):
+    """Learn from a finished sentence the user typed."""
+    if not load_settings().get("predictive_personalization_enabled", True):
+        return {"recorded": False, "reason": "personalization disabled"}
+    from personalization import record_typed_text
+    return {"recorded": record_typed_text(text)}
+
+
+@app.get("/complete/midword")
+def complete_midword(partial: str):
+    """One call that decides between completing a half-typed word and fixing a
+    typo, so the client doesn't have to guess from two unrelated signals."""
+    from personalization import midword_decision
+
+    suggestion = None
+    # 3, not 4: the most common typos in English are three letters ("teh",
+    # "hte", "adn"), and gating at 4 let every one of them through.
+    if len(partial) >= 3 and re.fullmatch(r"[A-Za-z']+", partial or ""):
+        try:
+            result = subprocess.run([str(AX_HELPER_PATH), "spellcheck", partial],
+                                    capture_output=True, text=True, timeout=5)
+            data = json.loads(result.stdout.strip())
+            if data.get("misspelled"):
+                suggestion = data.get("suggestion")
+        except (subprocess.SubprocessError, json.JSONDecodeError, OSError):
+            suggestion = None
+
+    return midword_decision(partial, suggestion)
