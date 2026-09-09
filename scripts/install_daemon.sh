@@ -19,7 +19,10 @@ PORT=11200
 if [ ! -x "$VENV_UVICORN" ]; then
   echo "error: $VENV_UVICORN not found."
   echo "Create the virtualenv first:"
-  echo "  cd '$DAEMON_DIR' && python3 -m venv venv && ./venv/bin/pip install -r requirements.txt"
+  echo "  cd '$DAEMON_DIR'"
+  echo "  python3 -m venv venv"
+  echo "  ./venv/bin/pip install --upgrade pip    # stock macOS pip cannot resolve these"
+  echo "  ./venv/bin/pip install -r requirements.txt"
   exit 1
 fi
 
