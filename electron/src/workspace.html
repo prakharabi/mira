@@ -1807,6 +1807,7 @@
 
 <script>
   const { ipcRenderer } = require('electron');
+  const { createDictation, transcribeBlob } = require('./dictation');
   const DAEMON_URL = 'http://localhost:11200';
   let SESSION_ID = 'main_chat'; // mutable: the history rail switches conversations
 
@@ -2043,15 +2044,17 @@
 
   async function transcribeAndSend(blob) {
     const thinking = addMessage('system', 'Transcribing…');
-    const formData = new FormData();
-    formData.append('audio', blob, 'recording.webm');
     try {
-      const res = await fetch(`${DAEMON_URL}/transcribe`, { method: 'POST', body: formData });
-      const data = await res.json();
+      // Shared with the Dump Box and Quick Capture mics, so the dictation
+      // engine chosen in Settings applies here too. This used to post straight
+      // to /transcribe, which meant the most-used mic in the app quietly
+      // ignored that setting.
+      const text = await transcribeBlob(blob);
       thinking.remove();
-      if (data.error) { addMessage('system', 'Transcription error: ' + JSON.stringify(data.error)); return; }
-      addMessage('user', data.text);
-      await sendToChat(data.text);
+      if (text === null) { addMessage('system', 'Could not transcribe that.'); return; }
+      if (!text.trim()) return;
+      addMessage('user', text.trim());
+      await sendToChat(text.trim());
     } catch (e) {
       thinking.remove();
       addMessage('system', 'Error: could not reach Mira daemon');
@@ -2704,7 +2707,6 @@
   document.getElementById('dump-process-btn').onclick = () => captureDump(true);
 
   // ---------- Dump Box dictation ----------
-  const { createDictation } = require('./dictation');
   const dumpMicBtn = document.getElementById('dump-mic-btn');
   const dumpMicLabel = document.getElementById('dump-mic-label');
   const dumpHint = document.getElementById('dump-hint');

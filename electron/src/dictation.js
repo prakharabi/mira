@@ -19,14 +19,19 @@ const { ipcRenderer } = require('electron');
 const SILENCE_PEAK_THRESHOLD = 0.02; // normalised amplitude, ~ -34 dBFS
 const MIN_SPEECH_MS = 300;
 
-function createDictation({ onText, onStateChange, onError }) {
-  let recorder = null;
-  let stream = null;
-  let chunks = [];
-  let recording = false;
-  let transcribing = false;
 
-// Settings are read per-dictation rather than cached: switching engine in
+/**
+ * Turn recorded audio into text, honouring the configured dictation engine.
+ *
+ * Exported because Mira has three separate mic buttons -- Dump Box, Quick
+ * Capture, and the chat composer -- and the chat one had its own copy of this
+ * that went straight to Whisper. Choosing Apple in Settings therefore did
+ * nothing for the mic most people press most often. One implementation now, so
+ * a fourth mic cannot drift the same way.
+ *
+ * Returns the transcript, or null if nothing could transcribe it.
+ */
+// Settings are read per transcription rather than cached: switching engine in
 // Settings should take effect on the very next press, not after a restart.
 async function fetchSettings() {
   try {
@@ -35,6 +40,44 @@ async function fetchSettings() {
     return {};
   }
 }
+
+async function transcribeBlob(blob) {
+  // Apple's recognizer first when chosen: it runs on this Mac, needs no API
+  // key, and answers a short clip faster than a round trip to a cloud Whisper.
+  // Whisper stays the fallback rather than being removed, because Apple's
+  // engine can be unavailable (permission refused, a locale with no model) and
+  // dictation failing outright is worse than dictation being a second slower.
+  const settings = await fetchSettings();
+
+  if ((settings.dictation_engine || 'apple') === 'apple') {
+    try {
+      const buffer = await blob.arrayBuffer();
+      const res = await ipcRenderer.invoke('speech-transcribe', {
+        buffer, locale: settings.dictation_locale || 'en-IN',
+      });
+      if (res && !res.error && typeof res.text === 'string') return res.text;
+      if (res && res.error) {
+        console.warn('[dictation] Apple engine unavailable, using Whisper:', res.error);
+      }
+    } catch (e) {
+      console.warn('[dictation] Apple engine threw, using Whisper:', e.message);
+    }
+  }
+
+  const form = new FormData();
+  form.append('audio', blob, 'dictation.webm');
+  const res = await fetch('http://localhost:11200/transcribe', { method: 'POST', body: form });
+  const data = await res.json();
+  if (data.error) return null;
+  return data.text || '';
+}
+
+function createDictation({ onText, onStateChange, onError }) {
+  let recorder = null;
+  let stream = null;
+  let chunks = [];
+  let recording = false;
+  let transcribing = false;
   let audioContext = null;
   let levelTimer = null;
   let speechMs = 0;
@@ -108,40 +151,9 @@ async function fetchSettings() {
       setState('transcribing');
 
       try {
-        let text = null;
-
-        // Apple's recognizer first when chosen: it runs on this Mac, needs no
-        // API key and answers a short clip faster than the round trip to a
-        // cloud Whisper. Whisper stays the fallback rather than being removed,
-        // because Apple's engine can be unavailable (permission refused, a
-        // locale with no model) and dictation failing outright is worse than
-        // dictation being a second slower.
-        const settings = await fetchSettings();
-        if ((settings.dictation_engine || 'apple') === 'apple') {
-          const buffer = await blob.arrayBuffer();
-          const res = await ipcRenderer.invoke('speech-transcribe', {
-            buffer, locale: settings.dictation_locale || 'en-IN',
-          });
-          if (res && !res.error && typeof res.text === 'string') {
-            text = res.text;
-          } else if (res && res.error) {
-            console.warn('[dictation] Apple engine unavailable, using Whisper:', res.error);
-          }
-        }
-
-        if (text === null) {
-          const form = new FormData();
-          form.append('audio', blob, 'dictation.webm');
-          const res = await fetch('http://localhost:11200/transcribe', { method: 'POST', body: form });
-          const data = await res.json();
-          if (data.error) {
-            onError && onError('Could not transcribe that.');
-          } else {
-            text = data.text || '';
-          }
-        }
-
-        if (text && text.trim()) onText && onText(text.trim());
+        const text = await transcribeBlob(blob);
+        if (text === null) onError && onError('Could not transcribe that.');
+        else if (text.trim()) onText && onText(text.trim());
       } catch (e) {
         onError && onError('Could not reach Mira daemon.');
       } finally {
@@ -170,4 +182,4 @@ async function fetchSettings() {
   };
 }
 
-module.exports = { createDictation };
+module.exports = { createDictation, transcribeBlob };
