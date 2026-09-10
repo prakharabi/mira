@@ -39,6 +39,11 @@ CHUNK_SIZE = 1280  # openWakeWord's expected frame size at 16kHz
 COMMAND_RECORD_SECONDS = 4
 DETECTION_THRESHOLD = 0.5
 DETECTION_COOLDOWN_SECONDS = 3  # avoid re-triggering immediately on the same utterance
+# Below this RMS a recording is treated as having no speech in it. Whisper
+# hallucinates fluent nonsense on near-silence, so the guard earns its place --
+# but it is an absolute level, which means a quiet input device or a low system
+# input volume trips it just as surely as an empty room. When it trips, say so.
+SILENCE_RMS_FLOOR = 150
 
 WAKEWORD_SESSION_ID = "wakeword_voice"
 
@@ -46,9 +51,9 @@ WAKEWORD_SESSION_ID = "wakeword_voice"
 _controller = None
 
 
-def record_command_audio(pa: pyaudio.PyAudio, seconds: int) -> Path:
+def record_command_audio(pa: pyaudio.PyAudio, seconds: int) -> tuple:
     """Records `seconds` of audio from the mic and saves it as a WAV file for transcription.
-    Returns (path, has_meaningful_audio) -- the second value is a cheap volume-based guard
+    Returns (path, has_meaningful_audio, rms, device_name) -- the guard is a volume check
     against feeding near-silent/noise-only recordings to Whisper, which can hallucinate
     fluent-sounding but meaningless text on such input."""
     stream = pa.open(
@@ -58,6 +63,10 @@ def record_command_audio(pa: pyaudio.PyAudio, seconds: int) -> Path:
         input=True,
         frames_per_buffer=CHUNK_SIZE
     )
+    try:
+        device_name = pa.get_default_input_device_info().get("name", "the microphone")
+    except Exception:
+        device_name = "the microphone"
 
     frames = []
     num_chunks = int(SAMPLE_RATE / CHUNK_SIZE * seconds)
@@ -78,9 +87,30 @@ def record_command_audio(pa: pyaudio.PyAudio, seconds: int) -> Path:
     # there's likely no real speech in it at all
     all_audio = np.frombuffer(b"".join(frames), dtype=np.int16)
     rms = np.sqrt(np.mean(all_audio.astype(np.float64) ** 2)) if len(all_audio) else 0
-    has_meaningful_audio = rms > 150  # empirical floor for "some real signal present"
+    has_meaningful_audio = rms > SILENCE_RMS_FLOOR
 
-    return TEMP_RECORDING_PATH, has_meaningful_audio
+    return TEMP_RECORDING_PATH, has_meaningful_audio, float(rms), device_name
+
+
+def notify(title: str, body: str):
+    """A visible alert, for failures that cannot be reported by voice."""
+    script = ('on run argv\n'
+              '  display notification (item 2 of argv) with title (item 1 of argv)\n'
+              'end run')
+    try:
+        subprocess.run(["osascript", "-e", script, "--", title, body],
+                       capture_output=True, timeout=10)
+    except (subprocess.SubprocessError, OSError):
+        pass
+
+
+def load_settings_safe() -> dict:
+    """Settings, without tripping the circular import guarded against below."""
+    try:
+        from main import load_settings
+        return load_settings()
+    except Exception:
+        return {}
 
 
 def play_chime():
@@ -90,15 +120,32 @@ def play_chime():
 
 
 def handle_wake_detected(pa: pyaudio.PyAudio, chime: bool = False):
-    log("[wakeword] 'Hey Mira' detected, recording command...")
+    # chime=True means this came from the shortcut, not the spoken wake word.
+    # Logging "'Hey Mira' detected" either way made shortcut sessions look like
+    # misfires of a wake word nobody said.
+    log("[wakeword] Shortcut triggered, recording command..." if chime
+        else "[wakeword] 'Hey Mira' detected, recording command...")
 
     if chime:
         play_chime()
 
-    audio_path, has_meaningful_audio = record_command_audio(pa, COMMAND_RECORD_SECONDS)
+    audio_path, has_meaningful_audio, rms, device_name = record_command_audio(
+        pa, COMMAND_RECORD_SECONDS)
 
     if not has_meaningful_audio:
-        log("[wakeword] Recording was near-silent, skipping transcription.")
+        # Saying nothing here was the whole problem: Mira took the trigger,
+        # recorded, decided it heard nothing and returned in silence -- which
+        # from the outside is indistinguishable from the shortcut being broken.
+        log(f"[wakeword] Near-silent recording from '{device_name}' "
+            f"(RMS {rms:.0f}, floor {SILENCE_RMS_FLOOR}).")
+        # Deliberately a NOTIFICATION rather than a spoken reply. When the
+        # cause is the audio route -- a Bluetooth headset taking the default
+        # input, say -- announcing it through that same route is useless: the
+        # user is not listening to the device Mira is talking into. Naming the
+        # device is the whole point, since that is the thing to change.
+        notify("Mira didn't hear you",
+               f"Nothing audible came from \u201c{device_name}\u201d. "
+               f"Check that it is the right input and that input volume is up.")
         return
 
     # these are imported here (not at module top) because wakeword_listener is
