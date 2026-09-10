@@ -1,5 +1,5 @@
 #!/bin/bash
-# Runs a local n8n for Mira's automations. No Docker required.
+# Runs a local n8n for Mira's automations.
 #
 # n8n is not bundled with Mira and never will be -- it is a workflow engine in
 # its own right, and Mira's job is only to fire named webhooks at whatever n8n
@@ -11,7 +11,6 @@
 #   ./scripts/n8n.sh install      install/repair only, don't start
 #   ./scripts/n8n.sh autostart    run in the background, and at login
 #   ./scripts/n8n.sh stop         stop it
-#   ./scripts/n8n.sh docker       run via Docker instead
 #
 # Requires Node 24+ (n8n 2.x declares `engines: node >=24`) and the Xcode
 # command line tools, which the sqlite3 build below needs.
@@ -146,17 +145,14 @@ case "${1:-start}" in
   stop)
     launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null && echo "Stopped background n8n." || true
     pkill -f "n8n start" 2>/dev/null && echo "Stopped foreground n8n." || true
-    docker stop mira-n8n >/dev/null 2>&1 && echo "Stopped Docker n8n." || true
     exit 0
     ;;
 
   autostart)
     ensure_installed
     mkdir -p "$HOME/Library/LaunchAgents" "$HOME/.n8n"
-    # A LaunchAgent rather than Docker. n8n itself costs about the same either
-    # way (~1GB resident, measured); what this avoids is Docker Desktop's own
-    # ~600MB of daemon and VM on top, plus the requirement that a user install
-    # Docker at all to use an optional integration.
+    # n8n runs as a LaunchAgent so it starts at login and stays running in
+    # the background without a separate app to manage.
     cat > "$PLIST" <<PLIST_EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -197,30 +193,6 @@ PLIST_EOF
     exit 0
     ;;
 
-  docker)
-    command -v docker >/dev/null 2>&1 || { echo "Docker not found. Just run: ./scripts/n8n.sh"; exit 1; }
-    if ! docker info >/dev/null 2>&1; then
-      echo "Docker is installed but not running. Starting Docker Desktop..."
-      open -a Docker 2>/dev/null || true
-      for _ in $(seq 1 60); do docker info >/dev/null 2>&1 && break; sleep 2; done
-      docker info >/dev/null 2>&1 || { echo "Docker did not start."; exit 1; }
-    fi
-    if docker ps -a --format '{{.Names}}' | grep -qx mira-n8n; then
-      docker start mira-n8n >/dev/null
-    else
-      docker volume create n8n_data >/dev/null
-      docker run -d --name mira-n8n --restart unless-stopped \
-        -p "127.0.0.1:$PORT:5678" \
-        -v n8n_data:/home/node/.n8n \
-        -e N8N_SECURE_COOKIE=false \
-        -e GENERIC_TIMEZONE="$(readlink /etc/localtime | sed 's|.*/zoneinfo/||')" \
-        docker.n8n.io/n8nio/n8n >/dev/null
-    fi
-    wait_for_n8n || { echo "Check: docker logs mira-n8n"; exit 1; }
-    next_steps
-    exit 0
-    ;;
-
   start)
     ensure_installed
     echo "Starting n8n on http://localhost:$PORT (Ctrl-C to stop)..."
@@ -229,7 +201,7 @@ PLIST_EOF
     ;;
 
   *)
-    echo "usage: $0 [start|install|autostart|stop|docker]"
+    echo "usage: $0 [start|install|autostart|stop]"
     exit 1
     ;;
 esac
