@@ -94,6 +94,14 @@ MIRA_OPEN_VIEW=automations MIRA_CLICK='#n8n-open-btn' \
   electron/dist/Mira.app/Contents/MacOS/Mira
 ```
 
+`MIRA_EVAL` runs a snippet in the renderer and logs the result, which is how to
+exercise a renderer-side code path in place:
+
+```bash
+MIRA_OPEN_VIEW=chat MIRA_EVAL='(async()=>await transcribeBlob(b))()' \
+  electron/dist/Mira.app/Contents/MacOS/Mira
+```
+
 **Test against a real permission state.** Predictive typing, OCR and audio all
 fail in ways that look like bugs when a TCC grant is missing. Settings →
 Assistant shows predictive typing's live status and has a Restart button.

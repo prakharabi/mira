@@ -1,7 +1,7 @@
 const { app, BrowserWindow, screen, ipcMain, globalShortcut, nativeTheme, Tray, Menu, nativeImage, dialog, systemPreferences } = require('electron');
 const { clipboard } = require('electron');
 const http = require('http');
-const { exec, spawn } = require('child_process');
+const { exec, execFile, spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -636,6 +636,14 @@ if (process.env.MIRA_OPEN_VIEW) {
     // section below the fold can be inspected without synthetic scrolling.
     // MIRA_CLICK fires a real click on a selector after the view loads, so a
     // button's whole handler chain can be exercised the way a user would.
+    // MIRA_EVAL runs a snippet in the renderer and logs its result, so a
+    // renderer-side code path can be exercised in place rather than reasoned
+    // about from the outside.
+    if (process.env.MIRA_EVAL && chatWindow && !chatWindow.isDestroyed()) {
+      setTimeout(() => chatWindow.webContents.executeJavaScript(process.env.MIRA_EVAL)
+        .then(r => console.log('[MIRA_EVAL]', JSON.stringify(r)))
+        .catch(e => console.log('[MIRA_EVAL] err', e.message)), 3000);
+    }
     if (process.env.MIRA_CLICK && chatWindow && !chatWindow.isDestroyed()) {
       const sel = JSON.stringify(process.env.MIRA_CLICK);
       setTimeout(() => chatWindow.webContents.executeJavaScript(
