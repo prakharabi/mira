@@ -44,7 +44,7 @@ and generates minutes.
 
 **Runs your workflows.** Fires named n8n webhooks by voice or chat, matched
 against how you describe them. The Automations view shows whether n8n is
-actually running, and starts it — no Docker required.
+actually running, and starts it.
 
 **Proactive.** Optionally speaks first — a meeting starting soon, mail addressed
 directly to you — delivered over Telegram so it reaches you with the lid shut.
@@ -161,7 +161,7 @@ accounts:
 - **Cloud model** — any OpenAI-compatible endpoint (Groq by default)
 - **Google** — your own OAuth client for Gmail/Calendar/Drive ([setup guide](docs/google-setup.md))
 - **Telegram** — your own bot from @BotFather
-- **n8n** — your own webhook URLs; `./scripts/n8n.sh` runs one locally (no Docker needed)
+- **n8n** — your own webhook URLs; `./scripts/n8n.sh` runs one locally
 
 Web search needs no key at all.
 
