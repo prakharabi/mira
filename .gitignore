@@ -44,3 +44,4 @@ electron/electron.log
 /electron/tab_tap
 /electron/mic_helper
 /electron/mic_test_helper
+/electron/ax_helper

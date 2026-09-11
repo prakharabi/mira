@@ -22,8 +22,5 @@
   "type": "commonjs",
   "devDependencies": {
     "electron": "^43.1.0"
-  },
-  "dependencies": {
-    "node-mac-permissions": "^2.5.0"
   }
 }

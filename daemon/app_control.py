@@ -20,7 +20,15 @@ import re
 import subprocess
 from pathlib import Path
 
-MEDIA_KEY_PATH = Path.home() / "Mira" / "electron" / "media_key"
+# Resolved from this file's location (repo_root/electron/media_key), not a
+# hardcoded ~/Mira -- that only worked for a checkout living at exactly that
+# path. Deliberately NOT named MIRA_HOME/an env override like the daemon's
+# user-data paths elsewhere (memory_store, meetings, etc. under ~/Mira) --
+# this points at a build artifact in the SOURCE tree, a different thing
+# entirely, and reusing that name here would mean two different defaults for
+# the same variable depending which file you're reading.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+MEDIA_KEY_PATH = _REPO_ROOT / "electron" / "media_key"
 
 # Friendly names people actually say -> the app macOS knows about.
 APP_ALIASES = {
