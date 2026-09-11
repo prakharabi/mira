@@ -5,6 +5,7 @@
   "description": "Mira — a CEO's personal AI assistant for Mac",
   "main": "src/main.js",
   "scripts": {
+    "postinstall": "node node_modules/electron/install.js",
     "start": "electron .",
     "build": "node scripts/build_app.js",
     "dmg": "node scripts/build_app.js && ../scripts/make_dmg.sh"
