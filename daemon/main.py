@@ -6,6 +6,7 @@ import requests
 import os
 import json
 import subprocess
+import shutil
 import threading
 import uuid
 import time
@@ -323,10 +324,21 @@ WHISPER_MODEL = _WHISPER_DIR / "models" / "ggml-small.bin"
 WHISPER_VAD_MODEL = _WHISPER_DIR / "models" / "ggml-silero-v6.2.0.bin"
 
 # ffmpeg's full path -- LaunchAgent daemons run with a minimal PATH that does NOT
-# include Homebrew's /opt/homebrew/bin, so "ffmpeg" alone is not found. Confirm this
-# matches `which ffmpeg` on your machine (Intel Macs often use /usr/local/bin/ffmpeg instead).
-FFMPEG_PATH = "/opt/homebrew/bin/ffmpeg"
-FFPROBE_PATH = "/opt/homebrew/bin/ffprobe"
+# include Homebrew's bin directory, so plain "ffmpeg" is not found. Checked
+# across both Homebrew prefixes (Apple Silicon and Intel) plus PATH itself,
+# rather than hardcoded to one -- a hardcoded /opt/homebrew path silently
+# broke this for every Intel Mac and anyone with ffmpeg somewhere else.
+def _find_binary(name: str, *extra_candidates: str) -> str:
+    found = shutil.which(name)
+    if found:
+        return found
+    for candidate in extra_candidates:
+        if Path(candidate).exists():
+            return candidate
+    return name  # last resort: let the OS raise a clear FileNotFoundError
+
+FFMPEG_PATH = _find_binary("ffmpeg", "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg")
+FFPROBE_PATH = _find_binary("ffprobe", "/opt/homebrew/bin/ffprobe", "/usr/local/bin/ffprobe")
 
 # ---------- mic_helper (Swift, run by the daemon) ----------
 # mic_helper runs from inside a proper .app bundle (with Info.plist declaring

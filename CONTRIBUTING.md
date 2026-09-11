@@ -56,6 +56,41 @@ codesign --force --sign - AXHelper.app
 Rebuilding a helper changes its code signature, which macOS treats as a new
 identity — you will have to re-grant its permission in System Settings.
 
+`speech_helper` is the one exception, and needs its Info.plist embedded
+directly into the binary at link time rather than living only in the
+surrounding .app bundle:
+
+```bash
+cd electron
+cat > /tmp/speech_helper_info.plist <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleIdentifier</key>
+    <string>com.mira.speechhelper</string>
+    <key>CFBundleName</key>
+    <string>SpeechHelper</string>
+    <key>NSSpeechRecognitionUsageDescription</key>
+    <string>Mira uses speech recognition to turn your dictation into text on this Mac.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Mira uses the microphone for voice dictation.</string>
+</dict>
+</plist>
+PLIST
+swiftc -O speech_helper.swift -o SpeechHelper.app/Contents/MacOS/speech_helper \
+  -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist \
+  -Xlinker /tmp/speech_helper_info.plist
+codesign --force --sign - SpeechHelper.app
+```
+
+Why: macOS aborts a process outright (`SIGABRT`) if it can't find
+`NSSpeechRecognitionUsageDescription` for whichever process TCC considers
+*responsible* — and for a helper Mira launches, that's Mira.app's own
+Info.plist (see `build_app.js`), not the helper's. The embedded plist here is
+what lets `speech_helper` also run correctly stand-alone, e.g. for the
+`check`/`locales` commands during development.
+
 ## Things to be careful about
 
 **Never commit personal data.** `daemon/memory_store/`, `chat_history/`,

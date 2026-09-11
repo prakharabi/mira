@@ -27,10 +27,9 @@ const DIST_DIR = path.join(ROOT, 'dist');
 const APP_DEST = path.join(DIST_DIR, `${APP_NAME}.app`);
 
 // Everything under electron/ that the packaged app actually needs at runtime.
-// node_modules is deliberately excluded: nothing in src/ requires a package
-// from it (checked -- "node-mac-permissions" is listed in package.json but
-// never imported), and the Electron runtime itself lives in the shell we're
-// copying, not in node_modules/electron.
+// node_modules is deliberately excluded: nothing in src/ requires a runtime
+// package (electron itself is the only dependency, and its own runtime lives
+// in the shell we're copying, not in node_modules/electron).
 const INCLUDE = [
   'src',
   'assets',
