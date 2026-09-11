@@ -78,7 +78,7 @@ Requirements: macOS (Apple Silicon tested), Python 3.11+, Node 18+,
 [Ollama](https://ollama.com), and `ffmpeg` (`brew install ffmpeg`).
 
 ```bash
-git clone https://github.com/<your-username>/mira.git && cd mira
+git clone https://github.com/prakharabi/mira.git && cd mira
 
 # daemon
 cd daemon
