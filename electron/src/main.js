@@ -16,6 +16,7 @@ app.dock.hide();
 
 let win = null;
 let pillWindow = null;
+let notchWindow = null;
 let chatWindow = null;
 let lastClipboard = clipboard.readText(); // seed with current clipboard so it doesn't trigger on startup
 let isQuitting = false; // lets the workspace window's close handler tell "put away" from "really quit"
@@ -119,6 +120,121 @@ function showResultWindow(text, x, y) {
   thisResult.on('closed', () => {
     if (resultWindow === thisResult) resultWindow = null;
   });
+}
+
+// ---------- Notch UI ----------
+// A second home for the same actions the copy-triggered pill offers
+// (Search/Summarize/Remind/Hindi/Call), anchored where a physical notch
+// sits (or would sit) rather than at the cursor -- built for the "circle
+// something on screen" flow (⌘⇧O) specifically, so the whole interaction
+// -- read the region, choose an action, see the answer -- happens in one
+// place that grows in place instead of a chain of separate popups.
+const NOTCH_COLLAPSED_HEIGHT = 34;
+const NOTCH_WIDTH = 360;
+
+function notchGeometry(height) {
+  const display = screen.getPrimaryDisplay();
+  const { workArea } = display;
+  const x = Math.round(workArea.x + (workArea.width - NOTCH_WIDTH) / 2);
+  // workArea.y already excludes the menu bar, so this sits flush against its
+  // bottom edge -- reading as an extension of it rather than a window
+  // floating somewhere near the top.
+  return { x, y: workArea.y, width: NOTCH_WIDTH, height };
+}
+
+function ensureNotchWindow() {
+  if (notchWindow && !notchWindow.isDestroyed()) return notchWindow;
+
+  notchWindow = new BrowserWindow({
+    ...notchGeometry(NOTCH_COLLAPSED_HEIGHT),
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    resizable: false,
+    hasShadow: true,
+    skipTaskbar: true,
+    focusable: true,  // needs to take clicks (action buttons), unlike the ghost overlay
+    show: false,
+    webPreferences: { nodeIntegration: true, contextIsolation: false }
+  });
+
+  notchWindow.loadFile('src/notch.html');
+  notchWindow.on('closed', () => { notchWindow = null; });
+  return notchWindow;
+}
+
+// Renderer reports its own content height after each state change (working /
+// context+actions / response) so the window can grow to fit exactly, with no
+// dead transparent space below the rounded corners and no clipped content.
+ipcMain.on('notch-resize', (event, contentHeight) => {
+  if (!notchWindow || notchWindow.isDestroyed()) return;
+  const h = Math.max(NOTCH_COLLAPSED_HEIGHT, Math.min(420, Math.round(contentHeight)));
+  const { x, y, width } = notchGeometry(h);
+  // Second argument is macOS-only: animates the resize as a native window
+  // transition instead of an instant jump between sizes, matching how the
+  // reference UI grows/shrinks smoothly rather than snapping.
+  notchWindow.setBounds({ x, y, width, height: h }, true);
+});
+
+ipcMain.on('notch-close', () => {
+  if (notchWindow && !notchWindow.isDestroyed()) notchWindow.close();
+});
+
+ipcMain.on('notch-action', (event, { action, text }) => {
+  if (action === 'remind') {
+    const prompt = `Extract only the core task as a short reminder title, no explanation, just the title: ${text}`;
+    callDaemon(prompt, (response) => {
+      const title = response.trim();
+      createReminder(title);
+      if (notchWindow && !notchWindow.isDestroyed()) {
+        notchWindow.webContents.send('notch-response', `Reminder created:\n"${title}"`);
+      }
+    });
+    return;
+  }
+
+  if (action === 'call') {
+    const number = extractPhoneNumber(text);
+    const msg = number
+      ? (require('electron').shell.openExternal(`tel:${number}`), `Calling ${number}...`)
+      : 'No phone number found in that text.';
+    if (notchWindow && !notchWindow.isDestroyed()) notchWindow.webContents.send('notch-response', msg);
+    return;
+  }
+
+  let prompt = '';
+  if (action === 'summarize') prompt = `Summarize this in 2 sentences: ${text}`;
+  if (action === 'search') prompt = `Give a brief factual answer about: ${text}`;
+  if (action === 'translate') prompt = `Translate this to Hindi, only give the translation, nothing else: ${text}`;
+
+  callDaemon(prompt, (response) => {
+    if (notchWindow && !notchWindow.isDestroyed()) notchWindow.webContents.send('notch-response', response);
+  });
+});
+
+// Opens the notch already showing a collapsed "Reading..." state, for the
+// moment between the circle gesture finishing and OCR text coming back --
+// otherwise there's a silent gap with nothing on screen to say anything is
+// happening at all.
+function showNotchWorking(label) {
+  const w = ensureNotchWindow();
+  w.setBounds(notchGeometry(NOTCH_COLLAPSED_HEIGHT));
+  w.showInactive();
+  const send = () => w.webContents.send('notch-collapsed', label);
+  if (w.webContents.isLoadingMainFrame()) w.webContents.once('did-finish-load', send);
+  else send();
+}
+
+function showNotchWithText(text) {
+  const w = ensureNotchWindow();
+  const send = () => w.webContents.send('notch-context', text);
+  if (w.webContents.isLoadingMainFrame()) w.webContents.once('did-finish-load', send);
+  else send();
+  w.showInactive();
+}
+
+function hideNotchOnError() {
+  if (notchWindow && !notchWindow.isDestroyed()) notchWindow.close();
 }
 
 // ---------- NEW: Chat window ----------
@@ -670,6 +786,29 @@ if (process.env.MIRA_OPEN_VIEW) {
   }, 2500));
 }
 
+// Opens the notch with a fixed test string, standing in for what runOCR()
+// would hand it after a real circle-and-read -- the interactive region
+// selection screencapture -i drives can't safely be scripted (it's a live
+// mouse drag), so this is how the notch's own rendering, growth and daemon
+// round trip get checked without touching the real mouse.
+//   MIRA_TEST_NOTCH=1 electron/dist/Mira.app/Contents/MacOS/Mira
+if (process.env.MIRA_TEST_NOTCH) {
+  app.whenReady().then(() => setTimeout(() => {
+    showNotchWithText('Kai Brokering — Founder of VoiceOS (YC F25). If you want to reach me, find me on X. San Francisco, California, United States.');
+    // Also exercises the full action -> daemon -> response chain, not just
+    // the static layout, when MIRA_TEST_NOTCH_CLICK names an action.
+    if (process.env.MIRA_TEST_NOTCH_CLICK) {
+      setTimeout(() => {
+        if (!notchWindow || notchWindow.isDestroyed()) return;
+        const action = JSON.stringify(process.env.MIRA_TEST_NOTCH_CLICK);
+        notchWindow.webContents.executeJavaScript(
+          `document.querySelector('button[data-action=${action}]').click()`
+        ).catch(e => console.log('[MIRA_TEST_NOTCH_CLICK] err', e.message));
+      }, 1500);
+    }
+  }, 2000));
+}
+
 // ---------- Custom logo ----------
 // The image lives in userData, never inside the .app: writing into the bundle
 // breaks its code signature, and every rebuild would wipe it anyway.
@@ -941,6 +1080,12 @@ function runOCR() {
       return;
     }
 
+    // The region is already circled at this point; OCR itself is the only
+    // remaining wait, so the notch opens now rather than after -- otherwise
+    // there's a silent gap between finishing the selection and anything
+    // appearing on screen at all.
+    showNotchWorking('Reading…');
+
     const ocr = spawn(OCR_HELPER_PATH, [tmpImage]);
     let output = '';
     let errOutput = '';
@@ -954,10 +1099,19 @@ function runOCR() {
       const text = output.trim();
       if (!text) {
         if (errOutput) console.error('ocr_helper error:', errOutput);
+        hideNotchOnError();
         return;
       }
 
+      // Clipboard write kept as-is -- Cmd+V of what was just circled should
+      // still work regardless of which UI (notch or the old copy-triggered
+      // pill) someone reaches for next. lastClipboard is updated in the same
+      // breath so the clipboard-watcher below doesn't see this as a new
+      // external copy and pop the OLD pill up too -- the notch already
+      // covers this exact flow now.
       clipboard.writeText(text);
+      lastClipboard = text;
+      showNotchWithText(text);
     });
   });
 }

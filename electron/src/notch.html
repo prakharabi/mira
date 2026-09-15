@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  :root { color-scheme: light dark; }
+
+  html, body {
+    margin: 0;
+    background: transparent;
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Anchored top-center, right where a physical notch sits (or where one
+     would be, on a Mac without one) -- the whole point is that it reads as
+     an extension of the menu bar, not a floating popup that could be
+     anywhere. It starts as a small pill and grows downward only, so it never
+     shifts its own top edge as content changes. */
+  #shell {
+    /* NOT height:100% -- #shell must size to its own content (its natural
+       height is what gets measured and sent to the main process to resize
+       the WINDOW to match); giving it the window's own height instead would
+       make that measurement circular and freeze the window at whatever size
+       it last happened to be. */
+    width: 100%;
+    position: relative;
+    background: rgba(22,22,26,0.96);
+    border: 1px solid rgba(255,255,255,0.1);
+    /* Rounded on every side, floating just clear of the menu bar rather than
+       flush-mounted to it -- reads as a pill extending down from the notch,
+       matching the reference, instead of a drawer welded to the bar. */
+    border-radius: 18px;
+    box-shadow: 0 10px 28px rgba(0,0,0,0.4);
+    overflow: hidden;
+    color: rgba(255,255,255,0.92);
+    box-sizing: border-box;
+  }
+
+  /* Every state swap below cross-fades + rises slightly rather than
+     hard-cutting between hidden/visible, matching the reference's smooth
+     grow instead of an instant content swap. */
+  #collapsed, #expanded {
+    transition: opacity 180ms ease, transform 180ms ease;
+  }
+  #collapsed[hidden], #expanded[hidden] {
+    display: flex; /* overridden below per-element, but keeps the transition running */
+    opacity: 0;
+    transform: translateY(-3px);
+    pointer-events: none;
+    position: absolute;
+    inset: 0;
+  }
+
+  #collapsed {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    height: 34px;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.75);
+  }
+  /* (fade handled by the shared #collapsed[hidden] rule above; this file
+     only needed the layout override once, not a second conflicting one) */
+
+  .spinner {
+    width: 11px; height: 11px;
+    border-radius: 50%;
+    border: 1.6px solid rgba(255,255,255,0.25);
+    border-top-color: rgba(255,255,255,0.85);
+    animation: spin 0.7s linear infinite;
+    flex-shrink: 0;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #expanded { padding: 12px 14px 11px; }
+
+  #context-text {
+    font-size: 12px;
+    line-height: 1.45;
+    color: rgba(255,255,255,0.6);
+    max-height: 4.4em;
+    overflow: hidden;
+    -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
+    margin-bottom: 10px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  #actions { display: flex; gap: 5px; flex-wrap: wrap; }
+  #actions button {
+    display: flex; align-items: center; gap: 5px;
+    background: rgba(255,255,255,0.08);
+    border: none;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font: inherit;
+    font-size: 11.5px;
+    font-weight: 550;
+    color: rgba(255,255,255,0.9);
+    cursor: default;
+    white-space: nowrap;
+  }
+  /* button { display:flex } beats the UA stylesheet's [hidden] {
+     display:none }, so without this the Call button shows regardless of the
+     attribute -- same bug already fixed once in pill.html, reintroduced here
+     by not carrying it forward into this new file. */
+  #actions button[hidden] { display: none; }
+  #actions button:hover { background: rgba(255,255,255,0.16); }
+  #actions svg { width: 12px; height: 12px; opacity: 0.8; }
+
+  #response-text {
+    font-size: 12.5px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 260px;
+    overflow-y: auto;
+  }
+
+  #foot {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 10px;
+    padding-top: 9px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+  }
+  .text-btn {
+    background: none; border: none; cursor: default;
+    color: rgba(255,255,255,0.55);
+    font: inherit; font-size: 11px; font-weight: 600;
+    padding: 3px 0;
+  }
+  .text-btn:hover { color: rgba(255,255,255,0.9); }
+  .text-btn.done { color: #7cffb0; }
+  #foot .spacer { flex: 1; }
+  #foot .hint { font-size: 10.5px; color: rgba(255,255,255,0.35); }
+
+  #close {
+    position: absolute;
+    top: 8px; right: 8px;
+    width: 20px; height: 20px;
+    display: flex; align-items: center; justify-content: center;
+    border: none; border-radius: 6px;
+    background: transparent;
+    color: rgba(255,255,255,0.4);
+    cursor: default;
+  }
+  #close:hover { background: rgba(240,68,56,0.22); color: #ff6369; }
+  #close svg { width: 11px; height: 11px; }
+
+  @keyframes fadeInUp { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+  .fade-in { animation: fadeInUp 160ms ease; }
+</style>
+</head>
+<body>
+  <div id="shell">
+    <div id="collapsed"><div class="spinner"></div><span id="collapsed-label">Reading…</span></div>
+    <div id="expanded" hidden style="position:relative;">
+      <button id="close" title="Dismiss (esc)">
+        <svg viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
+      <div id="context-text"></div>
+      <div id="actions">
+        <button data-action="search"><svg viewBox="0 0 20 20" fill="none"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6"/><path d="M13.5 13.5L17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Search</button>
+        <button data-action="summarize"><svg viewBox="0 0 20 20" fill="none"><path d="M4 5.5h12M4 10h12M4 14.5h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Summarize</button>
+        <button data-action="remind"><svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="M10 6.5V10l2.5 1.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Remind</button>
+        <button data-action="translate"><svg viewBox="0 0 20 20" fill="none"><path d="M3 5h7M6.5 5v1.5c0 3-1.5 5.5-3.5 6.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M5 9.5c1 2 2.6 3.2 4.5 3.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/><path d="M11 17l3.2-8 3.3 8M12.3 14.5h4.6" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Hindi</button>
+        <button data-action="call" id="call-btn" hidden><svg viewBox="0 0 20 20" fill="none"><path d="M6.5 3.5l2 3-1.6 1.6a10 10 0 004.9 4.9L13.5 11l3 2-1 2.5c-.3.7-1 1.1-1.8 1C8.4 15.7 4.3 11.6 3.5 6.3c-.1-.8.3-1.5 1-1.8L6.5 3.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>Call</button>
+      </div>
+      <div id="response" hidden>
+        <div id="response-text" class="loading"></div>
+        <div id="foot">
+          <button class="text-btn" id="copy-btn">Copy</button>
+          <button class="text-btn" id="back-btn">‹ Back</button>
+          <span class="spacer"></span>
+          <span class="hint">esc to close</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const { ipcRenderer, clipboard } = require('electron');
+    const collapsedEl = document.getElementById('collapsed');
+    const collapsedLabel = document.getElementById('collapsed-label');
+    const expandedEl = document.getElementById('expanded');
+    const contextEl = document.getElementById('context-text');
+    const actionsEl = document.getElementById('actions');
+    const responseEl = document.getElementById('response');
+    const responseTextEl = document.getElementById('response-text');
+    const callBtn = document.getElementById('call-btn');
+
+    let sourceText = '';
+    let responseText = '';
+
+    // Same pattern the pill uses -- Call only appears when there's actually
+    // a number to call.
+    const PHONE_RE = /(\+?\d[\d\s\-\(\)]{7,}\d)/;
+
+    function reportSize() {
+      // The window itself is resized from the main process to match content
+      // height exactly, since this sits fixed at the top edge and must never
+      // clip or leave dead transparent space below a rounded corner.
+      ipcRenderer.send('notch-resize', document.getElementById('shell').offsetHeight);
+    }
+
+    ipcRenderer.on('notch-collapsed', (event, label) => {
+      collapsedEl.hidden = false;
+      expandedEl.hidden = true;
+      collapsedLabel.textContent = label || 'Reading…';
+      requestAnimationFrame(reportSize);
+    });
+
+    ipcRenderer.on('notch-context', (event, text) => {
+      sourceText = text || '';
+      collapsedEl.hidden = true;
+      expandedEl.hidden = false;
+      responseEl.hidden = true;
+      actionsEl.hidden = false;
+      contextEl.hidden = false;
+      contextEl.textContent = sourceText;
+      callBtn.hidden = !PHONE_RE.test(sourceText);
+      expandedEl.classList.remove('fade-in'); void expandedEl.offsetWidth; expandedEl.classList.add('fade-in');
+      requestAnimationFrame(reportSize);
+    });
+
+    function showWorking(label) {
+      actionsEl.hidden = true;
+      contextEl.hidden = true;
+      responseEl.hidden = false;
+      responseTextEl.classList.add('loading');
+      responseTextEl.textContent = label || 'Working…';
+      responseEl.classList.remove('fade-in'); void responseEl.offsetWidth; responseEl.classList.add('fade-in');
+      requestAnimationFrame(reportSize);
+    }
+
+    actionsEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-action]');
+      if (!btn) return;
+      const action = btn.dataset.action;
+      showWorking(action === 'remind' ? 'Creating reminder…' : 'Working…');
+      ipcRenderer.send('notch-action', { action, text: sourceText });
+    });
+
+    ipcRenderer.on('notch-response', (event, text) => {
+      responseText = text || '';
+      responseTextEl.classList.remove('loading');
+      responseTextEl.textContent = responseText;
+      responseTextEl.classList.remove('fade-in'); void responseTextEl.offsetWidth; responseTextEl.classList.add('fade-in');
+      requestAnimationFrame(reportSize);
+    });
+
+    document.getElementById('back-btn').addEventListener('click', () => {
+      responseEl.hidden = true;
+      actionsEl.hidden = false;
+      contextEl.hidden = false;
+      requestAnimationFrame(reportSize);
+    });
+
+    document.getElementById('copy-btn').addEventListener('click', (e) => {
+      clipboard.writeText(responseText);
+      const btn = e.currentTarget;
+      btn.textContent = 'Copied';
+      btn.classList.add('done');
+      setTimeout(() => { btn.textContent = 'Copy'; btn.classList.remove('done'); }, 1400);
+    });
+
+    document.getElementById('close').addEventListener('click', () => ipcRenderer.send('notch-close'));
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') ipcRenderer.send('notch-close');
+    });
+
+    // Report height once more after fonts/layout settle, in case the first
+    // measurement raced the initial paint.
+    window.addEventListener('load', () => setTimeout(reportSize, 30));
+  </script>
+</body>
+</html>
