@@ -8,6 +8,10 @@
     background: transparent;
     overflow: hidden;
     font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    /* Chromium falls back to grayscale-only antialiasing on a transparent
+       window without this, which on top of the text-shadow above compounded
+       into text that looked soft rather than sharp. */
+    -webkit-font-smoothing: antialiased;
   }
 
   /* One row, vertically centred, left-aligned at x=0. The window itself is
@@ -26,11 +30,16 @@
      colour is unknowable from here. A mid-grey reads acceptably on both light
      and dark surfaces, and the paired shadows keep it legible on either
      extreme rather than dissolving into one of them. */
+  /* The previous version used two overlapping blurred text-shadows (2px and
+     3px radius) to stay legible on both light and dark backgrounds -- but a
+     blur radius that size doesn't read as a halo behind crisp text, it reads
+     as the text itself being soft/out-of-focus, especially at the compact
+     sizes this renders at. A single 1px, near-opaque shadow gives the same
+     cross-background legibility as a hairline outline instead of a glow, so
+     the glyphs themselves stay sharp. */
   .inline {
     color: #8b8b93;
-    text-shadow:
-      0 0 2px rgba(255,255,255,0.55),
-      0 0 3px rgba(0,0,0,0.35);
+    text-shadow: 0 0 1px rgba(0,0,0,0.7);
     letter-spacing: 0.1px;
   }
   .inline.next { font-style: italic; opacity: 0.92; }
@@ -40,7 +49,7 @@
     opacity: 0.55;
     font-weight: 600;
     margin-left: 0.45em;
-    text-shadow: 0 0 2px rgba(255,255,255,0.5), 0 0 3px rgba(0,0,0,0.3);
+    text-shadow: 0 0 1px rgba(0,0,0,0.6);
   }
 
   /* Corrections are a distinct affordance rather than a continuation of the

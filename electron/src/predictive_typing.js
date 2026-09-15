@@ -67,7 +67,12 @@ const TAB_TAP_PATH = path.join(__dirname, '..', 'TabTap.app', 'Contents', 'MacOS
 //    laggy first suggestion when the user resumes typing is exactly the
 //    "not matching my typing speed" complaint this whole feature exists to
 //    avoid. Any real text change resets straight back to fast, either way.
-const POLL_FAST_MS = 120;
+// 120ms -> 60ms: measured round-trip cost for the actual pieces this drives
+// (an ax_helper subprocess spawn ~30-40ms, a full /complete/midword call
+// ~75ms worst case) leaves headroom below 60ms without polls piling up
+// faster than they resolve, and halving the notice-lag is the direct answer
+// to "predictive text can't keep up with my typing speed."
+const POLL_FAST_MS = 60;
 const POLL_PAUSED_MS = 700;
 const POLL_NO_CONTEXT_MS = 3000;
 const PAUSED_TICKS_BEFORE_BACKOFF = 10; // ~5s of no change while still focused in a field
@@ -163,8 +168,8 @@ function insertTextViaAX(text, callback) {
   });
 }
 
-function correctWordViaAX(deleteCount, replacement, callback) {
-  execFile(AX_HELPER_PATH, ['correct', String(deleteCount), replacement], { timeout: 2000 }, (err, stdout) => {
+function correctWordViaAX(deleteCount, replacement, wrong, callback) {
+  execFile(AX_HELPER_PATH, ['correct', String(deleteCount), replacement, wrong || ''], { timeout: 2000 }, (err, stdout) => {
     if (err) { callback(false); return; }
     try {
       const parsed = JSON.parse(stdout.trim());
@@ -464,7 +469,7 @@ function acceptCorrection() {
   const deleteCount = wrong.length + trailingWhitespace.length;
   const replacement = correct + trailingWhitespace;
 
-  correctWordViaAX(deleteCount, replacement, (success) => {
+  correctWordViaAX(deleteCount, replacement, wrong, (success) => {
     acceptingInProgress = false;
     if (!success) { hideGhostText(); return; }
     // the word just changed length -- force a fresh AX read on the next poll

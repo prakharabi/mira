@@ -288,7 +288,7 @@ func postBackspace() {
 // "I receive " in testing -- some events in the burst never landed). A few ms
 // between each backspace, and a slightly longer pause before the final type,
 // gives the target app's event loop time to actually process each one.
-func correctWord(deleteCount: Int, replacement: String) {
+func correctWord(deleteCount: Int, replacement: String, wrong: String) {
     guard deleteCount >= 0, deleteCount <= 200 else {
         print("{\"error\":\"invalid deleteCount\"}")
         return
@@ -298,6 +298,45 @@ func correctWord(deleteCount: Int, replacement: String) {
         usleep(8000) // 8ms
     }
     usleep(15000) // 15ms settle before retyping
+
+    // Verify the deletion actually landed before retyping over it. The delays
+    // above were already added once for exactly this class of bug (see the
+    // comment on postBackspace) and still don't close it completely -- a
+    // dropped/coalesced event in the burst occasionally leaves a LEADING
+    // fragment of the misspelled word sitting right at the cursor (backspace
+    // deletes from the end inward, so an under-count leaves the start of the
+    // word behind), which then sits directly in front of the freshly typed
+    // correction: "wworld " instead of "world ". Rather than guess at more
+    // milliseconds, read back what's actually there and finish the job if it
+    // isn't what deleteCount was supposed to produce.
+    if !wrong.isEmpty, let el = getFocusedElement() {
+        let text = getStringAttribute(el, kAXValueAttribute as String) ?? ""
+        var selectedRange: AnyObject?
+        var rangeStart = text.count
+        if AXUIElementCopyAttributeValue(el, kAXSelectedTextRangeAttribute as CFString, &selectedRange) == .success,
+           let rangeValue = selectedRange {
+            var cfRange = CFRange()
+            if AXValueGetValue((rangeValue as! AXValue), .cfRange, &cfRange) {
+                rangeStart = cfRange.location
+            }
+        }
+        let before = String(text.prefix(rangeStart)).lowercased()
+        let wrongLower = wrong.lowercased()
+        // Longest leading fragment first, so one pass clears the whole
+        // leftover rather than needing several retries.
+        for k in stride(from: wrongLower.count, through: 1, by: -1) {
+            let leftover = String(wrongLower.prefix(k))
+            if before.hasSuffix(leftover) {
+                for _ in 0..<k {
+                    postBackspace()
+                    usleep(8000)
+                }
+                usleep(15000)
+                break
+            }
+        }
+    }
+
     if postUnicodeText(replacement) {
         print("{\"success\":true}")
     } else {
@@ -365,9 +404,12 @@ if args.count >= 2 && args[1] == "read" {
 } else if args.count >= 3 && args[1] == "insert" {
     typeText(args[2])
 } else if args.count >= 4 && args[1] == "correct", let deleteCount = Int(args[2]) {
-    correctWord(deleteCount: deleteCount, replacement: args[3])
+    // 5th arg (the misspelled word) is optional so the binary still accepts
+    // an older 4-arg call -- it just skips the verify-and-retry step then.
+    let wrong = args.count >= 5 ? args[4] : ""
+    correctWord(deleteCount: deleteCount, replacement: args[3], wrong: wrong)
 } else if args.count >= 3 && args[1] == "spellcheck" {
     spellcheck(args[2])
 } else {
-    print("{\"error\":\"usage: ax_helper read | insert <text> | correct <deleteCount> <replacement> | spellcheck <word>\"}")
+    print("{\"error\":\"usage: ax_helper read | insert <text> | correct <deleteCount> <replacement> [wrong] | spellcheck <word>\"}")
 }

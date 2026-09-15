@@ -380,6 +380,12 @@ def record_typed_text(text: str) -> bool:
 CORRECTION_FREQ_MARGIN = 1.0  # zipf points; 1.0 == roughly 10x more common
 
 
+# How many times the user has to have typed a word themselves before it's
+# trusted as real vocabulary rather than a typo -- deliberately low, since the
+# whole point is to catch words on the second or third use, not the fiftieth.
+PERSONAL_WORD_TRUST_COUNT = 2
+
+
 def midword_decision(partial: str, spell_suggestion: str = None):
     """Decide whether a half-typed word should be completed or corrected.
 
@@ -393,6 +399,20 @@ def midword_decision(partial: str, spell_suggestion: str = None):
     completed_word = (partial + completion) if completion else None
 
     if not spell_suggestion:
+        return ({"mode": "complete", "suffix": completion}
+                if completion else {"mode": "none"})
+
+    # macOS's spellchecker only knows the languages it's configured for, and
+    # has no idea what a Hinglish word (Hindi typed in Latin letters -- "kal",
+    # "hoga", "nahi") is. Left alone, every one of those gets flagged as an
+    # English typo and "corrected" into an unrelated English word -- worse
+    # than doing nothing, since it's confidently wrong rather than just
+    # unhelpful. A word the user has actually typed more than once before is
+    # real vocabulary as far as Mira's concerned, whatever a dictionary tuned
+    # for a different language thinks of it.
+    with _lock:
+        own_count = _load().get("unigram_counts", {}).get(partial.lower(), 0)
+    if own_count >= PERSONAL_WORD_TRUST_COUNT:
         return ({"mode": "complete", "suffix": completion}
                 if completion else {"mode": "none"})
 
