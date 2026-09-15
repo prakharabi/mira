@@ -52,6 +52,26 @@ def _save_seen(seen: set):
     SEEN_PATH.write_text(json.dumps(trimmed))
 
 
+def is_screen_locked() -> bool:
+    """True while the display is locked (lock screen, or fast user switching).
+
+    `ioreg -a` dumps IORegistry's Root node as an XML property list, which
+    plistlib parses directly -- no PyObjC/Quartz dependency needed just for
+    one boolean. IOConsoleLocked is the key macOS itself sets; it is absent
+    (not just false) when unlocked, hence the permissive .get().
+    """
+    try:
+        out = subprocess.run(["ioreg", "-n", "Root", "-d1", "-a"],
+                             capture_output=True, timeout=5)
+        import plistlib
+        return bool(plistlib.loads(out.stdout).get("IOConsoleLocked", False))
+    except Exception:
+        # Fail toward the safer assumption: if we can't tell, prefer Telegram
+        # (a message waiting to be read) over speaking into a room where we
+        # don't actually know anyone can hear it.
+        return True
+
+
 def _notify_mac(title: str, body: str):
     """Local fallback. Passed via argv, never interpolated into the script."""
     script = ('on run argv\n'
@@ -64,22 +84,64 @@ def _notify_mac(title: str, body: str):
         pass
 
 
-def deliver(text: str) -> str:
-    """Send an alert wherever it will actually be seen."""
+def _send_telegram(text: str) -> bool:
     try:
         import telegram_bot
         status = telegram_bot.status()
-        if status.get("linked"):
-            from main import load_settings
-            settings = load_settings()
-            telegram_bot._send_message(
-                settings.get("telegram_bot_token"),
-                settings.get("telegram_owner_chat_id"),
-                text,
-            )
-            return "telegram"
+        if not status.get("linked"):
+            return False
+        from main import load_settings
+        settings = load_settings()
+        telegram_bot._send_message(
+            settings.get("telegram_bot_token"),
+            settings.get("telegram_owner_chat_id"),
+            text,
+        )
+        return True
     except Exception as e:
-        log(f"telegram delivery failed, falling back to notification: {e}")
+        log(f"telegram delivery failed: {e}")
+        return False
+
+
+def _speak(text: str) -> bool:
+    """Say it aloud, the same way a wake-word reply does."""
+    try:
+        from wakeword_listener import speak_reply
+        speak_reply(text)
+        return True
+    except Exception as e:
+        log(f"speaking failed: {e}")
+        return False
+
+
+def deliver(text: str) -> str:
+    """Send an alert wherever it will actually be seen.
+
+    Delivery mode is a setting, "auto" by default: locked screen means
+    Telegram (so it's waiting when the lid opens), unlocked means spoken
+    aloud (so it doesn't interrupt whatever's on screen with a written
+    message you have to go read). "telegram" and "voice" pin one or the
+    other regardless of lock state, for anyone who'd rather choose than have
+    Mira guess.
+    """
+    from main import load_settings
+    mode = load_settings().get("proactive_delivery", "auto")
+
+    if mode == "telegram":
+        if _send_telegram(text):
+            return "telegram"
+    elif mode == "voice":
+        if _speak(text):
+            return "voice"
+    else:  # auto
+        if is_screen_locked():
+            if _send_telegram(text):
+                return "telegram"
+        else:
+            if _speak(text):
+                return "voice"
+            if _send_telegram(text):  # spoken failed (e.g. muted) -- still get it to them
+                return "telegram"
 
     _notify_mac("Mira", text)
     return "notification"
@@ -252,5 +314,7 @@ def status() -> dict:
         "calendar": bool(settings.get("proactive_calendar", True)),
         "email": bool(settings.get("proactive_email", False)),
         "tasks": bool(settings.get("proactive_tasks", True)),
+        "delivery": settings.get("proactive_delivery", "auto"),
+        "screen_locked": is_screen_locked(),
         "interval_seconds": CHECK_INTERVAL_SECONDS,
     }

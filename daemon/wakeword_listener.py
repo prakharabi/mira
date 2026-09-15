@@ -198,13 +198,13 @@ def speak_reply(text: str):
     """Uses the same macOS `say` mechanism as the /speak endpoint, but plays directly
     since this runs inside the daemon process (no HTTP round-trip needed)."""
     import uuid
-    from main import load_settings
+    from main import load_settings, resolve_tts_voice
 
     TTS_DIR = Path.home() / "Mira" / "daemon" / "tts_output"
     TTS_DIR.mkdir(parents=True, exist_ok=True)
     filepath = TTS_DIR / f"{uuid.uuid4().hex}.aiff"
 
-    voice = load_settings().get("tts_voice")
+    voice = resolve_tts_voice(text, load_settings())
     cmd = ["say", "-o", str(filepath)]
     if voice:
         cmd += ["-v", voice]

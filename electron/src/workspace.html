@@ -1296,6 +1296,17 @@
               <span class="toggle-slider"></span>
             </label>
           </div>
+          <div class="setting-row">
+            <div>
+              <div class="label">How alerts reach you</div>
+              <div class="sublabel" id="proactive-delivery-sub">Auto — Telegram while the screen is locked, spoken aloud while it's unlocked</div>
+            </div>
+            <select class="dropdown-select" id="proactive-delivery-select" style="width:150px; flex:none;">
+              <option value="auto">Auto</option>
+              <option value="telegram">Always Telegram</option>
+              <option value="voice">Always spoken</option>
+            </select>
+          </div>
           <div class="setting-block">
             <div class="setting-block-row">
               <div>
@@ -1557,6 +1568,14 @@
               <div class="field-row">
                 <select class="dropdown-select" id="tts-voice-select" style="flex:1;"></select>
                 <button class="mini-btn" id="preview-voice-btn">Preview</button>
+              </div>
+              <div style="margin-top:10px;">
+                <span class="field-label">Hindi voice</span>
+                <div class="sublabel" style="margin-bottom:6px;">Used automatically whenever a reply is actually in Hindi script</div>
+                <div class="field-row">
+                  <select class="dropdown-select" id="tts-voice-hindi-select" style="flex:1;"></select>
+                  <button class="mini-btn" id="preview-voice-hindi-btn">Preview</button>
+                </div>
               </div>
             </div>
           </div>
@@ -2198,6 +2217,7 @@
       document.getElementById('proactive-calendar-toggle').checked = data.proactive_calendar !== false;
       document.getElementById('proactive-email-toggle').checked = data.proactive_email === true;
       document.getElementById('proactive-tasks-toggle').checked = data.proactive_tasks !== false;
+      document.getElementById('proactive-delivery-select').value = data.proactive_delivery || 'auto';
       document.getElementById('dictation-engine-select').value = data.dictation_engine || 'apple';
       document.getElementById('dictation-locale-select').value = data.dictation_locale || 'en-IN';
       syncWhisperSubSetting();
@@ -2208,6 +2228,7 @@
 
       await loadLocalModels(data.local_chat_model);
       await loadVoices(data.tts_voice);
+      await loadHindiVoice(data.tts_voice_hindi);
       await loadRemindersLists(data.reminders_list);
     } catch (e) { console.error('Could not load settings', e); }
   }
@@ -2441,39 +2462,72 @@
   };
 
   // ---------- TTS voices ----------
-  async function loadVoices(selectedVoice) {
-    const select = document.getElementById('tts-voice-select');
-    select.innerHTML = '<option value="">System default</option>';
+  let _allVoicesCache = null;
+
+  async function _fetchVoices() {
+    if (_allVoicesCache) return _allVoicesCache;
     try {
       const res = await fetch(`${DAEMON_URL}/voices`);
       const data = await res.json();
-      (data.voices || []).forEach(v => {
-        const opt = document.createElement('option');
-        opt.value = v.name;
-        opt.textContent = `${v.name} (${v.locale})`;
-        select.appendChild(opt);
-      });
-      select.value = selectedVoice || '';
-    } catch (e) {}
+      _allVoicesCache = data.voices || [];
+    } catch (e) {
+      _allVoicesCache = [];
+    }
+    return _allVoicesCache;
+  }
+
+  async function loadVoices(selectedVoice) {
+    const select = document.getElementById('tts-voice-select');
+    select.innerHTML = '<option value="">System default</option>';
+    (await _fetchVoices()).forEach(v => {
+      const opt = document.createElement('option');
+      opt.value = v.name;
+      opt.textContent = `${v.name} (${v.locale})`;
+      select.appendChild(opt);
+    });
+    select.value = selectedVoice || '';
+  }
+
+  async function loadHindiVoice(selectedVoice) {
+    const select = document.getElementById('tts-voice-hindi-select');
+    select.innerHTML = '';
+    (await _fetchVoices()).forEach(v => {
+      const opt = document.createElement('option');
+      opt.value = v.name;
+      opt.textContent = `${v.name} (${v.locale})`;
+      select.appendChild(opt);
+    });
+    // Lekha is the only Hindi voice on a stock macOS install -- picked by
+    // default so this control isn't sitting empty on a fresh setup.
+    select.value = selectedVoice || 'Lekha';
   }
 
   document.getElementById('tts-voice-select').addEventListener('change', (e) => {
     updateSetting('tts_voice', e.target.value);
   });
 
-  document.getElementById('preview-voice-btn').onclick = async () => {
-    const voice = document.getElementById('tts-voice-select').value;
+  document.getElementById('tts-voice-hindi-select').addEventListener('change', (e) => {
+    updateSetting('tts_voice_hindi', e.target.value);
+  });
+
+  async function _previewVoice(voice, text) {
     try {
       const res = await fetch(`${DAEMON_URL}/speak`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: "Hi, I'm Mira.", voice: voice || undefined })
+        body: JSON.stringify({ text, voice: voice || undefined })
       });
       if (!res.ok) return;
       const blob = await res.blob();
       new Audio(URL.createObjectURL(blob)).play();
     } catch (e) { console.error('preview failed', e); }
-  };
+  }
+
+  document.getElementById('preview-voice-btn').onclick = () =>
+    _previewVoice(document.getElementById('tts-voice-select').value, "Hi, I'm Mira.");
+
+  document.getElementById('preview-voice-hindi-btn').onclick = () =>
+    _previewVoice(document.getElementById('tts-voice-hindi-select').value, "नमस्ते, मैं मीरा हूँ।");
 
   // ================= MEETINGS =================
   let isMeetingRecording = false;
@@ -3950,6 +4004,17 @@
     updateSetting('proactive_email', e.target.checked));
   document.getElementById('proactive-tasks-toggle').addEventListener('change', (e) =>
     updateSetting('proactive_tasks', e.target.checked));
+
+  const PROACTIVE_DELIVERY_SUB = {
+    auto: "Auto — Telegram while the screen is locked, spoken aloud while it's unlocked",
+    telegram: 'Always sent to Telegram, whether or not you\'re at the Mac',
+    voice: 'Always spoken aloud, even to an empty room if the screen is locked',
+  };
+  document.getElementById('proactive-delivery-select').addEventListener('change', (e) => {
+    updateSetting('proactive_delivery', e.target.value);
+    document.getElementById('proactive-delivery-sub').textContent =
+      PROACTIVE_DELIVERY_SUB[e.target.value] || PROACTIVE_DELIVERY_SUB.auto;
+  });
 
   document.getElementById('proactive-check-btn').onclick = async (e) => {
     const btn = e.currentTarget;
