@@ -89,6 +89,7 @@ DEFAULT_SETTINGS = {
     "transcription_mode": "translate",  # "translate" (-> English) | "native" (original language)
     # TTS: macOS `say` voice name (e.g. "Samantha", "Lekha"). Empty = system default.
     "tts_voice": "",
+    "tts_voice_hindi": "Lekha",
     # optional: Tavily API key for live web search on queries that need current info.
     # blank = web search disabled, models just answer from their own knowledge.
     "tavily_api_key": "",
@@ -132,6 +133,7 @@ DEFAULT_SETTINGS = {
     "dumpbox_auto_reminders": True,
     "dictation_engine": "apple",
     "dictation_locale": "en-IN",
+    "proactive_delivery": "auto",  # "auto" | "telegram" | "voice"
     # Shown to Mira so she can address her owner by name. Blank falls back to
     # "the user" -- this ships in an open-source repo, so it can't be hardcoded.
     "owner_name": ""
@@ -176,6 +178,7 @@ def update_settings(
     stt_prefer: str = Body(None),
     transcription_mode: str = Body(None),
     tts_voice: str = Body(None),
+    tts_voice_hindi: str = Body(None),
     tavily_api_key: str = Body(None),
     predictive_personalization_enabled: bool = Body(None),
     google_client_id: str = Body(None),
@@ -195,6 +198,7 @@ def update_settings(
     dumpbox_auto_reminders: bool = Body(None),
     dictation_engine: str = Body(None),
     dictation_locale: str = Body(None),
+    proactive_delivery: str = Body(None),
     owner_name: str = Body(None),
 ):
     settings = load_settings()
@@ -226,6 +230,8 @@ def update_settings(
         settings["transcription_mode"] = transcription_mode
     if tts_voice is not None:
         settings["tts_voice"] = tts_voice
+    if tts_voice_hindi is not None:
+        settings["tts_voice_hindi"] = tts_voice_hindi
     if tavily_api_key is not None:
         settings["tavily_api_key"] = tavily_api_key
     if predictive_personalization_enabled is not None:
@@ -254,6 +260,8 @@ def update_settings(
         settings["dictation_engine"] = dictation_engine
     if dictation_locale is not None:
         settings["dictation_locale"] = dictation_locale
+    if proactive_delivery is not None:
+        settings["proactive_delivery"] = proactive_delivery
     if proactive_email is not None:
         settings["proactive_email"] = proactive_email
     if appearance is not None:
@@ -308,6 +316,29 @@ def save_history(session_id: str, messages: list):
 # ---------- TTS audio output storage ----------
 TTS_DIR = Path.home() / "Mira" / "daemon" / "tts_output"
 TTS_DIR.mkdir(parents=True, exist_ok=True)
+
+# Devanagari block -- covers Hindi text written in its own script. Hinglish
+# (Hindi typed in Latin letters) is indistinguishable from English by script
+# alone, so this only ever catches genuine Devanagari; Hinglish replies still
+# get the regular voice, same as English, which is the honest answer since
+# macOS ships no dedicated Hinglish voice to switch to anyway.
+_DEVANAGARI_RE = re.compile(r"[\u0900-\u097F]")
+
+
+def resolve_tts_voice(text: str, settings: dict, explicit_voice: str = None) -> str:
+    """Which `say` voice to use for this reply.
+
+    An explicit request always wins. Otherwise: if the reply is actually in
+    Hindi script, switch to the configured Hindi voice rather than reading
+    Devanagari through an English voice, which macOS's `say` mangles into
+    something unintelligible -- it's transliterating phonetically through the
+    wrong language's rules, not actually speaking Hindi.
+    """
+    if explicit_voice:
+        return explicit_voice
+    if _DEVANAGARI_RE.search(text or ""):
+        return settings.get("tts_voice_hindi") or "Lekha"
+    return settings.get("tts_voice") or ""
 
 # ---------- Meeting audio storage ----------
 MEETINGS_DIR = Path.home() / "Mira" / "daemon" / "meetings"
@@ -1140,7 +1171,7 @@ def meeting_stop():
 @app.post("/speak")
 def speak(text: str = Body(..., embed=True), voice: str = Body(None)):
     settings = load_settings()
-    chosen_voice = voice or settings.get("tts_voice")
+    chosen_voice = resolve_tts_voice(text, settings, voice)
 
     filename = f"{uuid.uuid4().hex}.aiff"
     filepath = TTS_DIR / filename

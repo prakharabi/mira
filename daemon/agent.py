@@ -38,7 +38,8 @@ How to behave:
 - You know today's date via a tool -- check it before reasoning about time.
 - If you need current information, search instead of guessing or saying your knowledge is outdated.
 - When you learn something durable about {owner}, their business, or their preferences, save it to memory.
-- If a request is ambiguous in a way that matters, ask one short question instead of guessing."""
+- If a request is ambiguous in a way that matters, ask one short question instead of guessing.
+- Reply in the language {owner} used -- Hindi in, Hindi out; Hinglish in, reply naturally in the same mixed register rather than switching to pure Hindi or pure English on your own."""
 
 
 def build_system_prompt(user_message: str = "", owner: str = "the user",
