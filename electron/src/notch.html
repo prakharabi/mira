@@ -41,16 +41,55 @@
   /* Every state swap below cross-fades + rises slightly rather than
      hard-cutting between hidden/visible, matching the reference's smooth
      grow instead of an instant content swap. */
-  #collapsed, #expanded {
+  #idle, #collapsed, #expanded {
     transition: opacity 180ms ease, transform 180ms ease;
   }
-  #collapsed[hidden], #expanded[hidden] {
+  #idle[hidden], #collapsed[hidden], #expanded[hidden] {
     display: flex; /* overridden below per-element, but keeps the transition running */
     opacity: 0;
     transform: translateY(-3px);
     pointer-events: none;
     position: absolute;
     inset: 0;
+  }
+
+  /* At rest, nothing is happening -- this is a presence, not a status
+     display, so it stays small and quiet rather than showing a spinner
+     (that's what #collapsed below is for, once something actually starts). */
+  #idle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 10px;
+    transition: height 160ms ease;
+  }
+  #idle::after {
+    content: '';
+    width: 46px; height: 4px;
+    border-radius: 2px;
+    background: rgba(255,255,255,0.22);
+    transition: background 160ms ease;
+  }
+  /* Hovering the idle pill IS hovering this window -- it only ever exists at
+     the one screen location it's anchored to, so a plain DOM mouseenter on
+     its own body is exactly "cursor entered the notch area", no separate
+     global mouse tracking needed. */
+  body.hovering #idle { height: 40px; }
+  body.hovering #idle::after { display: none; }
+  #idle-hint {
+    display: none;
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.7);
+    letter-spacing: 0.1px;
+  }
+  body.hovering #idle-hint { display: block; }
+  #idle-hint kbd {
+    font: inherit;
+    background: rgba(255,255,255,0.12);
+    border-radius: 4px;
+    padding: 1px 5px;
+    margin: 0 1px;
   }
 
   #collapsed {
@@ -159,7 +198,10 @@
 </head>
 <body>
   <div id="shell">
-    <div id="collapsed"><div class="spinner"></div><span id="collapsed-label">Reading…</span></div>
+    <div id="idle">
+      <span id="idle-hint"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>O</kbd> to ask or do anything</span>
+    </div>
+    <div id="collapsed" hidden><div class="spinner"></div><span id="collapsed-label">Reading…</span></div>
     <div id="expanded" hidden style="position:relative;">
       <button id="close" title="Dismiss (esc)">
         <svg viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
@@ -186,6 +228,7 @@
 
   <script>
     const { ipcRenderer, clipboard } = require('electron');
+    const idleEl = document.getElementById('idle');
     const collapsedEl = document.getElementById('collapsed');
     const collapsedLabel = document.getElementById('collapsed-label');
     const expandedEl = document.getElementById('expanded');
@@ -209,7 +252,29 @@
       ipcRenderer.send('notch-resize', document.getElementById('shell').offsetHeight);
     }
 
+    // Runs permanently rather than being created per-trigger, so this is the
+    // resting state most of the time -- a quiet presence near the menu bar,
+    // not a status display. Hovering it directly IS hovering the notch, since
+    // the window only ever exists at that one anchored spot.
+    function goIdle() {
+      idleEl.hidden = false;
+      collapsedEl.hidden = true;
+      expandedEl.hidden = true;
+      requestAnimationFrame(reportSize);
+    }
+    document.body.addEventListener('mouseenter', () => {
+      document.body.classList.add('hovering');
+      requestAnimationFrame(reportSize);
+    });
+    document.body.addEventListener('mouseleave', () => {
+      document.body.classList.remove('hovering');
+      requestAnimationFrame(reportSize);
+    });
+
+    ipcRenderer.on('notch-idle', goIdle);
+
     ipcRenderer.on('notch-collapsed', (event, label) => {
+      idleEl.hidden = true;
       collapsedEl.hidden = false;
       expandedEl.hidden = true;
       collapsedLabel.textContent = label || 'Reading…';
@@ -218,6 +283,7 @@
 
     ipcRenderer.on('notch-context', (event, text) => {
       sourceText = text || '';
+      idleEl.hidden = true;
       collapsedEl.hidden = true;
       expandedEl.hidden = false;
       responseEl.hidden = true;
