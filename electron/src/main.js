@@ -23,6 +23,7 @@ let isQuitting = false; // lets the workspace window's close handler tell "put a
 // tracks whether the pet was already visible BEFORE the current pill triggered it
 // null = no pill-triggered show in progress; true/false = pet's visibility state before pill appeared
 let petWasVisibleBeforePill = null;
+let petPositionBeforePill = null;
 
 function createReminder(title) {
   reminders.addReminder({ title }).then((res) => {
@@ -364,12 +365,21 @@ function openWorkspaceAt(view) {
   chatWindow.webContents.once('did-finish-load', focusAndNavigate);
 }
 
-// hides the pet again, but ONLY if it wasn't already visible before the pill triggered it
+// Undoes what showPill() did to the pet: hide it again if the pill borrowed
+// it from being hidden, or put it back where it actually was if it was
+// already sitting on screen -- showPill() always repositions it next to the
+// pill's location, and without restoring afterward it just stayed at
+// whichever spot the most recent copy happened to be made from, forever.
 function hidePetIfPillOpened() {
-  if (petWasVisibleBeforePill === false && win && !win.isDestroyed() && win.isVisible()) {
-    win.hide();
+  if (win && !win.isDestroyed()) {
+    if (petWasVisibleBeforePill === false) {
+      win.hide();
+    } else if (petWasVisibleBeforePill === true && petPositionBeforePill) {
+      win.setPosition(petPositionBeforePill.x, petPositionBeforePill.y);
+    }
   }
   petWasVisibleBeforePill = null;
+  petPositionBeforePill = null;
 }
 
 ipcMain.on('close-result', () => {
@@ -835,9 +845,15 @@ function showPill(text) {
 
   const { x, y } = screen.getCursorScreenPoint();
 
-  // record pet's visibility BEFORE we potentially show it, then show it next to the pill (cursor position)
+  // record pet's visibility (and, if already visible, its position) BEFORE
+  // borrowing it to sit next to the pill -- both get restored in
+  // hidePetIfPillOpened() once the pill closes.
   if (win && !win.isDestroyed()) {
     petWasVisibleBeforePill = win.isVisible();
+    if (petWasVisibleBeforePill) {
+      const [px, py] = win.getPosition();
+      petPositionBeforePill = { x: px, y: py };
+    }
     win.setPosition(x - 170, y - 40); // to the left of the pill, roughly vertically centered on it
     if (!petWasVisibleBeforePill) {
       win.show();
