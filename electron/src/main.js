@@ -130,6 +130,7 @@ function showResultWindow(text, x, y) {
 // -- read the region, choose an action, see the answer -- happens in one
 // place that grows in place instead of a chain of separate popups.
 const NOTCH_COLLAPSED_HEIGHT = 34;
+const NOTCH_IDLE_HEIGHT = 14;  // resting pill height; renderer corrects this on load/hover
 const NOTCH_WIDTH = 360;
 
 function notchGeometry(height) {
@@ -146,7 +147,7 @@ function ensureNotchWindow() {
   if (notchWindow && !notchWindow.isDestroyed()) return notchWindow;
 
   notchWindow = new BrowserWindow({
-    ...notchGeometry(NOTCH_COLLAPSED_HEIGHT),
+    ...notchGeometry(NOTCH_IDLE_HEIGHT),
     frame: false,
     transparent: true,
     alwaysOnTop: true,
@@ -176,8 +177,11 @@ ipcMain.on('notch-resize', (event, contentHeight) => {
   notchWindow.setBounds({ x, y, width, height: h }, true);
 });
 
+// The notch is a permanent fixture, not a per-use popup -- Escape/the close
+// button returns it to its quiet idle pill rather than destroying the
+// window, so the hover hint is still there next time the cursor passes by.
 ipcMain.on('notch-close', () => {
-  if (notchWindow && !notchWindow.isDestroyed()) notchWindow.close();
+  goNotchIdle();
 });
 
 ipcMain.on('notch-action', (event, { action, text }) => {
@@ -234,7 +238,13 @@ function showNotchWithText(text) {
 }
 
 function hideNotchOnError() {
-  if (notchWindow && !notchWindow.isDestroyed()) notchWindow.close();
+  goNotchIdle();
+}
+
+function goNotchIdle() {
+  if (!notchWindow || notchWindow.isDestroyed()) return;
+  notchWindow.setBounds(notchGeometry(NOTCH_IDLE_HEIGHT), true);
+  notchWindow.webContents.send('notch-idle');
 }
 
 // ---------- NEW: Chat window ----------
@@ -792,6 +802,19 @@ if (process.env.MIRA_OPEN_VIEW) {
 // mouse drag), so this is how the notch's own rendering, growth and daemon
 // round trip get checked without touching the real mouse.
 //   MIRA_TEST_NOTCH=1 electron/dist/Mira.app/Contents/MacOS/Mira
+// Dispatches a synthetic mouseenter INSIDE the notch's own renderer (pure
+// DOM event, no OS-level cursor movement) so the hover-reveal can be checked
+// without touching the real mouse.
+//   MIRA_TEST_NOTCH_HOVER=1 electron/dist/Mira.app/Contents/MacOS/Mira
+if (process.env.MIRA_TEST_NOTCH_HOVER) {
+  app.whenReady().then(() => setTimeout(() => {
+    if (!notchWindow || notchWindow.isDestroyed()) return;
+    notchWindow.webContents.executeJavaScript(
+      `document.body.dispatchEvent(new MouseEvent('mouseenter'))`
+    ).catch(e => console.log('[MIRA_TEST_NOTCH_HOVER] err', e.message));
+  }, 2000));
+}
+
 if (process.env.MIRA_TEST_NOTCH) {
   app.whenReady().then(() => setTimeout(() => {
     showNotchWithText('Kai Brokering — Founder of VoiceOS (YC F25). If you want to reach me, find me on X. San Francisco, California, United States.');
@@ -1120,6 +1143,13 @@ app.whenReady().then(() => {
   createWindow();
   startPredictiveTyping();
 
+  // The notch is created and shown once here, in its resting idle state, and
+  // then runs for the lifetime of the app -- every other notch function
+  // (working/context/response/idle) operates on this same window rather
+  // than creating and destroying one per use.
+  const notch = ensureNotchWindow();
+  notch.once('ready-to-show', () => notch.showInactive());
+
   globalShortcut.register('Command+Shift+M', () => {
     togglePet();
   });
@@ -1156,7 +1186,12 @@ app.whenReady().then(() => {
     const current = clipboard.readText();
     if (current && current !== lastClipboard) {
       lastClipboard = current;
-      showPill(current);
+      // Both triggers -- copying text, and circling a region with ⌘⇧O --
+      // now land on the same notch UI rather than a copy going to the old
+      // pill and only ⌘⇧O reaching the notch. The pill itself is left
+      // intact in the code below rather than deleted outright, in case this
+      // turns out to need reverting; it's just no longer wired to anything.
+      showNotchWithText(current);
     }
   }, 500);
 });
