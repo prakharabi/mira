@@ -279,15 +279,66 @@ function showNotchListening() {
   else send();
 }
 
-function showNotchSpeaking(text) {
+function showNotchSpeaking(text, duration) {
   const w = ensureNotchWindow();
   w.setHasShadow(true);
   w.setBounds(notchGeometry(NOTCH_COLLAPSED_HEIGHT, NOTCH_ACTIVE_WIDTH), true);
   w.showInactive();
-  const send = () => w.webContents.send('notch-speaking', text || '');
+  const send = () => w.webContents.send('notch-speaking', { text: text || '', duration: duration || 0 });
   if (w.webContents.isLoadingMainFrame()) w.webContents.once('did-finish-load', send);
   else send();
 }
+
+// Unlike the other notch states (OCR/copy/listening/speaking), this one
+// needs real keyboard focus -- w.show() rather than showInactive(), which
+// every other notch trigger deliberately uses so it never steals focus from
+// whatever the user was doing (typically mid-selection when copying text).
+// Asking a typed question is the one flow where taking focus is the point.
+function showNotchAsk() {
+  const w = ensureNotchWindow();
+  w.setHasShadow(true);
+  w.setBounds(notchGeometry(NOTCH_COLLAPSED_HEIGHT, NOTCH_ACTIVE_WIDTH), true);
+  w.show();
+  const send = () => w.webContents.send('notch-ask');
+  if (w.webContents.isLoadingMainFrame()) w.webContents.once('did-finish-load', send);
+  else send();
+}
+
+// A dedicated chat session, kept apart from the main chat window's history
+// the same way WAKEWORD_SESSION_ID is -- a quick notch question and answer
+// isn't necessarily something that belongs mixed into the visible chat log.
+const NOTCH_ASK_SESSION_ID = 'notch_ask';
+
+ipcMain.on('notch-ask-submit', (event, text) => {
+  if (!text || !text.trim()) return;
+  showNotchWorking('Thinking…');
+
+  const req = http.request(
+    { hostname: 'localhost', port: 11200, path: '/chat', method: 'POST',
+      headers: { 'Content-Type': 'application/json' } },
+    (res) => {
+      let data = '';
+      res.on('data', (chunk) => { data += chunk; });
+      res.on('end', () => {
+        if (!notchWindow || notchWindow.isDestroyed()) return;
+        try {
+          const parsed = JSON.parse(data);
+          notchWindow.webContents.send('notch-ask-response',
+            parsed.response || parsed.error || "Didn't get an answer that time.");
+        } catch (e) {
+          notchWindow.webContents.send('notch-ask-response', 'Error: could not reach Mira daemon');
+        }
+      });
+    }
+  );
+  req.on('error', () => {
+    if (notchWindow && !notchWindow.isDestroyed()) {
+      notchWindow.webContents.send('notch-ask-response', 'Error: could not reach Mira daemon');
+    }
+  });
+  req.write(JSON.stringify({ session_id: NOTCH_ASK_SESSION_ID, message: text, model: 'auto' }));
+  req.end();
+});
 
 function hideNotchOnError() {
   goNotchIdle();
@@ -761,7 +812,7 @@ function pollVoiceStatus() {
 
     if (state === 'listening') showNotchListening();
     else if (state === 'thinking') showNotchWorking('Thinking…');
-    else if (state === 'speaking') showNotchSpeaking(data.text);
+    else if (state === 'speaking') showNotchSpeaking(data.text, data.duration);
     else goNotchIdle();  // idle -- only reached after one of the states above, so this is always a real return-to-rest
   });
 }
@@ -1043,7 +1094,9 @@ if (process.env.MIRA_TEST_VOICE_STATE) {
     const state = process.env.MIRA_TEST_VOICE_STATE;
     if (state === 'listening') showNotchListening();
     else if (state === 'thinking') showNotchWorking('Thinking…');
-    else if (state === 'speaking') showNotchSpeaking('This is a test of the speaking animation in the notch.');
+    else if (state === 'speaking') showNotchSpeaking('This is a test of the speaking caption reveal in the notch.', 3);
+    else if (state === 'ask') showNotchAsk();
+    const checkDelay = state === 'speaking' ? 3400 : 1000;  // let the whole 3s caption reveal finish first
     setTimeout(() => {
       if (!notchWindow || notchWindow.isDestroyed()) return;
       console.log('[MIRA_TEST_VOICE_STATE] bounds:', JSON.stringify(notchWindow.getBounds()));
@@ -1052,10 +1105,30 @@ if (process.env.MIRA_TEST_VOICE_STATE) {
         listeningHidden: document.getElementById('listening').hidden,
         speakingHidden: document.getElementById('speaking').hidden,
         idleHidden: document.getElementById('idle').hidden,
+        askHidden: document.getElementById('ask').hidden,
         voiceLabel: document.getElementById('voice-label').textContent,
         barCount: document.querySelectorAll('#speaking .voice-bars span, #listening .voice-bars span').length,
       })`).then(r => console.log('[MIRA_TEST_VOICE_STATE] state:', JSON.stringify(r)));
-    }, 1000);
+
+      if (state === 'ask') {
+        // Exercises the full type -> submit -> daemon /chat -> notch-ask-response
+        // round trip, via a synthetic DOM value+Enter dispatch inside the
+        // notch's own renderer -- no real keyboard/OS input involved.
+        notchWindow.webContents.executeJavaScript(`
+          (() => {
+            const input = document.getElementById('ask-input');
+            input.value = 'What is 9 times 7?';
+            input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+          })()
+        `);
+        setTimeout(() => {
+          if (!notchWindow || notchWindow.isDestroyed()) return;
+          notchWindow.webContents.executeJavaScript(
+            `document.getElementById('response-text').textContent`
+          ).then(r => console.log('[MIRA_TEST_VOICE_STATE] ask response:', JSON.stringify(r)));
+        }, 4000);
+      }
+    }, checkDelay);
   }, 1500));
 }
 
@@ -1400,27 +1473,36 @@ app.whenReady().then(() => {
     togglePet();
   });
 
-  // NEW: Control+Space opens/toggles the chat window
+  // Control+Space opens/toggles the chat window ("open Mira")
   globalShortcut.register('Control+Space', () => {
     toggleChatWindow();
   });
 
-  // NEW: Command+Shift+L triggers a "Hey Mira" voice command instantly, without
-  // needing to say the wake word -- works system-wide, from any app
-  globalShortcut.register('Command+Shift+L', () => {
+  // Control+Shift+A triggers a "Hey Mira" voice command instantly, without
+  // needing to say the wake word -- works system-wide, from any app.
+  // (Was Command+Shift+L; a bare Control+Option isn't a valid Electron
+  // accelerator -- it requires a real key alongside modifiers, not just
+  // modifiers alone -- so this is the key the user chose instead.)
+  globalShortcut.register('Control+Shift+A', () => {
     triggerWakewordManually();
   });
 
-  // NEW: Command+Shift+O starts a system-wide OCR capture -- drag-select any
+  // Control+S opens a small text input right in the notch -- type a
+  // question, get the answer back in the same panel, no chat window needed.
+  globalShortcut.register('Control+S', () => {
+    showNotchAsk();
+  });
+
+  // Command+Shift+O starts a system-wide OCR capture -- drag-select any
   // region of the screen, recognized text lands on the clipboard and pops up
   // the same action pill used for selected text
   globalShortcut.register('Command+Shift+O', () => {
     runOCR();
   });
 
-  // NEW: Command+Shift+D opens Quick Capture -- dump a thought into the Dump Box
-  // from any app without opening the main window
-  globalShortcut.register('Command+Shift+D', () => {
+  // Control+Shift+D opens Quick Capture -- dump a thought into the Dump Box
+  // from any app without opening the main window. (Was Command+Shift+D.)
+  globalShortcut.register('Control+Shift+D', () => {
     showQuickCapture();
   });
 

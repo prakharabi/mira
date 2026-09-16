@@ -14,13 +14,17 @@ happening for Electron to notice on its next poll.
 import threading
 
 _lock = threading.Lock()
-_state = {"state": "idle", "text": ""}  # state: idle | listening | thinking | speaking
+_state = {"state": "idle", "text": "", "duration": 0}  # state: idle | listening | thinking | speaking
 
 
-def set_state(state: str, text: str = ""):
+def set_state(state: str, text: str = "", duration: float = 0):
     with _lock:
         _state["state"] = state
         _state["text"] = text
+        # Real playback length in seconds, when known (speak_reply reads it
+        # from the synthesized audio file via afinfo) -- lets the notch pace
+        # a word-by-word caption reveal against actual speech, not a guess.
+        _state["duration"] = duration
 
 
 def get_state() -> dict:

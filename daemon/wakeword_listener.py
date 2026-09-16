@@ -204,6 +204,21 @@ def handle_wake_detected(pa: pyaudio.PyAudio, chime: bool = False):
         voice_state.set_state("idle")
 
 
+def _audio_duration(filepath: Path) -> float:
+    """Seconds, via afinfo -- ships with macOS, no extra dependency. Best
+    effort: a caption that starts un-synced and catches up (the fallback
+    words-per-minute estimate the caller uses when this returns 0) is a much
+    smaller problem than failing to speak at all over a parsing error."""
+    try:
+        out = subprocess.run(["afinfo", str(filepath)], capture_output=True, text=True, timeout=5)
+        for line in out.stdout.splitlines():
+            if "estimated duration" in line.lower():
+                return float(line.split(":", 1)[1].strip().split()[0])
+    except (subprocess.SubprocessError, OSError, ValueError, IndexError):
+        pass
+    return 0
+
+
 def speak_reply(text: str):
     """Uses the same macOS `say` mechanism as the /speak endpoint, but plays directly
     since this runs inside the daemon process (no HTTP round-trip needed)."""
@@ -224,8 +239,11 @@ def speak_reply(text: str):
     # speak_reply is also the path proactive.py's spoken delivery uses (see
     # proactive.py's _speak), so this is the one place that covers every kind
     # of speech Mira produces, not just wakeword replies -- the notch's
-    # speaking animation should show for all of it.
-    voice_state.set_state("speaking", text)
+    # speaking animation should show for all of it. The real duration (not
+    # a guessed words-per-minute figure) is what lets the notch pace a
+    # word-by-word caption reveal that actually tracks the audio instead of
+    # drifting out of sync on a long or short reply.
+    voice_state.set_state("speaking", text, _audio_duration(filepath))
     try:
         subprocess.run(["afplay", str(filepath)])
     finally:
