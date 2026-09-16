@@ -130,6 +130,18 @@ def _tool_search_email(query: str = "", max_results: int = 8, **_):
         return {"error": str(e)}
 
 
+def _tool_draft_email(to: str = "", subject: str = "", body: str = "", **_):
+    import google_integration as g
+    if not g.is_connected():
+        return {"error": "Google account isn't connected. Connect it in Mira > Google."}
+    if not to.strip():
+        return {"error": "an email needs a recipient"}
+    try:
+        return g.gmail_create_draft(to, subject, body)
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def _tool_open_app(name: str = "", **_):
     return app_control.open_app(name)
 
@@ -329,6 +341,24 @@ TOOLS = [
             },
         },
         "fn": _tool_search_email,
+    },
+    {
+        "name": "draft_email",
+        "summary": "draft emails in Gmail (e.g. to send someone meeting details)",
+        "description": "Create a Gmail draft addressed to someone -- this is how to prepare a meeting "
+                       "invite, follow-up, or any other email for the user. It only ever creates a "
+                       "DRAFT for the user to review and send themselves; Mira never sends email on "
+                       "the user's behalf.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "to": {"type": "string", "description": "Recipient email address"},
+                "subject": {"type": "string"},
+                "body": {"type": "string"},
+            },
+            "required": ["to", "subject", "body"],
+        },
+        "fn": _tool_draft_email,
     },
     {
         "name": "open_app",
