@@ -330,9 +330,9 @@ def _api_get(url: str, params: dict = None):
     return resp.json()
 
 
-def _api_post(url: str, body: dict):
+def _api_post(url: str, body: dict, params: dict = None):
     token = get_access_token()
-    resp = requests.post(url, json=body,
+    resp = requests.post(url, json=body, params=params or {},
                          headers={"Authorization": f"Bearer {token}"},
                          timeout=REQUEST_TIMEOUT)
     if resp.status_code not in (200, 201):
@@ -479,7 +479,7 @@ def calendar_list_events(days: int = 7, max_results: int = 25) -> list:
 
 def calendar_create_event(summary: str, start_iso: str, end_iso: str = None,
                           description: str = "", location: str = "",
-                          attendees: list = None) -> dict:
+                          attendees: list = None, add_meet: bool = False) -> dict:
     if not summary or not start_iso:
         raise ValueError("summary and start are required")
 
@@ -502,9 +502,30 @@ def calendar_create_event(summary: str, start_iso: str, end_iso: str = None,
     if attendees:
         body["attendees"] = [{"email": a} for a in attendees if a]
 
-    created = _api_post(f"{CALENDAR_API}/calendars/primary/events", body)
+    params = {}
+    if add_meet:
+        # Asking the Calendar API to attach a Meet link is done by sending a
+        # conferenceData "create request" alongside the event, not by calling
+        # any separate Meet API -- Meet itself has no public REST API of its
+        # own for this. conferenceDataVersion=1 is required on the request or
+        # Google silently ignores conferenceData and creates a plain event.
+        body["conferenceData"] = {
+            "createRequest": {
+                "requestId": secrets.token_hex(16),
+                "conferenceSolutionKey": {"type": "hangoutsMeet"},
+            }
+        }
+        params["conferenceDataVersion"] = 1
+
+    created = _api_post(f"{CALENDAR_API}/calendars/primary/events", body, params)
+    meet_link = ""
+    for entry in (created.get("conferenceData", {}).get("entryPoints") or []):
+        if entry.get("entryPointType") == "video":
+            meet_link = entry.get("uri", "")
+            break
+
     return {"id": created.get("id"), "link": created.get("htmlLink"),
-            "summary": created.get("summary")}
+            "summary": created.get("summary"), "meet_link": meet_link}
 
 
 # ---------- Drive ----------
