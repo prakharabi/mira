@@ -1173,6 +1173,19 @@
             <button class="full-btn" id="record-btn">Start Recording</button>
             <div class="meta-line" id="meeting-status"></div>
           </div>
+          <div class="card meeting-card">
+            <h3>Auto-record scheduled meetings</h3>
+            <div class="setting-row" style="padding:0;">
+              <div>
+                <div class="sublabel">Starts recording on its own when a calendar event with a Google Meet link begins, and transcribes it when the event ends — no button to press</div>
+              </div>
+              <label class="toggle-switch">
+                <input type="checkbox" id="auto-record-meetings-toggle">
+                <span class="toggle-slider"></span>
+              </label>
+            </div>
+            <div class="meta-line" id="auto-meeting-status"></div>
+          </div>
         </div>
 
         <div class="section-grid">
@@ -2566,6 +2579,21 @@
   document.getElementById('file-upload-btn').onclick = () => document.getElementById('file-input').click();
   document.getElementById('file-input').addEventListener('change', handleFileUpload);
 
+  const autoRecordToggle = document.getElementById('auto-record-meetings-toggle');
+  fetch(`${DAEMON_URL}/settings`).then(r => r.json()).then(d => {
+    autoRecordToggle.checked = d.auto_record_scheduled_meetings === true;
+  }).catch(() => {});
+  autoRecordToggle.addEventListener('change', (e) => {
+    fetch(`${DAEMON_URL}/settings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ auto_record_scheduled_meetings: e.target.checked }),
+    }).catch(() => {});
+    document.getElementById('auto-meeting-status').textContent = e.target.checked
+      ? 'On — checks your calendar every 30s for a meeting with a Meet link in progress'
+      : '';
+  });
+
   async function handleFileUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
@@ -2610,7 +2638,7 @@
     meetingStatus.textContent = 'Recording in progress…';
   });
 
-  ipcRenderer.on('meeting-stop-result', async (event, { result, err }) => {
+  ipcRenderer.on('meeting-stop-result', async (event, { result, err, auto }) => {
     recordBtn.disabled = false;
     isMeetingRecording = false;
     recordBtn.textContent = 'Start Recording';
@@ -2625,6 +2653,12 @@
     transcriptBox.classList.remove('empty');
     transcriptBox.textContent = 'Transcribing… this may take a while for long recordings.';
 
+    // An auto-stopped recording (see main.js's autoStopMeeting) already
+    // triggers its own transcription and reports back via
+    // 'meeting-transcript-ready' -- calling /transcribe-local-meeting again
+    // here would transcribe the same file a second time for nothing.
+    if (auto) return;
+
     try {
       const res = await fetch(`${DAEMON_URL}/transcribe-local-meeting`, {
         method: 'POST',
@@ -2637,6 +2671,14 @@
       transcriptBox.textContent = data.text;
       meetingStatus.textContent = `Transcribed using: ${data.engine_used}`;
     } catch (e) { transcriptBox.textContent = 'Error: could not reach Mira daemon'; }
+  });
+
+  ipcRenderer.on('meeting-transcript-ready', (event, data) => {
+    if (data.error) { transcriptBox.textContent = 'Error: ' + JSON.stringify(data.error); return; }
+    currentTranscript = data.text;
+    transcriptBox.classList.remove('empty');
+    transcriptBox.textContent = data.text;
+    meetingStatus.textContent = `Transcribed using: ${data.engine_used} (auto-recorded)`;
   });
 
   document.getElementById('generate-minutes-btn').onclick = async () => {

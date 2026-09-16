@@ -473,6 +473,12 @@ def calendar_list_events(days: int = 7, max_results: int = 25) -> list:
             "location": ev.get("location", ""),
             "attendees": [a.get("email", "") for a in (ev.get("attendees") or [])],
             "link": ev.get("htmlLink", ""),
+            # hangoutLink is Calendar's own field for "this event has a Meet/Hangout
+            # video call attached" -- present whether the link was added via our own
+            # add_meet or from Calendar's UI. Callers that want to act only on real
+            # video meetings (e.g. auto-recording) filter on this rather than
+            # summary/location text, which nothing here can trust generally.
+            "has_meet": bool(ev.get("hangoutLink")),
         })
     return out
 
