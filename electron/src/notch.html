@@ -544,21 +544,17 @@
       syncActive();
       requestAnimationFrame(reportSize);
     });
-    document.body.addEventListener('mouseenter', () => {
-      hovering = true;
-      clearAutoIdle();
-      syncActive();
-      requestAnimationFrame(reportSize);
-    });
-    document.body.addEventListener('mouseleave', () => {
-      hovering = false;
-      // Resume the countdown from a full window rather than wherever it left
-      // off -- the cursor having just been there is exactly when someone was
-      // reading it, so it shouldn't vanish the instant they look away.
-      if (contentShown) armAutoIdle(8000);
-      syncActive();
-      requestAnimationFrame(reportSize);
-    });
+    // Hover-to-reveal is switched off for now (not removed -- `hovering`
+    // and every place that reads it below are left wired up on purpose).
+    // To bring it back, re-add:
+    //   document.body.addEventListener('mouseenter', () => {
+    //     hovering = true; clearAutoIdle(); syncActive(); requestAnimationFrame(reportSize);
+    //   });
+    //   document.body.addEventListener('mouseleave', () => {
+    //     hovering = false;
+    //     if (contentShown) armAutoIdle(8000);  // resume the countdown fresh, not wherever it left off
+    //     syncActive(); requestAnimationFrame(reportSize);
+    //   });
 
     ipcRenderer.on('notch-idle', goIdle);
 
