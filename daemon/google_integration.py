@@ -510,7 +510,12 @@ def calendar_create_event(summary: str, start_iso: str, end_iso: str = None,
             attendees = [a.strip() for a in attendees.split(",")]
         body["attendees"] = [{"email": a} for a in attendees if a]
 
-    params = {}
+    # The Calendar UI's own "notify guests" checkbox on invites IS the
+    # sendUpdates param -- unlike the UI, events.insert defaults it to "none"
+    # when omitted, so an attendee added by the API gets silently added to
+    # the event with no invite email at all. Sending "all" whenever there are
+    # attendees is what actually invites them, exactly like ticking that box.
+    params = {"sendUpdates": "all"} if attendees else {}
     if add_meet:
         # Asking the Calendar API to attach a Meet link is done by sending a
         # conferenceData "create request" alongside the event, not by calling
