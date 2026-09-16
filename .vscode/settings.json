@@ -1,0 +1,34 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}/daemon/venv/bin/python3",
+  "python.analysis.extraPaths": ["${workspaceFolder}/daemon"],
+  "python.terminal.activateEnvironment": true,
+
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/*.pyc": true
+  },
+  "search.exclude": {
+    "**/venv": true,
+    "**/node_modules": true,
+    "electron/dist": true,
+    "whisper.cpp": true,
+    "daemon/meetings": true,
+    "daemon/chat_history": true,
+    "daemon/tts_output": true,
+    "daemon/memory_store": true,
+    "daemon/dumpbox": true
+  },
+  "files.watcherExclude": {
+    "**/venv/**": true,
+    "**/node_modules/**": true,
+    "electron/dist/**": true,
+    "whisper.cpp/**": true
+  },
+
+  "[python]": {
+    "editor.tabSize": 4
+  },
+  "[javascript][html]": {
+    "editor.tabSize": 2
+  }
+}
