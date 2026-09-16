@@ -263,6 +263,24 @@
       document.body.classList.toggle('active', hovering || contentShown);
     }
 
+    // The old pill auto-dismissed itself 6s after appearing -- being a
+    // disposable window created fresh per copy, that came for free. The
+    // notch is a permanent fixture instead (see goIdle's comment below), so
+    // nothing ever told it to let go of shown content on its own: it just
+    // sat there expanded until someone hit Escape or the close button,
+    // which read as "stuck" compared to the pill's own behavior. This
+    // mirrors that auto-dismiss, paused for as long as the cursor is
+    // actually over it so it never vanishes out from under an in-progress
+    // read or click.
+    let autoIdleTimer = null;
+    function clearAutoIdle() {
+      if (autoIdleTimer) { clearTimeout(autoIdleTimer); autoIdleTimer = null; }
+    }
+    function armAutoIdle(ms) {
+      clearAutoIdle();
+      autoIdleTimer = setTimeout(() => { if (!hovering) goIdle(); }, ms);
+    }
+
     function reportSize() {
       // The window itself is resized from the main process to match content
       // height exactly, since this sits fixed at the top edge and must never
@@ -281,6 +299,7 @@
     // IS hovering the notch, since the window only ever exists at that one
     // anchored spot.
     function goIdle() {
+      clearAutoIdle();
       idleEl.hidden = false;
       collapsedEl.hidden = true;
       expandedEl.hidden = true;
@@ -290,11 +309,16 @@
     }
     document.body.addEventListener('mouseenter', () => {
       hovering = true;
+      clearAutoIdle();
       syncActive();
       requestAnimationFrame(reportSize);
     });
     document.body.addEventListener('mouseleave', () => {
       hovering = false;
+      // Resume the countdown from a full window rather than wherever it left
+      // off -- the cursor having just been there is exactly when someone was
+      // reading it, so it shouldn't vanish the instant they look away.
+      if (contentShown) armAutoIdle(8000);
       syncActive();
       requestAnimationFrame(reportSize);
     });
@@ -308,6 +332,10 @@
       collapsedLabel.textContent = label || 'Reading…';
       contentShown = true;
       syncActive();
+      // A stuck OCR/tool call would otherwise leave this spinning forever;
+      // this state normally transitions on its own (to context or an error)
+      // well before this fires.
+      armAutoIdle(15000);
       requestAnimationFrame(reportSize);
     });
 
@@ -324,10 +352,12 @@
       contextEl.textContent = sourceText;
       callBtn.hidden = !PHONE_RE.test(sourceText);
       expandedEl.classList.remove('fade-in'); void expandedEl.offsetWidth; expandedEl.classList.add('fade-in');
+      armAutoIdle(8000);
       requestAnimationFrame(reportSize);
     });
 
     function showWorking(label) {
+      clearAutoIdle();  // an in-flight daemon call must never get cut off by this
       actionsEl.hidden = true;
       contextEl.hidden = true;
       responseEl.hidden = false;
@@ -350,6 +380,7 @@
       responseTextEl.classList.remove('loading');
       responseTextEl.textContent = responseText;
       responseTextEl.classList.remove('fade-in'); void responseTextEl.offsetWidth; responseTextEl.classList.add('fade-in');
+      armAutoIdle(12000);  // longer than a bare context read -- there's an answer to actually read here
       requestAnimationFrame(reportSize);
     });
 
@@ -357,6 +388,7 @@
       responseEl.hidden = true;
       actionsEl.hidden = false;
       contextEl.hidden = false;
+      armAutoIdle(8000);
       requestAnimationFrame(reportSize);
     });
 
