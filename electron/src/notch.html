@@ -26,16 +26,25 @@
        it last happened to be. */
     width: 100%;
     position: relative;
-    background: rgba(22,22,26,0.96);
-    border: 1px solid rgba(255,255,255,0.1);
-    /* Rounded on every side, floating just clear of the menu bar rather than
-       flush-mounted to it -- reads as a pill extending down from the notch,
-       matching the reference, instead of a drawer welded to the bar. */
+    /* Chrome-less by default -- truly not visible at rest, not just small.
+       body.active is what draws the dark pill (background/border/shadow);
+       without this split, a "resting" window was still a visible rounded
+       rectangle sitting below the notch even with nothing in it. */
+    background: transparent;
+    border: 1px solid transparent;
     border-radius: 18px;
-    box-shadow: 0 10px 28px rgba(0,0,0,0.4);
     overflow: hidden;
     color: rgba(255,255,255,0.92);
     box-sizing: border-box;
+    transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+  }
+  body.active #shell {
+    background: rgba(22,22,26,0.96);
+    border-color: rgba(255,255,255,0.1);
+    /* Rounded on every side, floating just clear of the menu bar rather than
+       flush-mounted to it -- reads as a pill extending down from the notch,
+       matching the reference, instead of a drawer welded to the bar. */
+    box-shadow: 0 10px 28px rgba(0,0,0,0.4);
   }
 
   /* Every state swap below cross-fades + rises slightly rather than
@@ -53,29 +62,18 @@
     inset: 0;
   }
 
-  /* At rest, nothing is happening -- this is a presence, not a status
-     display, so it stays small and quiet rather than showing a spinner
-     (that's what #collapsed below is for, once something actually starts). */
+  /* At true rest this shows NOTHING -- no dash, no outline, nothing to see
+     below the notch at all, matching a hardware notch's own edge exactly.
+     Its only job while empty is to occupy the notch's real screen footprint
+     as an invisible hover target. body.active reveals the hint. */
   #idle {
     display: flex;
     align-items: center;
     justify-content: center;
-    height: 10px;
+    height: 1px;
     transition: height 160ms ease;
   }
-  #idle::after {
-    content: '';
-    width: 46px; height: 4px;
-    border-radius: 2px;
-    background: rgba(255,255,255,0.22);
-    transition: background 160ms ease;
-  }
-  /* Hovering the idle pill IS hovering this window -- it only ever exists at
-     the one screen location it's anchored to, so a plain DOM mouseenter on
-     its own body is exactly "cursor entered the notch area", no separate
-     global mouse tracking needed. */
-  body.hovering #idle { height: 40px; }
-  body.hovering #idle::after { display: none; }
+  body.active #idle { height: 40px; }
   #idle-hint {
     display: none;
     font-size: 11px;
@@ -83,7 +81,7 @@
     color: rgba(255,255,255,0.7);
     letter-spacing: 0.1px;
   }
-  body.hovering #idle-hint { display: block; }
+  body.active #idle-hint { display: block; }
   #idle-hint kbd {
     font: inherit;
     background: rgba(255,255,255,0.12);
@@ -115,7 +113,16 @@
   }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  #expanded { padding: 12px 14px 11px; }
+  /* position:relative only so #close (position:absolute) has a positioning
+     context while #expanded is actually shown -- must live here, NOT as an
+     inline style on the element, because `#expanded[hidden]` above (higher
+     specificity: id+attribute beats a bare id) is what's supposed to force
+     position:absolute while hidden, keeping a hidden #expanded's full
+     content height out of #shell's layout flow. An inline style used to sit
+     directly on the element and always won regardless of specificity,
+     which is exactly how #shell ended up measuring 113px of buttons/text
+     nobody could see, even at rest. */
+  #expanded { padding: 12px 14px 11px; position: relative; }
 
   #context-text {
     font-size: 12px;
@@ -202,7 +209,7 @@
       <span id="idle-hint"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>O</kbd> to ask or do anything</span>
     </div>
     <div id="collapsed" hidden><div class="spinner"></div><span id="collapsed-label">Reading…</span></div>
-    <div id="expanded" hidden style="position:relative;">
+    <div id="expanded" hidden>
       <button id="close" title="Dismiss (esc)">
         <svg viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
       </button>
@@ -245,29 +252,50 @@
     // a number to call.
     const PHONE_RE = /(\+?\d[\d\s\-\(\)]{7,}\d)/;
 
+    // "active" (visible dark pill, wide layout) is true whenever there's
+    // something to show: hovering the idle target, or genuine content
+    // (working/context/response) on screen. True bare rest -- not hovering,
+    // nothing happening -- is the only time it's false, which is what makes
+    // idle actually invisible instead of merely small.
+    let hovering = false;
+    let contentShown = false;
+    function syncActive() {
+      document.body.classList.toggle('active', hovering || contentShown);
+    }
+
     function reportSize() {
       // The window itself is resized from the main process to match content
       // height exactly, since this sits fixed at the top edge and must never
-      // clip or leave dead transparent space below a rounded corner.
-      ipcRenderer.send('notch-resize', document.getElementById('shell').offsetHeight);
+      // clip or leave dead transparent space below a rounded corner. `idle`
+      // tells main.js which width to use too -- notch-matched and narrow at
+      // rest, wide once there's real content or the hover hint to fit.
+      ipcRenderer.send('notch-resize', {
+        height: document.getElementById('shell').offsetHeight,
+        idle: !contentShown && !hovering,
+      });
     }
 
     // Runs permanently rather than being created per-trigger, so this is the
-    // resting state most of the time -- a quiet presence near the menu bar,
-    // not a status display. Hovering it directly IS hovering the notch, since
-    // the window only ever exists at that one anchored spot.
+    // resting state most of the time -- nothing visible near the menu bar
+    // until hovered or triggered, not a status display. Hovering it directly
+    // IS hovering the notch, since the window only ever exists at that one
+    // anchored spot.
     function goIdle() {
       idleEl.hidden = false;
       collapsedEl.hidden = true;
       expandedEl.hidden = true;
+      contentShown = false;
+      syncActive();
       requestAnimationFrame(reportSize);
     }
     document.body.addEventListener('mouseenter', () => {
-      document.body.classList.add('hovering');
+      hovering = true;
+      syncActive();
       requestAnimationFrame(reportSize);
     });
     document.body.addEventListener('mouseleave', () => {
-      document.body.classList.remove('hovering');
+      hovering = false;
+      syncActive();
       requestAnimationFrame(reportSize);
     });
 
@@ -278,6 +306,8 @@
       collapsedEl.hidden = false;
       expandedEl.hidden = true;
       collapsedLabel.textContent = label || 'Reading…';
+      contentShown = true;
+      syncActive();
       requestAnimationFrame(reportSize);
     });
 
@@ -286,6 +316,8 @@
       idleEl.hidden = true;
       collapsedEl.hidden = true;
       expandedEl.hidden = false;
+      contentShown = true;
+      syncActive();
       responseEl.hidden = true;
       actionsEl.hidden = false;
       contextEl.hidden = false;

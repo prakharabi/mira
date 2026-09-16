@@ -130,47 +130,78 @@ function showResultWindow(text, x, y) {
 // -- read the region, choose an action, see the answer -- happens in one
 // place that grows in place instead of a chain of separate popups.
 const NOTCH_COLLAPSED_HEIGHT = 34;
-const NOTCH_IDLE_HEIGHT = 14;  // resting pill height; renderer corrects this on load/hover
-const NOTCH_WIDTH = 360;
+// Idle sits at the physical notch's own footprint on a notched MacBook (or
+// the equivalent spot at screen-center-top on one without a hardware notch)
+// -- narrow and flush with the true top edge, not workArea's, which starts
+// BELOW the whole menu bar and left a visible gap under the real notch.
+// These are close to a 14"/16" MacBook Pro's actual camera-housing size;
+// being a little off costs nothing since idle is invisible anyway (see the
+// CSS) -- what matters is the hover TARGET sits where the notch really is.
+const NOTCH_IDLE_WIDTH = 200;
+const NOTCH_IDLE_HEIGHT = 32;
+const NOTCH_ACTIVE_WIDTH = 360;
 
-function notchGeometry(height) {
+function notchGeometry(height, width) {
   const display = screen.getPrimaryDisplay();
-  const { workArea } = display;
-  const x = Math.round(workArea.x + (workArea.width - NOTCH_WIDTH) / 2);
-  // workArea.y already excludes the menu bar, so this sits flush against its
-  // bottom edge -- reading as an extension of it rather than a window
-  // floating somewhere near the top.
-  return { x, y: workArea.y, width: NOTCH_WIDTH, height };
+  const { bounds } = display;
+  const w = width || NOTCH_ACTIVE_WIDTH;
+  // Centered on the FULL screen (bounds), not workArea -- workArea is
+  // narrowed by the Dock, which shifts its horizontal center away from the
+  // true screen center where the physical notch actually sits. Centering
+  // against workArea here was exactly the "not in center" bug.
+  const x = Math.round(bounds.x + (bounds.width - w) / 2);
+  // y:0, not workArea.y -- workArea already excludes the whole menu bar
+  // height, which sat this well below where the physical notch actually is.
+  // Flush against the true screen edge is what makes it read as tucked
+  // under the notch rather than a window floating somewhere near the top.
+  // (Confirmed the hard way: even a raw setBounds({y:0}) on a bare 'panel'
+  // -type BrowserWindow still comes back y:33 -- AppKit constrains ANY
+  // window's frame away from the menu bar with no public API to opt out,
+  // so y:0 here is the ask and the OS silently clamps it to workArea.y,
+  // which happens to be exactly flush with zero gap since that IS the
+  // menu bar's height on this Mac.)
+  return { x, y: 0, width: w, height };
 }
 
 function ensureNotchWindow() {
   if (notchWindow && !notchWindow.isDestroyed()) return notchWindow;
 
   notchWindow = new BrowserWindow({
-    ...notchGeometry(NOTCH_IDLE_HEIGHT),
+    ...notchGeometry(NOTCH_IDLE_HEIGHT, NOTCH_IDLE_WIDTH),
     frame: false,
     transparent: true,
     alwaysOnTop: true,
     resizable: false,
-    hasShadow: true,
+    // Starts with no window shadow at all -- with fully transparent idle
+    // content (see notch.html) a shadow would still draw a faint outline
+    // around the invisible pill's bounds, which is exactly the "visible at
+    // rest" problem this is fixing. Turned on only once actually expanded.
+    hasShadow: false,
     skipTaskbar: true,
     focusable: true,  // needs to take clicks (action buttons), unlike the ghost overlay
     show: false,
     webPreferences: { nodeIntegration: true, contextIsolation: false }
   });
 
+  notchWindow.setAlwaysOnTop(true, 'screen-saver');
+  notchWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+
   notchWindow.loadFile('src/notch.html');
   notchWindow.on('closed', () => { notchWindow = null; });
   return notchWindow;
 }
 
-// Renderer reports its own content height after each state change (working /
-// context+actions / response) so the window can grow to fit exactly, with no
-// dead transparent space below the rounded corners and no clipped content.
-ipcMain.on('notch-resize', (event, contentHeight) => {
+// Renderer reports its own content height (and whether it's the idle state,
+// which uses the narrow notch-matched width instead of the wider active one)
+// after each state change, so the window grows to fit exactly -- no dead
+// transparent space below the rounded corners, no clipped content.
+ipcMain.on('notch-resize', (event, { height, idle }) => {
   if (!notchWindow || notchWindow.isDestroyed()) return;
-  const h = Math.max(NOTCH_COLLAPSED_HEIGHT, Math.min(420, Math.round(contentHeight)));
-  const { x, y, width } = notchGeometry(h);
+  notchWindow.setHasShadow(!idle);
+  const h = idle
+    ? Math.max(1, Math.round(height))
+    : Math.max(NOTCH_COLLAPSED_HEIGHT, Math.min(420, Math.round(height)));
+  const { x, y, width } = notchGeometry(h, idle ? NOTCH_IDLE_WIDTH : NOTCH_ACTIVE_WIDTH);
   // Second argument is macOS-only: animates the resize as a native window
   // transition instead of an instant jump between sizes, matching how the
   // reference UI grows/shrinks smoothly rather than snapping.
@@ -222,7 +253,8 @@ ipcMain.on('notch-action', (event, { action, text }) => {
 // happening at all.
 function showNotchWorking(label) {
   const w = ensureNotchWindow();
-  w.setBounds(notchGeometry(NOTCH_COLLAPSED_HEIGHT));
+  w.setHasShadow(true);
+  w.setBounds(notchGeometry(NOTCH_COLLAPSED_HEIGHT, NOTCH_ACTIVE_WIDTH), true);
   w.showInactive();
   const send = () => w.webContents.send('notch-collapsed', label);
   if (w.webContents.isLoadingMainFrame()) w.webContents.once('did-finish-load', send);
@@ -243,7 +275,8 @@ function hideNotchOnError() {
 
 function goNotchIdle() {
   if (!notchWindow || notchWindow.isDestroyed()) return;
-  notchWindow.setBounds(notchGeometry(NOTCH_IDLE_HEIGHT), true);
+  notchWindow.setHasShadow(false);
+  notchWindow.setBounds(notchGeometry(NOTCH_IDLE_HEIGHT, NOTCH_IDLE_WIDTH), true);
   notchWindow.webContents.send('notch-idle');
 }
 
@@ -809,9 +842,12 @@ if (process.env.MIRA_OPEN_VIEW) {
 if (process.env.MIRA_TEST_NOTCH_HOVER) {
   app.whenReady().then(() => setTimeout(() => {
     if (!notchWindow || notchWindow.isDestroyed()) return;
+    console.log('[MIRA_TEST_NOTCH_HOVER] bounds before:', JSON.stringify(notchWindow.getBounds()));
     notchWindow.webContents.executeJavaScript(
-      `document.body.dispatchEvent(new MouseEvent('mouseenter'))`
-    ).catch(e => console.log('[MIRA_TEST_NOTCH_HOVER] err', e.message));
+      `document.body.dispatchEvent(new MouseEvent('mouseenter')); document.body.className`
+    ).then(r => console.log('[MIRA_TEST_NOTCH_HOVER] body.className after:', r))
+     .catch(e => console.log('[MIRA_TEST_NOTCH_HOVER] err', e.message));
+    setTimeout(() => console.log('[MIRA_TEST_NOTCH_HOVER] bounds after:', JSON.stringify(notchWindow.getBounds())), 500);
   }, 2000));
 }
 
