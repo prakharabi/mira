@@ -142,6 +142,48 @@ def _tool_draft_email(to: str = "", subject: str = "", body: str = "", **_):
         return {"error": str(e)}
 
 
+def _tool_list_calcom_bookings(status: str = "upcoming", **_):
+    import calcom_integration as c
+    if not c.is_connected():
+        return {"error": "Cal.com isn't connected. Add an API key in Settings."}
+    try:
+        return {"bookings": c.list_bookings(status)}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _tool_create_calcom_booking(event_type: str = "", start: str = "",
+                                attendee_name: str = "", attendee_email: str = "", **_):
+    import calcom_integration as c
+    if not c.is_connected():
+        return {"error": "Cal.com isn't connected. Add an API key in Settings."}
+    try:
+        return c.create_booking(event_type, start, attendee_name, attendee_email)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _tool_cancel_calcom_booking(booking_uid: str = "", reason: str = "", **_):
+    import calcom_integration as c
+    if not c.is_connected():
+        return {"error": "Cal.com isn't connected. Add an API key in Settings."}
+    try:
+        return c.cancel_booking(booking_uid, reason)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _tool_reschedule_calcom_booking(booking_uid: str = "", new_start: str = "",
+                                    reason: str = "", **_):
+    import calcom_integration as c
+    if not c.is_connected():
+        return {"error": "Cal.com isn't connected. Add an API key in Settings."}
+    try:
+        return c.reschedule_booking(booking_uid, new_start, reason)
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def _tool_open_app(name: str = "", **_):
     return app_control.open_app(name)
 
@@ -359,6 +401,68 @@ TOOLS = [
             "required": ["to", "subject", "body"],
         },
         "fn": _tool_draft_email,
+    },
+    {
+        "name": "list_calcom_bookings",
+        "summary": "check bookings on the user's Cal.com page",
+        "description": "List bookings from the user's Cal.com scheduling page.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "status": {"type": "string",
+                          "description": "upcoming (default), recurring, past, cancelled, or unconfirmed"},
+            },
+        },
+        "fn": _tool_list_calcom_bookings,
+    },
+    {
+        "name": "create_calcom_booking",
+        "summary": "book a slot on the user's Cal.com page for someone",
+        "description": "Create a booking on the user's Cal.com page. event_type is the event's name or "
+                       "slug as it appears on their Cal.com page (e.g. '30 Min Meeting') -- list it with "
+                       "list_calcom_bookings or ask the user if unsure.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "event_type": {"type": "string"},
+                "start": {"type": "string", "description": "ISO 8601 start datetime, UTC"},
+                "attendee_name": {"type": "string"},
+                "attendee_email": {"type": "string"},
+            },
+            "required": ["event_type", "start", "attendee_name", "attendee_email"],
+        },
+        "fn": _tool_create_calcom_booking,
+    },
+    {
+        "name": "cancel_calcom_booking",
+        "summary": "cancel a Cal.com booking",
+        "description": "Cancel an existing booking on the user's Cal.com page, by its booking uid "
+                       "(from list_calcom_bookings).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "booking_uid": {"type": "string"},
+                "reason": {"type": "string"},
+            },
+            "required": ["booking_uid"],
+        },
+        "fn": _tool_cancel_calcom_booking,
+    },
+    {
+        "name": "reschedule_calcom_booking",
+        "summary": "reschedule a Cal.com booking",
+        "description": "Move an existing Cal.com booking to a new time, by its booking uid "
+                       "(from list_calcom_bookings).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "booking_uid": {"type": "string"},
+                "new_start": {"type": "string", "description": "ISO 8601 new start datetime, UTC"},
+                "reason": {"type": "string"},
+            },
+            "required": ["booking_uid", "new_start"],
+        },
+        "fn": _tool_reschedule_calcom_booking,
     },
     {
         "name": "open_app",
