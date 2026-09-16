@@ -1,0 +1,27 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Reset Permissions (all)",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/reset_permissions.sh",
+      "presentation": { "reveal": "always", "panel": "new" },
+      "problemMatcher": []
+    },
+    {
+      "label": "Reset Permissions (choose one)",
+      "type": "shell",
+      "command": "${workspaceFolder}/scripts/reset_permissions.sh ${input:permissionService}",
+      "presentation": { "reveal": "always", "panel": "new" },
+      "problemMatcher": []
+    }
+  ],
+  "inputs": [
+    {
+      "id": "permissionService",
+      "type": "pickString",
+      "description": "Which permission to reset",
+      "options": ["Accessibility", "ScreenCapture", "Microphone", "SpeechRecognition", "AppleEvents"]
+    }
+  ]
+}
