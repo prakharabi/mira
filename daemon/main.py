@@ -444,6 +444,16 @@ def wakeword_trigger():
         return {"error": str(e)}
 
 
+@app.get("/voice/status")
+def voice_status():
+    """What Mira's voice is doing right now -- idle/listening/thinking/speaking,
+    plus the heard or spoken text. Electron polls this to drive the notch's
+    listening/speaking animation; see voice_state.py for why this lives in its
+    own module instead of wakeword_listener.py directly."""
+    import voice_state
+    return voice_state.get_state()
+
+
 @app.get("/ask")
 def ask_mira(prompt: str):
     response = requests.post(
