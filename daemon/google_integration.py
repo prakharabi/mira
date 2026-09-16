@@ -500,6 +500,14 @@ def calendar_create_event(summary: str, start_iso: str, end_iso: str = None,
         "end": {"dateTime": end_iso, "timeZone": tz},
     }
     if attendees:
+        # A tool-calling model -- especially a smaller local one -- doesn't
+        # reliably send array-typed arguments as a real JSON array; a single
+        # attendee often arrives as a bare comma-separated string instead.
+        # Iterating that directly walked its individual CHARACTERS into
+        # {"email": "p"}, {"email": "r"}, ... which the Calendar API rejected
+        # as a wall of "Invalid attendee email" errors.
+        if isinstance(attendees, str):
+            attendees = [a.strip() for a in attendees.split(",")]
         body["attendees"] = [{"email": a} for a in attendees if a]
 
     params = {}
