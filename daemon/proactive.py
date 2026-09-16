@@ -23,6 +23,7 @@ import time
 from pathlib import Path
 
 SEEN_PATH = Path.home() / "Mira" / "daemon" / "memory_store" / "alerts_seen.json"
+DIGEST_STATE_PATH = Path.home() / "Mira" / "daemon" / "memory_store" / "email_digest_state.json"
 CHECK_INTERVAL_SECONDS = 300           # 5 minutes
 MEETING_LEAD_MINUTES = 15              # how far ahead a meeting is worth flagging
 MAX_SEEN_KEYS = 500
@@ -216,6 +217,98 @@ def _check_email(seen: set) -> list:
 
 
 
+def _load_digest_state() -> dict:
+    if not DIGEST_STATE_PATH.exists():
+        return {}
+    try:
+        return json.loads(DIGEST_STATE_PATH.read_text())
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_digest_state(state: dict):
+    DIGEST_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    DIGEST_STATE_PATH.write_text(json.dumps(state))
+
+
+def _check_email_digest(settings: dict) -> list:
+    """Once a day at a fixed hour, one summarized readout of the last 24h of
+    mail instead of a ping per message -- see proactive_email above for that
+    other, per-message mode this is meant as an alternative to.
+
+    Gated on local wall-clock hour reaching the configured target and never
+    having already fired today, rather than a real scheduler: this whole
+    module is a 5-minute poll loop already, so a date stamp is enough to make
+    "once, at or after 10am" true without pulling in a cron dependency.
+    """
+    if not settings.get("proactive_email_digest_enabled", True):
+        return []
+
+    today = datetime.date.today().isoformat()
+    state = _load_digest_state()
+    if state.get("last_date") == today:
+        return []
+
+    target_hour = int(settings.get("proactive_email_digest_hour", 10) or 10)
+    if datetime.datetime.now().hour < target_hour:
+        return []
+
+    try:
+        import google_integration as g
+        if not g.is_connected():
+            return []
+        messages = g.gmail_list("newer_than:1d to:me", max_results=30)
+    except Exception as e:
+        log(f"email digest fetch failed: {e}")
+        return []
+
+    # Mark today as done regardless of what follows -- an empty inbox or a
+    # summarization failure shouldn't make this retry every 5 minutes for the
+    # rest of the day.
+    state["last_date"] = today
+    _save_digest_state(state)
+
+    if not messages:
+        return []
+
+    listing = "\n".join(
+        f"- From: {m.get('from', '')}\n  Subject: {m.get('subject', '(no subject)')}\n"
+        f"  Preview: {m.get('snippet', '')}"
+        for m in messages
+    )
+    prompt = (
+        "Here is all the mail from the last 24 hours, already fetched -- do not "
+        "call any tools, just work with what's below.\n\n"
+        f"{listing}\n\n"
+        "Write a short spoken-style morning digest: summarize what came in, "
+        "grouped naturally rather than email-by-email, and call out anything "
+        "that looks like it actually needs a reply or action from me. If "
+        "nothing needs action, say so plainly instead of inventing something."
+    )
+
+    try:
+        import agent
+        from main import GROQ_API_KEY
+        # run_agent takes the actual conversation turn from `history`, not
+        # from `user_message` (that's only used to build the system prompt's
+        # memory context) -- an empty history here sent nothing but a bare
+        # system prompt and got back a content-free "Ready." in response.
+        text, meta = agent.run_agent(
+            history=[{"role": "user", "content": prompt}], user_message=prompt,
+            model_pref="auto", settings=settings, groq_key=GROQ_API_KEY,
+            surface="proactive",
+        )
+    except Exception as e:
+        log(f"email digest summarization failed: {e}")
+        return []
+
+    if not text:
+        log(f"email digest summarization returned nothing: {meta}")
+        return []
+
+    return [f"📬 Morning mail digest ({len(messages)} messages)\n\n{text}"]
+
+
 def _check_tasks(seen: set) -> list:
     """Open commitments that have come due or gone quiet.
 
@@ -267,6 +360,7 @@ def run_checks(force: bool = False) -> dict:
         alerts.extend(_check_email(seen))
     if settings.get("proactive_tasks", True):
         alerts.extend(_check_tasks(seen))
+    alerts.extend(_check_email_digest(settings))
 
     delivered_via = None
     if alerts:
@@ -314,6 +408,8 @@ def status() -> dict:
         "calendar": bool(settings.get("proactive_calendar", True)),
         "email": bool(settings.get("proactive_email", False)),
         "tasks": bool(settings.get("proactive_tasks", True)),
+        "email_digest_enabled": bool(settings.get("proactive_email_digest_enabled", True)),
+        "email_digest_hour": int(settings.get("proactive_email_digest_hour", 10) or 10),
         "delivery": settings.get("proactive_delivery", "auto"),
         "screen_locked": is_screen_locked(),
         "interval_seconds": CHECK_INTERVAL_SECONDS,

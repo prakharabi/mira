@@ -1298,6 +1298,23 @@
           </div>
           <div class="setting-row">
             <div>
+              <div class="label">Morning mail digest</div>
+              <div class="sublabel">One summary of the last 24h of mail instead of a ping per message</div>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="proactive-email-digest-toggle">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="setting-row">
+            <div>
+              <div class="label">Digest time</div>
+              <div class="sublabel">When the morning mail digest goes out</div>
+            </div>
+            <select class="dropdown-select" id="proactive-email-digest-hour-select" style="width:150px; flex:none;"></select>
+          </div>
+          <div class="setting-row">
+            <div>
               <div class="label">How alerts reach you</div>
               <div class="sublabel" id="proactive-delivery-sub">Auto — Telegram while the screen is locked, spoken aloud while it's unlocked</div>
             </div>
@@ -2217,6 +2234,15 @@
       document.getElementById('proactive-calendar-toggle').checked = data.proactive_calendar !== false;
       document.getElementById('proactive-email-toggle').checked = data.proactive_email === true;
       document.getElementById('proactive-tasks-toggle').checked = data.proactive_tasks !== false;
+      document.getElementById('proactive-email-digest-toggle').checked = data.proactive_email_digest_enabled !== false;
+      const digestHourSelect = document.getElementById('proactive-email-digest-hour-select');
+      if (!digestHourSelect.options.length) {
+        for (let h = 0; h < 24; h++) {
+          const label = h === 0 ? '12:00 AM' : h < 12 ? `${h}:00 AM` : h === 12 ? '12:00 PM' : `${h - 12}:00 PM`;
+          digestHourSelect.add(new Option(label, h));
+        }
+      }
+      digestHourSelect.value = data.proactive_email_digest_hour ?? 10;
       document.getElementById('proactive-delivery-select').value = data.proactive_delivery || 'auto';
       document.getElementById('dictation-engine-select').value = data.dictation_engine || 'apple';
       document.getElementById('dictation-locale-select').value = data.dictation_locale || 'en-IN';
@@ -4004,6 +4030,10 @@
     updateSetting('proactive_email', e.target.checked));
   document.getElementById('proactive-tasks-toggle').addEventListener('change', (e) =>
     updateSetting('proactive_tasks', e.target.checked));
+  document.getElementById('proactive-email-digest-toggle').addEventListener('change', (e) =>
+    updateSetting('proactive_email_digest_enabled', e.target.checked));
+  document.getElementById('proactive-email-digest-hour-select').addEventListener('change', (e) =>
+    updateSetting('proactive_email_digest_hour', parseInt(e.target.value, 10)));
 
   const PROACTIVE_DELIVERY_SUB = {
     auto: "Auto — Telegram while the screen is locked, spoken aloud while it's unlocked",

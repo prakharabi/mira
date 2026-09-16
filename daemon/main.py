@@ -129,6 +129,13 @@ DEFAULT_SETTINGS = {
     "proactive_calendar": True,
     "proactive_email": False,
     "proactive_tasks": True,
+    # A once-a-day digest of the last 24h of mail, summarized with action
+    # items to look at -- distinct from proactive_email above, which pings
+    # per-message as unread mail arrives. The two are meant as alternatives:
+    # this is for someone who'd rather get one considered readout at a fixed
+    # time than a ping every time a message lands.
+    "proactive_email_digest_enabled": True,
+    "proactive_email_digest_hour": 10,  # local 24h clock, e.g. 10 = 10am
     "dumpbox_auto_process": True,
     "dumpbox_auto_reminders": True,
     "dictation_engine": "apple",
@@ -194,6 +201,8 @@ def update_settings(
     proactive_calendar: bool = Body(None),
     proactive_email: bool = Body(None),
     proactive_tasks: bool = Body(None),
+    proactive_email_digest_enabled: bool = Body(None),
+    proactive_email_digest_hour: int = Body(None),
     dumpbox_auto_process: bool = Body(None),
     dumpbox_auto_reminders: bool = Body(None),
     dictation_engine: str = Body(None),
@@ -252,6 +261,10 @@ def update_settings(
         settings["proactive_calendar"] = proactive_calendar
     if proactive_tasks is not None:
         settings["proactive_tasks"] = proactive_tasks
+    if proactive_email_digest_enabled is not None:
+        settings["proactive_email_digest_enabled"] = proactive_email_digest_enabled
+    if proactive_email_digest_hour is not None:
+        settings["proactive_email_digest_hour"] = max(0, min(23, proactive_email_digest_hour))
     if dumpbox_auto_process is not None:
         settings["dumpbox_auto_process"] = dumpbox_auto_process
     if dumpbox_auto_reminders is not None:
