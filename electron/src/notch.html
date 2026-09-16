@@ -55,12 +55,12 @@
      fluid than plain ease for the same distance -- this is the single
      change that does the most to make state swaps feel alive rather than
      mechanical. */
-  #idle, #collapsed, #expanded, #listening, #speaking {
+  #idle, #collapsed, #expanded, #listening, #speaking, #ask {
     transition: opacity 240ms cubic-bezier(0.34, 1.56, 0.64, 1),
                 transform 240ms cubic-bezier(0.34, 1.56, 0.64, 1),
                 filter 240ms ease;
   }
-  #idle[hidden], #collapsed[hidden], #expanded[hidden], #listening[hidden], #speaking[hidden] {
+  #idle[hidden], #collapsed[hidden], #expanded[hidden], #listening[hidden], #speaking[hidden], #ask[hidden] {
     display: flex; /* overridden below per-element, but keeps the transition running */
     opacity: 0;
     transform: translateY(-4px) scale(0.96);
@@ -186,6 +186,24 @@
      nobody could see, even at rest. */
   #expanded { padding: 12px 14px 11px; position: relative; }
 
+  #ask {
+    display: flex;
+    align-items: center;
+    height: 34px;
+    padding: 0 14px;
+  }
+  #ask-input {
+    flex: 1;
+    background: none;
+    border: none;
+    outline: none;
+    font: inherit;
+    font-size: 12.5px;
+    color: rgba(255,255,255,0.95);
+    caret-color: #6ea8ff;
+  }
+  #ask-input::placeholder { color: rgba(255,255,255,0.4); }
+
   #context-text {
     font-size: 12px;
     line-height: 1.45;
@@ -279,6 +297,9 @@
       <div class="voice-bars"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
       <span id="voice-label" class="voice-label-text"></span>
     </div>
+    <div id="ask" hidden>
+      <input id="ask-input" type="text" placeholder="Ask Mira anything…" spellcheck="false">
+    </div>
     <div id="expanded" hidden>
       <button id="close" title="Dismiss (esc)">
         <svg viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
@@ -317,6 +338,9 @@
     const listeningEl = document.getElementById('listening');
     const speakingEl = document.getElementById('speaking');
     const voiceLabelEl = document.getElementById('voice-label');
+    const askEl = document.getElementById('ask');
+    const askInputEl = document.getElementById('ask-input');
+    const backBtn = document.getElementById('back-btn');
 
     let sourceText = '';
     let responseText = '';
@@ -373,11 +397,14 @@
     // anchored spot.
     function goIdle() {
       clearAutoIdle();
+      clearSpeakCaption();
       idleEl.hidden = false;
       collapsedEl.hidden = true;
       expandedEl.hidden = true;
       listeningEl.hidden = true;
       speakingEl.hidden = true;
+      askEl.hidden = true;
+      backBtn.hidden = false;  // restore default; ask-response hides it (see notch-ask-response below)
       contentShown = false;
       syncActive();
       requestAnimationFrame(reportSize);
@@ -391,24 +418,112 @@
     // notch-idle itself the moment the daemon reports back to idle.
     ipcRenderer.on('notch-listening', () => {
       clearAutoIdle();
+      clearSpeakCaption();
       idleEl.hidden = true;
       collapsedEl.hidden = true;
       expandedEl.hidden = true;
       speakingEl.hidden = true;
+      askEl.hidden = true;
       listeningEl.hidden = false;
       contentShown = true;
       syncActive();
       requestAnimationFrame(reportSize);
     });
 
-    ipcRenderer.on('notch-speaking', (event, text) => {
+    // A typed question, opened via Control+S -- takes real keyboard focus
+    // (main.js uses w.show() rather than showInactive() for this one state
+    // specifically) since every other notch trigger deliberately avoids
+    // stealing focus, but there's nothing to type into otherwise.
+    ipcRenderer.on('notch-ask', () => {
+      clearAutoIdle();
+      clearSpeakCaption();
+      idleEl.hidden = true;
+      collapsedEl.hidden = true;
+      expandedEl.hidden = true;
+      listeningEl.hidden = true;
+      speakingEl.hidden = true;
+      askEl.hidden = false;
+      askInputEl.value = '';
+      contentShown = true;
+      syncActive();
+      requestAnimationFrame(reportSize);
+      // Focus after the resize/paint settles, not synchronously -- focusing
+      // an element that's still mid-transition (opacity/blur still
+      // animating in) can land the caret before the input is actually
+      // interactive.
+      setTimeout(() => askInputEl.focus(), 50);
+    });
+
+    askInputEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && askInputEl.value.trim()) {
+        ipcRenderer.send('notch-ask-submit', askInputEl.value.trim());
+      }
+      // Escape is handled by the existing document-level listener below
+      // (sends notch-close), so nothing extra needed here for that.
+    });
+
+    // The daemon runs this through the full chat agent (tools, memory, the
+    // works) via main.js's notch-ask-submit handler, so "what's on my
+    // calendar today" or "remind me to..." works here too, not just plain
+    // Q&A -- showNotchWorking('Thinking…') fires first (reusing the same
+    // #collapsed spinner the OCR flow uses), then this replaces it with the
+    // answer once the agent responds.
+    ipcRenderer.on('notch-ask-response', (event, text) => {
+      idleEl.hidden = true;
+      collapsedEl.hidden = true;
+      listeningEl.hidden = true;
+      speakingEl.hidden = true;
+      askEl.hidden = true;
+      expandedEl.hidden = false;
+      actionsEl.hidden = true;
+      contextEl.hidden = true;
+      responseEl.hidden = false;
+      backBtn.hidden = true;  // nothing to go "back" to in this flow -- see goIdle for where this resets
+      responseTextEl.classList.remove('loading');
+      responseTextEl.textContent = text || "Didn't get an answer that time.";
+      responseTextEl.classList.remove('fade-in'); void responseTextEl.offsetWidth; responseTextEl.classList.add('fade-in');
+      contentShown = true;
+      syncActive();
+      armAutoIdle(12000);
+      requestAnimationFrame(reportSize);
+    });
+
+    // Word-by-word caption reveal, timed to the ACTUAL audio duration
+    // (measured daemon-side via afinfo on the synthesized file, not guessed
+    // here) so a long reply and a short one both finish revealing right as
+    // the audio does, the way a real-time caption should -- rather than a
+    // fixed per-word delay that drifts out of sync either direction. Falls
+    // back to an average-speech-rate estimate (~175 wpm) only when the
+    // daemon couldn't measure a duration.
+    let speakCaptionTimer = null;
+    function clearSpeakCaption() {
+      if (speakCaptionTimer) { clearInterval(speakCaptionTimer); speakCaptionTimer = null; }
+    }
+    function runSpeakCaption(text, duration) {
+      clearSpeakCaption();
+      const words = (text || '').split(/\s+/).filter(Boolean);
+      if (!words.length) { voiceLabelEl.textContent = text || 'Speaking…'; return; }
+      const totalMs = duration > 0 ? duration * 1000 : (words.length / 175) * 60000;
+      const perWordMs = Math.max(40, totalMs / words.length);
+      let shown = 0;
+      voiceLabelEl.textContent = '';
+      speakCaptionTimer = setInterval(() => {
+        shown++;
+        voiceLabelEl.textContent = words.slice(0, shown).join(' ');
+        requestAnimationFrame(reportSize);  // caption grows the pill width as it fills
+        if (shown >= words.length) clearSpeakCaption();
+      }, perWordMs);
+    }
+
+    ipcRenderer.on('notch-speaking', (event, { text, duration }) => {
       clearAutoIdle();
       idleEl.hidden = true;
       collapsedEl.hidden = true;
       expandedEl.hidden = true;
       listeningEl.hidden = true;
+      askEl.hidden = true;
       speakingEl.hidden = false;
-      voiceLabelEl.textContent = text || 'Speaking…';
+      runSpeakCaption(text, duration);
       contentShown = true;
       syncActive();
       requestAnimationFrame(reportSize);
@@ -432,9 +547,13 @@
     ipcRenderer.on('notch-idle', goIdle);
 
     ipcRenderer.on('notch-collapsed', (event, label) => {
+      clearSpeakCaption();
       idleEl.hidden = true;
       collapsedEl.hidden = false;
       expandedEl.hidden = true;
+      listeningEl.hidden = true;
+      speakingEl.hidden = true;
+      askEl.hidden = true;  // reachable from notch-ask-submit's "Thinking…" step, not just OCR
       collapsedLabel.textContent = label || 'Reading…';
       contentShown = true;
       syncActive();
@@ -446,9 +565,13 @@
     });
 
     ipcRenderer.on('notch-context', (event, text) => {
+      clearSpeakCaption();
       sourceText = text || '';
       idleEl.hidden = true;
       collapsedEl.hidden = true;
+      listeningEl.hidden = true;
+      speakingEl.hidden = true;
+      askEl.hidden = true;
       expandedEl.hidden = false;
       contentShown = true;
       syncActive();
@@ -456,6 +579,7 @@
       actionsEl.hidden = false;
       contextEl.hidden = false;
       contextEl.textContent = sourceText;
+      backBtn.hidden = false;  // reset in case the last thing shown was an ask-response, which hides this
       callBtn.hidden = !PHONE_RE.test(sourceText);
       expandedEl.classList.remove('fade-in'); void expandedEl.offsetWidth; expandedEl.classList.add('fade-in');
       armAutoIdle(8000);
