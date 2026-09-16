@@ -1645,6 +1645,38 @@
           <div class="setting-block">
             <div class="setting-block-row">
               <div>
+                <div class="label">Cal.com</div>
+                <div class="sublabel">Read/book/cancel/reschedule on your Cal.com page, and get notified when someone books time with you</div>
+              </div>
+            </div>
+            <div class="setting-block-body">
+              <div>
+                <label class="field-label">API key</label>
+                <input type="password" class="rect-field" id="calcom-api-key" placeholder="Enter to set" style="width:100%;">
+              </div>
+              <div class="setting-row" style="padding:0;">
+                <div>
+                  <div class="sublabel">Notify me when someone books a new meeting</div>
+                </div>
+                <label class="toggle-switch">
+                  <input type="checkbox" id="calcom-notify-toggle">
+                  <span class="toggle-slider"></span>
+                </label>
+              </div>
+              <div class="field-row">
+                <button class="mini-btn-sm" id="save-calcom-key-btn">Save</button>
+              </div>
+              <div class="inline-note">
+                Get a personal API key from Cal.com → Settings → Developer → API Keys.
+                Once saved, ask Mira to check, book, cancel or reschedule anything on your page.
+              </div>
+              <div class="inline-note" id="calcom-key-msg"></div>
+            </div>
+          </div>
+
+          <div class="setting-block">
+            <div class="setting-block-row">
+              <div>
                 <div class="label">Reminders list</div>
                 <div class="sublabel">Where Dump Box action items get saved</div>
               </div>
@@ -2237,6 +2269,9 @@
       document.getElementById('google-client-id').value = data.google_client_id || '';
       document.getElementById('google-client-secret').placeholder =
         data.google_client_secret_set ? 'Saved — enter to replace' : 'Enter to set';
+      document.getElementById('calcom-api-key').placeholder =
+        data.cal_com_api_key_set ? 'Saved — enter to replace' : 'Enter to set';
+      document.getElementById('calcom-notify-toggle').checked = data.proactive_calcom_bookings !== false;
       document.getElementById('n8n-base-url').value = data.n8n_base_url || '';
       document.getElementById('telegram-enabled-toggle').checked = !!data.telegram_enabled;
       document.getElementById('telegram-bot-token').placeholder =
@@ -3030,6 +3065,28 @@
       msg.textContent = 'Could not save.';
     }
   };
+
+  document.getElementById('save-calcom-key-btn').onclick = async () => {
+    const msg = document.getElementById('calcom-key-msg');
+    const keyEl = document.getElementById('calcom-api-key');
+    if (!keyEl.value.trim()) { msg.className = 'inline-note'; msg.textContent = 'Enter a key to save.'; return; }
+    try {
+      await fetch(`${DAEMON_URL}/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cal_com_api_key: keyEl.value.trim() })
+      });
+      keyEl.value = '';
+      msg.className = 'inline-note ok';
+      msg.textContent = 'Saved. Ask Mira to check your Cal.com bookings to confirm it works.';
+      loadSettings();
+    } catch (e) {
+      msg.className = 'inline-note error';
+      msg.textContent = 'Could not save.';
+    }
+  };
+  document.getElementById('calcom-notify-toggle').addEventListener('change', (e) =>
+    updateSetting('proactive_calcom_bookings', e.target.checked));
 
   // ---------- local model memory ----------
   function formatBytes(n) {

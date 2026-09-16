@@ -309,6 +309,44 @@ def _check_email_digest(settings: dict) -> list:
     return [f"📬 Morning mail digest ({len(messages)} messages)\n\n{text}"]
 
 
+def _check_calcom_bookings(seen: set) -> list:
+    """New bookings someone has made on the user's Cal.com page.
+
+    This is the "react automatically" half of the Cal.com integration: a new
+    booking is exactly the kind of thing worth a heads-up without being asked,
+    the same reasoning proactive_email above already applies to unread mail.
+    """
+    try:
+        import calcom_integration as c
+        if not c.is_connected():
+            return []
+        bookings = c.list_bookings(status="upcoming", limit=25)
+    except Exception as e:
+        log(f"cal.com check failed: {e}")
+        return []
+
+    alerts = []
+    for b in bookings:
+        key = f"calcom:{b.get('uid')}"
+        if key in seen:
+            continue
+        seen.add(key)
+
+        try:
+            start_dt = datetime.datetime.fromisoformat((b.get("start") or "").replace("Z", "+00:00"))
+            when = start_dt.astimezone().strftime("%a %I:%M %p").lstrip("0").replace(" 0", " ")
+        except ValueError:
+            when = b.get("start", "")
+
+        attendee = ""
+        if b.get("attendees"):
+            attendee = b["attendees"][0].get("name") or b["attendees"][0].get("email", "")
+        line = f"🗓️ New Cal.com booking: {b.get('title', 'Meeting')} with {attendee or 'someone'} at {when}"
+        alerts.append(line)
+
+    return alerts
+
+
 def _check_tasks(seen: set) -> list:
     """Open commitments that have come due or gone quiet.
 
@@ -360,6 +398,8 @@ def run_checks(force: bool = False) -> dict:
         alerts.extend(_check_email(seen))
     if settings.get("proactive_tasks", True):
         alerts.extend(_check_tasks(seen))
+    if settings.get("proactive_calcom_bookings", True):
+        alerts.extend(_check_calcom_bookings(seen))
     alerts.extend(_check_email_digest(settings))
 
     delivered_via = None
@@ -410,6 +450,7 @@ def status() -> dict:
         "tasks": bool(settings.get("proactive_tasks", True)),
         "email_digest_enabled": bool(settings.get("proactive_email_digest_enabled", True)),
         "email_digest_hour": int(settings.get("proactive_email_digest_hour", 10) or 10),
+        "calcom_bookings": bool(settings.get("proactive_calcom_bookings", True)),
         "delivery": settings.get("proactive_delivery", "auto"),
         "screen_locked": is_screen_locked(),
         "interval_seconds": CHECK_INTERVAL_SECONDS,

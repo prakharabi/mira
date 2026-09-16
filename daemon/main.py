@@ -142,6 +142,11 @@ DEFAULT_SETTINGS = {
     # from the Meetings section, not something that starts happening the day
     # this ships.
     "auto_record_scheduled_meetings": False,
+    # Personal API key from Cal.com Settings > Developer > API Keys -- no
+    # OAuth client of our own, unlike Google, since Cal.com issues these
+    # directly to the account owner.
+    "cal_com_api_key": "",
+    "proactive_calcom_bookings": True,
     "dumpbox_auto_process": True,
     "dumpbox_auto_reminders": True,
     "dictation_engine": "apple",
@@ -173,10 +178,12 @@ def get_settings():
     masked["tavily_api_key_set"] = bool(settings.get("tavily_api_key"))
     masked["google_client_secret_set"] = bool(settings.get("google_client_secret"))
     masked["telegram_bot_token_set"] = bool(settings.get("telegram_bot_token"))
+    masked["cal_com_api_key_set"] = bool(settings.get("cal_com_api_key"))
     masked.pop("cloud_api_key", None)
     masked.pop("tavily_api_key", None)
     masked.pop("google_client_secret", None)
     masked.pop("telegram_bot_token", None)
+    masked.pop("cal_com_api_key", None)
     return masked
 
 @app.post("/settings")
@@ -210,6 +217,8 @@ def update_settings(
     proactive_email_digest_enabled: bool = Body(None),
     proactive_email_digest_hour: int = Body(None),
     auto_record_scheduled_meetings: bool = Body(None),
+    cal_com_api_key: str = Body(None),
+    proactive_calcom_bookings: bool = Body(None),
     dumpbox_auto_process: bool = Body(None),
     dumpbox_auto_reminders: bool = Body(None),
     dictation_engine: str = Body(None),
@@ -274,6 +283,10 @@ def update_settings(
         settings["proactive_email_digest_hour"] = max(0, min(23, proactive_email_digest_hour))
     if auto_record_scheduled_meetings is not None:
         settings["auto_record_scheduled_meetings"] = auto_record_scheduled_meetings
+    if cal_com_api_key is not None:
+        settings["cal_com_api_key"] = cal_com_api_key
+    if proactive_calcom_bookings is not None:
+        settings["proactive_calcom_bookings"] = proactive_calcom_bookings
     if dumpbox_auto_process is not None:
         settings["dumpbox_auto_process"] = dumpbox_auto_process
     if dumpbox_auto_reminders is not None:
