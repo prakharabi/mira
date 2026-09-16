@@ -36,7 +36,9 @@
     overflow: hidden;
     color: rgba(255,255,255,0.92);
     box-sizing: border-box;
-    transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease;
+    transition: background 280ms cubic-bezier(0.22, 1, 0.36, 1),
+                border-color 280ms cubic-bezier(0.22, 1, 0.36, 1),
+                box-shadow 280ms cubic-bezier(0.22, 1, 0.36, 1);
   }
   body.active #shell {
     background: rgba(22,22,26,0.96);
@@ -48,15 +50,21 @@
   }
 
   /* Every state swap below cross-fades + rises slightly rather than
-     hard-cutting between hidden/visible, matching the reference's smooth
-     grow instead of an instant content swap. */
-  #idle, #collapsed, #expanded {
-    transition: opacity 180ms ease, transform 180ms ease;
+     hard-cutting between hidden/visible. A back-out curve (slight overshoot
+     past the resting position before settling) reads as considerably more
+     fluid than plain ease for the same distance -- this is the single
+     change that does the most to make state swaps feel alive rather than
+     mechanical. */
+  #idle, #collapsed, #expanded, #listening, #speaking {
+    transition: opacity 240ms cubic-bezier(0.34, 1.56, 0.64, 1),
+                transform 240ms cubic-bezier(0.34, 1.56, 0.64, 1),
+                filter 240ms ease;
   }
-  #idle[hidden], #collapsed[hidden], #expanded[hidden] {
+  #idle[hidden], #collapsed[hidden], #expanded[hidden], #listening[hidden], #speaking[hidden] {
     display: flex; /* overridden below per-element, but keeps the transition running */
     opacity: 0;
-    transform: translateY(-3px);
+    transform: translateY(-4px) scale(0.96);
+    filter: blur(2px);
     pointer-events: none;
     position: absolute;
     inset: 0;
@@ -71,7 +79,7 @@
     align-items: center;
     justify-content: center;
     height: 1px;
-    transition: height 160ms ease;
+    transition: height 280ms cubic-bezier(0.22, 1, 0.36, 1);
   }
   body.active #idle { height: 40px; }
   #idle-hint {
@@ -112,6 +120,60 @@
     flex-shrink: 0;
   }
   @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Listening/speaking share one waveform layout -- only the bar color and
+     each bar's own animation timing differ, so the two states read as
+     clearly related (both "Mira's voice, active right now") rather than
+     like unrelated features bolted on. Bars are plain CSS keyframes with
+     staggered negative delays, not real audio amplitude -- there's no mic/
+     speaker signal available in this renderer to drive them from, and a
+     wandering pseudo-random bounce reads as "live" well enough without it
+     (the same trick most voice-assistant UIs actually use). */
+  #listening, #speaking {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    height: 34px;
+    padding: 0 14px;
+  }
+  .voice-bars {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    height: 18px;
+  }
+  .voice-bars span {
+    width: 3px;
+    border-radius: 2px;
+    animation: voicebar 900ms ease-in-out infinite;
+  }
+  #listening .voice-bars span { background: #6ea8ff; }
+  #speaking .voice-bars span { background: #7cffb0; }
+  /* Seven bars, each a different phase/duration of the same keyframe so
+     none of them are ever in lockstep -- a uniform pulse reads as a loading
+     spinner, not speech. */
+  .voice-bars span:nth-child(1) { height: 30%; animation-duration: 780ms; animation-delay: -310ms; }
+  .voice-bars span:nth-child(2) { height: 55%; animation-duration: 900ms; animation-delay: -110ms; }
+  .voice-bars span:nth-child(3) { height: 80%; animation-duration: 640ms; animation-delay: -560ms; }
+  .voice-bars span:nth-child(4) { height: 100%; animation-duration: 1020ms; animation-delay: -20ms; }
+  .voice-bars span:nth-child(5) { height: 75%; animation-duration: 700ms; animation-delay: -430ms; }
+  .voice-bars span:nth-child(6) { height: 50%; animation-duration: 860ms; animation-delay: -240ms; }
+  .voice-bars span:nth-child(7) { height: 32%; animation-duration: 950ms; animation-delay: -650ms; }
+  @keyframes voicebar {
+    0%, 100% { transform: scaleY(0.35); }
+    50% { transform: scaleY(1); }
+  }
+
+  .voice-label-text {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: rgba(255,255,255,0.75);
+    white-space: nowrap;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 
   /* position:relative only so #close (position:absolute) has a positioning
      context while #expanded is actually shown -- must live here, NOT as an
@@ -209,6 +271,14 @@
       <span id="idle-hint"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>O</kbd> to ask or do anything</span>
     </div>
     <div id="collapsed" hidden><div class="spinner"></div><span id="collapsed-label">Reading…</span></div>
+    <div id="listening" hidden>
+      <div class="voice-bars"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+      <span id="listening-label" class="voice-label-text">Listening…</span>
+    </div>
+    <div id="speaking" hidden>
+      <div class="voice-bars"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+      <span id="voice-label" class="voice-label-text"></span>
+    </div>
     <div id="expanded" hidden>
       <button id="close" title="Dismiss (esc)">
         <svg viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
@@ -244,6 +314,9 @@
     const responseEl = document.getElementById('response');
     const responseTextEl = document.getElementById('response-text');
     const callBtn = document.getElementById('call-btn');
+    const listeningEl = document.getElementById('listening');
+    const speakingEl = document.getElementById('speaking');
+    const voiceLabelEl = document.getElementById('voice-label');
 
     let sourceText = '';
     let responseText = '';
@@ -303,10 +376,43 @@
       idleEl.hidden = false;
       collapsedEl.hidden = true;
       expandedEl.hidden = true;
+      listeningEl.hidden = true;
+      speakingEl.hidden = true;
       contentShown = false;
       syncActive();
       requestAnimationFrame(reportSize);
     }
+
+    // Listening/speaking are driven entirely from outside (main.js polls the
+    // daemon's actual voice state -- see voice_state.py -- and sends these),
+    // not on a timer like the copy/OCR states above: only the daemon knows
+    // when a recording or afplay call has really finished, so there's
+    // nothing sensible for armAutoIdle to guess at here. main.js sends
+    // notch-idle itself the moment the daemon reports back to idle.
+    ipcRenderer.on('notch-listening', () => {
+      clearAutoIdle();
+      idleEl.hidden = true;
+      collapsedEl.hidden = true;
+      expandedEl.hidden = true;
+      speakingEl.hidden = true;
+      listeningEl.hidden = false;
+      contentShown = true;
+      syncActive();
+      requestAnimationFrame(reportSize);
+    });
+
+    ipcRenderer.on('notch-speaking', (event, text) => {
+      clearAutoIdle();
+      idleEl.hidden = true;
+      collapsedEl.hidden = true;
+      expandedEl.hidden = true;
+      listeningEl.hidden = true;
+      speakingEl.hidden = false;
+      voiceLabelEl.textContent = text || 'Speaking…';
+      contentShown = true;
+      syncActive();
+      requestAnimationFrame(reportSize);
+    });
     document.body.addEventListener('mouseenter', () => {
       hovering = true;
       clearAutoIdle();

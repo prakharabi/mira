@@ -24,6 +24,8 @@ import numpy as np
 import pyaudio
 from openwakeword.model import Model
 
+import voice_state
+
 
 def log(message: str):
     """print() alone can be buffered and not show up promptly in LaunchAgent logs --
@@ -129,69 +131,77 @@ def handle_wake_detected(pa: pyaudio.PyAudio, chime: bool = False):
     if chime:
         play_chime()
 
-    audio_path, has_meaningful_audio, rms, device_name = record_command_audio(
-        pa, COMMAND_RECORD_SECONDS)
+    # Reset to idle on every exit from here down, early return or not -- the
+    # notch's listening/thinking animation would otherwise stay stuck on
+    # whatever it last showed if a run ends in silence or an empty transcript.
+    try:
+        voice_state.set_state("listening")
+        audio_path, has_meaningful_audio, rms, device_name = record_command_audio(
+            pa, COMMAND_RECORD_SECONDS)
 
-    if not has_meaningful_audio:
-        # Saying nothing here was the whole problem: Mira took the trigger,
-        # recorded, decided it heard nothing and returned in silence -- which
-        # from the outside is indistinguishable from the shortcut being broken.
-        log(f"[wakeword] Near-silent recording from '{device_name}' "
-            f"(RMS {rms:.0f}, floor {SILENCE_RMS_FLOOR}).")
-        # Deliberately a NOTIFICATION rather than a spoken reply. When the
-        # cause is the audio route -- a Bluetooth headset taking the default
-        # input, say -- announcing it through that same route is useless: the
-        # user is not listening to the device Mira is talking into. Naming the
-        # device is the whole point, since that is the thing to change.
-        notify("Mira didn't hear you",
-               f"Nothing audible came from \u201c{device_name}\u201d. "
-               f"Check that it is the right input and that input volume is up.")
-        return
+        if not has_meaningful_audio:
+            # Saying nothing here was the whole problem: Mira took the trigger,
+            # recorded, decided it heard nothing and returned in silence -- which
+            # from the outside is indistinguishable from the shortcut being broken.
+            log(f"[wakeword] Near-silent recording from '{device_name}' "
+                f"(RMS {rms:.0f}, floor {SILENCE_RMS_FLOOR}).")
+            # Deliberately a NOTIFICATION rather than a spoken reply. When the
+            # cause is the audio route -- a Bluetooth headset taking the default
+            # input, say -- announcing it through that same route is useless: the
+            # user is not listening to the device Mira is talking into. Naming the
+            # device is the whole point, since that is the thing to change.
+            notify("Mira didn't hear you",
+                   f"Nothing audible came from \u201c{device_name}\u201d. "
+                   f"Check that it is the right input and that input volume is up.")
+            return
 
-    # these are imported here (not at module top) because wakeword_listener is
-    # imported BY main.py at startup -- importing main.py's own names at module
-    # load time would create a circular import. Safe to import here since this
-    # function only runs after main.py has fully finished loading.
-    from main import (
-        transcribe_smart, load_history, save_history, load_settings,
-        remember_exchange_async, GROQ_API_KEY,
-    )
-    import agent
+        # these are imported here (not at module top) because wakeword_listener is
+        # imported BY main.py at startup -- importing main.py's own names at module
+        # load time would create a circular import. Safe to import here since this
+        # function only runs after main.py has fully finished loading.
+        from main import (
+            transcribe_smart, load_history, save_history, load_settings,
+            remember_exchange_async, GROQ_API_KEY,
+        )
+        import agent
 
-    text, _engine_used, _err = transcribe_smart(audio_path)
+        voice_state.set_state("thinking")
+        text, _engine_used, _err = transcribe_smart(audio_path)
 
-    if not text or not text.strip():
-        log("[wakeword] No speech detected in command window, ignoring.")
-        return
+        if not text or not text.strip():
+            log("[wakeword] No speech detected in command window, ignoring.")
+            return
 
-    log(f"[wakeword] Heard: {text}")
+        log(f"[wakeword] Heard: {text}")
 
-    history = load_history(WAKEWORD_SESSION_ID)
-    history.append({"role": "user", "content": text})
+        history = load_history(WAKEWORD_SESSION_ID)
+        history.append({"role": "user", "content": text})
 
-    # Same agent as chat and Telegram, so spoken requests can create reminders,
-    # search the web or control music too -- previously voice was the only
-    # surface with no access to any of Mira's actual capabilities. The "voice"
-    # surface tells it to answer in short spoken prose rather than markdown.
-    reply, meta = agent.run_agent(
-        history=history,
-        user_message=text,
-        model_pref="auto",
-        settings=load_settings(),
-        groq_key=GROQ_API_KEY,
-        surface="voice",
-    )
-    if not reply:
-        reply = "Sorry, I couldn't work that one out."
+        # Same agent as chat and Telegram, so spoken requests can create reminders,
+        # search the web or control music too -- previously voice was the only
+        # surface with no access to any of Mira's actual capabilities. The "voice"
+        # surface tells it to answer in short spoken prose rather than markdown.
+        reply, meta = agent.run_agent(
+            history=history,
+            user_message=text,
+            model_pref="auto",
+            settings=load_settings(),
+            groq_key=GROQ_API_KEY,
+            surface="voice",
+        )
+        if not reply:
+            reply = "Sorry, I couldn't work that one out."
 
-    history.append({"role": "assistant", "content": reply})
-    save_history(WAKEWORD_SESSION_ID, history)
-    remember_exchange_async(text, reply)
+        history.append({"role": "assistant", "content": reply})
+        save_history(WAKEWORD_SESSION_ID, history)
+        remember_exchange_async(text, reply)
 
-    log(f"[wakeword] Reply: {reply}")
+        log(f"[wakeword] Reply: {reply}")
 
-    if load_settings().get("voice_response_enabled", True):
-        speak_reply(reply)
+        if load_settings().get("voice_response_enabled", True):
+            speak_reply(reply)
+    finally:
+        voice_state.set_state("idle")
 
 
 def speak_reply(text: str):
@@ -211,7 +221,15 @@ def speak_reply(text: str):
     cmd.append(text)
 
     subprocess.run(cmd, capture_output=True)
-    subprocess.run(["afplay", str(filepath)])
+    # speak_reply is also the path proactive.py's spoken delivery uses (see
+    # proactive.py's _speak), so this is the one place that covers every kind
+    # of speech Mira produces, not just wakeword replies -- the notch's
+    # speaking animation should show for all of it.
+    voice_state.set_state("speaking", text)
+    try:
+        subprocess.run(["afplay", str(filepath)])
+    finally:
+        voice_state.set_state("idle")
 
 
 class WakewordController:

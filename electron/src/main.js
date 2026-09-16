@@ -269,6 +269,26 @@ function showNotchWithText(text) {
   w.showInactive();
 }
 
+function showNotchListening() {
+  const w = ensureNotchWindow();
+  w.setHasShadow(true);
+  w.setBounds(notchGeometry(NOTCH_COLLAPSED_HEIGHT, NOTCH_ACTIVE_WIDTH), true);
+  w.showInactive();
+  const send = () => w.webContents.send('notch-listening');
+  if (w.webContents.isLoadingMainFrame()) w.webContents.once('did-finish-load', send);
+  else send();
+}
+
+function showNotchSpeaking(text) {
+  const w = ensureNotchWindow();
+  w.setHasShadow(true);
+  w.setBounds(notchGeometry(NOTCH_COLLAPSED_HEIGHT, NOTCH_ACTIVE_WIDTH), true);
+  w.showInactive();
+  const send = () => w.webContents.send('notch-speaking', text || '');
+  if (w.webContents.isLoadingMainFrame()) w.webContents.once('did-finish-load', send);
+  else send();
+}
+
 function hideNotchOnError() {
   goNotchIdle();
 }
@@ -722,6 +742,34 @@ function startAutoMeetingWatcher() {
   checkAutoMeetings();  // don't wait a full interval for the first check
 }
 
+// ---------- Voice status: drives the notch's listening/speaking states ----------
+// The daemon is a headless process and can't push into this renderer, so
+// this poll is the only way Electron finds out "Mira is now listening" or
+// "...now speaking" -- see voice_state.py for the daemon side, set from
+// wakeword_listener.py's handle_wake_detected/speak_reply. 400ms keeps the
+// notch's reaction feeling immediate without being a meaningfully heavier
+// localhost request than the 30s meeting-watcher poll above.
+const VOICE_POLL_MS = 400;
+let lastVoiceUIState = 'idle';
+
+function pollVoiceStatus() {
+  fetchDaemonJson('http://localhost:11200/voice/status', (data, err) => {
+    if (err || !data) return;
+    const state = data.state || 'idle';
+    if (state === lastVoiceUIState) return;
+    lastVoiceUIState = state;
+
+    if (state === 'listening') showNotchListening();
+    else if (state === 'thinking') showNotchWorking('Thinking…');
+    else if (state === 'speaking') showNotchSpeaking(data.text);
+    else goNotchIdle();  // idle -- only reached after one of the states above, so this is always a real return-to-rest
+  });
+}
+
+function startVoiceStatusWatcher() {
+  setInterval(pollVoiceStatus, VOICE_POLL_MS);
+}
+
 // ---------- Reminders IPC (Dump Box action items) ----------
 // Reminders access lives here rather than in the daemon -- see reminders.js for
 // why. The renderer awaits these directly via ipcRenderer.invoke.
@@ -981,6 +1029,34 @@ if (process.env.MIRA_TEST_NOTCH_HOVER) {
      .catch(e => console.log('[MIRA_TEST_NOTCH_HOVER] err', e.message));
     setTimeout(() => console.log('[MIRA_TEST_NOTCH_HOVER] bounds after:', JSON.stringify(notchWindow.getBounds())), 500);
   }, 2000));
+}
+
+// Exercises the listening/speaking notch UI directly, bypassing the daemon
+// poll entirely -- calls the exact same showNotchListening/showNotchSpeaking
+// functions pollVoiceStatus does, so this proves out the window+rendering
+// path without needing a real wakeword trigger (which would record real
+// mic audio and play real speech through the speakers unprompted).
+//   MIRA_TEST_VOICE_STATE=listening electron/dist/Mira.app/Contents/MacOS/Mira
+//   MIRA_TEST_VOICE_STATE=speaking electron/dist/Mira.app/Contents/MacOS/Mira
+if (process.env.MIRA_TEST_VOICE_STATE) {
+  app.whenReady().then(() => setTimeout(() => {
+    const state = process.env.MIRA_TEST_VOICE_STATE;
+    if (state === 'listening') showNotchListening();
+    else if (state === 'thinking') showNotchWorking('Thinking…');
+    else if (state === 'speaking') showNotchSpeaking('This is a test of the speaking animation in the notch.');
+    setTimeout(() => {
+      if (!notchWindow || notchWindow.isDestroyed()) return;
+      console.log('[MIRA_TEST_VOICE_STATE] bounds:', JSON.stringify(notchWindow.getBounds()));
+      notchWindow.webContents.executeJavaScript(`({
+        bodyClass: document.body.className,
+        listeningHidden: document.getElementById('listening').hidden,
+        speakingHidden: document.getElementById('speaking').hidden,
+        idleHidden: document.getElementById('idle').hidden,
+        voiceLabel: document.getElementById('voice-label').textContent,
+        barCount: document.querySelectorAll('#speaking .voice-bars span, #listening .voice-bars span').length,
+      })`).then(r => console.log('[MIRA_TEST_VOICE_STATE] state:', JSON.stringify(r)));
+    }, 1000);
+  }, 1500));
 }
 
 if (process.env.MIRA_TEST_NOTCH) {
@@ -1311,6 +1387,7 @@ app.whenReady().then(() => {
   createWindow();
   startPredictiveTyping();
   startAutoMeetingWatcher();
+  startVoiceStatusWatcher();
 
   // The notch is created and shown once here, in its resting idle state, and
   // then runs for the lifetime of the app -- every other notch function
