@@ -341,6 +341,7 @@
     const askEl = document.getElementById('ask');
     const askInputEl = document.getElementById('ask-input');
     const backBtn = document.getElementById('back-btn');
+    const listeningLabelEl = document.getElementById('listening-label');
 
     let sourceText = '';
     let responseText = '';
@@ -425,8 +426,23 @@
       speakingEl.hidden = true;
       askEl.hidden = true;
       listeningEl.hidden = false;
+      listeningLabelEl.textContent = 'Listening…';
       contentShown = true;
       syncActive();
+      requestAnimationFrame(reportSize);
+    });
+
+    // Live partial transcript from a SEPARATE capture main.js runs
+    // specifically for this caption (see its startListeningCaption comment
+    // for why) -- purely cosmetic, never what Mira actually acts on. Shows
+    // only the last few words rather than the whole growing transcript:
+    // this is a fixed-width pill, not a scrolling transcript view, and a
+    // single-line ellipsis truncates from the END, which would hide the
+    // newest word behind "…" right when it lands -- the opposite of what a
+    // live caption should show.
+    ipcRenderer.on('notch-listening-partial', (event, text) => {
+      const words = (text || '').trim().split(/\s+/).filter(Boolean);
+      listeningLabelEl.textContent = words.length ? words.slice(-8).join(' ') : 'Listening…';
       requestAnimationFrame(reportSize);
     });
 

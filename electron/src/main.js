@@ -810,10 +810,20 @@ function pollVoiceStatus() {
     if (state === lastVoiceUIState) return;
     lastVoiceUIState = state;
 
-    if (state === 'listening') showNotchListening();
-    else if (state === 'thinking') showNotchWorking('Thinking…');
-    else if (state === 'speaking') showNotchSpeaking(data.text, data.duration);
-    else goNotchIdle();  // idle -- only reached after one of the states above, so this is always a real return-to-rest
+    if (state === 'listening') {
+      showNotchListening();
+      startListeningCaption();
+    } else {
+      // Any state other than listening means the daemon has moved past the
+      // recording window this caption exists to cover -- stop polling for
+      // it immediately rather than waiting on its own backstop timeout,
+      // so a quick "heard nothing" round trip doesn't leave a stale caption
+      // poll running into the next, unrelated state.
+      stopListeningCaption();
+      if (state === 'thinking') showNotchWorking('Thinking…');
+      else if (state === 'speaking') showNotchSpeaking(data.text, data.duration);
+      else goNotchIdle();  // idle -- only reached after one of the states above, so this is always a real return-to-rest
+    }
   });
 }
 
@@ -1001,6 +1011,58 @@ function runSpeechHelper(args, timeoutMs = 130000) {
 ipcMain.handle('speech-check', (event, locale) =>
   runSpeechHelper(['check', locale || 'en-IN'], 130000));
 
+// ---------- Live listening caption ----------
+// A SEPARATE capture from the daemon's own PyAudio recording of the actual
+// command (wakeword_listener.py's record_command_audio) -- this one exists
+// purely to drive the notch's "what Mira is hearing" caption in real time,
+// via speech_helper's new `stream` mode (see that file's own comment on why
+// this runs as its own independent capture rather than piping the daemon's
+// audio into a process only launchable through LaunchServices). Its
+// transcript is never used to decide what Mira actually does; the daemon's
+// Whisper/Groq pipeline remains the one that's acted on.
+const CAPTION_STREAM_SECONDS = 4;  // must match wakeword_listener.py's COMMAND_RECORD_SECONDS
+const CAPTION_POLL_MS = 150;
+let captionPollTimer = null;
+
+function startListeningCaption() {
+  if (captionPollTimer || !fs.existsSync(SPEECH_HELPER_APP)) return;
+
+  fetchDaemonJson('http://localhost:11200/settings', (settings) => {
+    const locale = (settings && settings.dictation_locale) || 'en-IN';
+    const outPath = path.join(os.tmpdir(), `mira-caption-${Date.now()}.json`);
+
+    execFile('/usr/bin/open',
+      ['-a', SPEECH_HELPER_APP, '--args', 'stream', outPath, locale, String(CAPTION_STREAM_SECONDS)],
+      { timeout: 15000 }, (err) => { if (err) console.error('[caption] could not launch speech helper:', err.message); });
+
+    let lastText = null;
+    captionPollTimer = setInterval(() => {
+      if (!fs.existsSync(outPath)) return;
+      let parsed;
+      try { parsed = JSON.parse(fs.readFileSync(outPath, 'utf8')); }
+      catch (e) { return; }  // mid-write; try again next tick rather than treating a torn read as empty
+      const text = parsed.partial || '';
+      if (text !== lastText) {
+        lastText = text;
+        if (notchWindow && !notchWindow.isDestroyed()) {
+          notchWindow.webContents.send('notch-listening-partial', text);
+        }
+      }
+      if (parsed.done) stopListeningCaption(outPath);
+    }, CAPTION_POLL_MS);
+
+    // Backstop in case speech_helper never reports done:true (e.g. it never
+    // got a final result before its own maxSeconds deadline) -- this poll
+    // must not outlive the state it's captioning for.
+    setTimeout(() => stopListeningCaption(outPath), (CAPTION_STREAM_SECONDS + 4) * 1000);
+  });
+}
+
+function stopListeningCaption(outPath) {
+  if (captionPollTimer) { clearInterval(captionPollTimer); captionPollTimer = null; }
+  if (outPath) { try { fs.unlinkSync(outPath); } catch (e) {} }
+}
+
 ipcMain.handle('speech-transcribe', async (event, { buffer, locale }) => {
   if (!fs.existsSync(SPEECH_HELPER_APP)) return { error: 'speech helper not installed' };
 
@@ -1093,10 +1155,25 @@ if (process.env.MIRA_TEST_VOICE_STATE) {
   app.whenReady().then(() => setTimeout(() => {
     const state = process.env.MIRA_TEST_VOICE_STATE;
     if (state === 'listening') showNotchListening();
+    else if (state === 'listening-partial') {
+      // Simulates main.js's own startListeningCaption() sending growing
+      // partial text over time, without needing a real live mic capture
+      // (which needs a human to answer the permission dialog) -- verifies
+      // the last-8-words truncation and resize logic in notch.html.
+      showNotchListening();
+      const words = 'what is the weather like in san francisco today please'.split(' ');
+      words.forEach((_, i) => {
+        setTimeout(() => {
+          if (notchWindow && !notchWindow.isDestroyed()) {
+            notchWindow.webContents.send('notch-listening-partial', words.slice(0, i + 1).join(' '));
+          }
+        }, i * 300);
+      });
+    }
     else if (state === 'thinking') showNotchWorking('Thinking…');
     else if (state === 'speaking') showNotchSpeaking('This is a test of the speaking caption reveal in the notch.', 3);
     else if (state === 'ask') showNotchAsk();
-    const checkDelay = state === 'speaking' ? 3400 : 1000;  // let the whole 3s caption reveal finish first
+    const checkDelay = state === 'speaking' ? 3400 : state === 'listening-partial' ? 3300 : 1000;
     setTimeout(() => {
       if (!notchWindow || notchWindow.isDestroyed()) return;
       console.log('[MIRA_TEST_VOICE_STATE] bounds:', JSON.stringify(notchWindow.getBounds()));
@@ -1107,6 +1184,7 @@ if (process.env.MIRA_TEST_VOICE_STATE) {
         idleHidden: document.getElementById('idle').hidden,
         askHidden: document.getElementById('ask').hidden,
         voiceLabel: document.getElementById('voice-label').textContent,
+        listeningLabel: document.getElementById('listening-label').textContent,
         barCount: document.querySelectorAll('#speaking .voice-bars span, #listening .voice-bars span').length,
       })`).then(r => console.log('[MIRA_TEST_VOICE_STATE] state:', JSON.stringify(r)));
 
