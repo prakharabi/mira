@@ -1,0 +1,33 @@
+{
+  // Stop the LaunchAgent daemon first (launchctl bootout gui/$(id -u)/com.mira.daemon)
+  // if this fails to bind :11200 -- both can't hold the port at once.
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Daemon (FastAPI)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["main:app", "--port", "11200", "--reload"],
+      "cwd": "${workspaceFolder}/daemon",
+      "python": "${workspaceFolder}/daemon/venv/bin/python3",
+      "justMyCode": false,
+      "console": "integratedTerminal"
+    },
+    {
+      "name": "Electron (npx electron .)",
+      "type": "node",
+      "request": "launch",
+      "cwd": "${workspaceFolder}/electron",
+      "runtimeExecutable": "${workspaceFolder}/electron/node_modules/.bin/electron",
+      "args": ["."],
+      "outputCapture": "std"
+    }
+  ],
+  "compounds": [
+    {
+      "name": "Daemon + Electron",
+      "configurations": ["Daemon (FastAPI)", "Electron (npx electron .)"]
+    }
+  ]
+}
