@@ -136,6 +136,12 @@ DEFAULT_SETTINGS = {
     # time than a ping every time a message lands.
     "proactive_email_digest_enabled": True,
     "proactive_email_digest_hour": 10,  # local 24h clock, e.g. 10 = 10am
+    # Off by default -- unlike the alerts above, this starts the microphone
+    # and system audio on its own the moment a calendar event's time arrives,
+    # with nobody having pressed Record. That needs to be an explicit opt-in
+    # from the Meetings section, not something that starts happening the day
+    # this ships.
+    "auto_record_scheduled_meetings": False,
     "dumpbox_auto_process": True,
     "dumpbox_auto_reminders": True,
     "dictation_engine": "apple",
@@ -203,6 +209,7 @@ def update_settings(
     proactive_tasks: bool = Body(None),
     proactive_email_digest_enabled: bool = Body(None),
     proactive_email_digest_hour: int = Body(None),
+    auto_record_scheduled_meetings: bool = Body(None),
     dumpbox_auto_process: bool = Body(None),
     dumpbox_auto_reminders: bool = Body(None),
     dictation_engine: str = Body(None),
@@ -265,6 +272,8 @@ def update_settings(
         settings["proactive_email_digest_enabled"] = proactive_email_digest_enabled
     if proactive_email_digest_hour is not None:
         settings["proactive_email_digest_hour"] = max(0, min(23, proactive_email_digest_hour))
+    if auto_record_scheduled_meetings is not None:
+        settings["auto_record_scheduled_meetings"] = auto_record_scheduled_meetings
     if dumpbox_auto_process is not None:
         settings["dumpbox_auto_process"] = dumpbox_auto_process
     if dumpbox_auto_reminders is not None:

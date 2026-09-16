@@ -583,12 +583,144 @@ ipcMain.on('meeting-start', (event) => {
 });
 
 ipcMain.on('meeting-stop', (event) => {
+  autoMeetingActive = null;  // a manual stop ends whatever was running, auto or not
   stopMeetingRecording((result, err) => {
     if (chatWindow && !chatWindow.isDestroyed()) {
       chatWindow.webContents.send('meeting-stop-result', { result, err });
     }
   });
 });
+
+// ---------- Auto-record scheduled meetings ----------
+// Watches the user's Google Calendar and drives the exact same start/stop/
+// transcribe pipeline as the manual Record button, timed to whichever event
+// is currently in its window -- so a meeting scheduled with a Google Meet
+// link gets recorded without anyone pressing anything. Only events with
+// has_meet (see google_integration.py) qualify: a plain calendar block with
+// no video call attached has nothing worth recording. Off by default (see
+// auto_record_scheduled_meetings in main.py) since this starts the
+// microphone and system audio entirely on its own.
+const AUTO_MEETING_POLL_MS = 30000;  // fine enough to catch a start time within ~30s
+const AUTO_MEETING_STATE_PATH = path.join(app.getPath('userData'), 'auto_meeting_state.json');
+let autoMeetingActive = null;  // { eventId, endTime, summary } while an auto-started recording runs
+let autoMeetingTimer = null;
+
+function loadAutoMeetingState() {
+  try {
+    return JSON.parse(fs.readFileSync(AUTO_MEETING_STATE_PATH, 'utf8'));
+  } catch (e) {
+    return { recordedEventIds: [] };
+  }
+}
+
+function saveAutoMeetingState(state) {
+  try {
+    fs.writeFileSync(AUTO_MEETING_STATE_PATH, JSON.stringify(state));
+  } catch (e) {
+    console.error('[auto-meeting] could not save state:', e.message);
+  }
+}
+
+function fetchDaemonJson(url, callback) {
+  http.get(url, (res) => {
+    let data = '';
+    res.on('data', (chunk) => { data += chunk; });
+    res.on('end', () => {
+      try { callback(JSON.parse(data), null); }
+      catch (e) { callback(null, 'bad response from daemon'); }
+    });
+  }).on('error', (e) => callback(null, e.message));
+}
+
+function autoStartMeeting(ev) {
+  console.log(`[auto-meeting] starting recording for "${ev.summary}"`);
+  startMeetingRecording((result, err) => {
+    if (err || !result || result.error) {
+      // Most commonly: a manual recording was already in progress (the daemon
+      // itself refuses a second /meeting/start) -- nothing to do but skip
+      // this occurrence, not retry every poll for the rest of the meeting.
+      console.error('[auto-meeting] start failed:', err || result.error);
+      return;
+    }
+    autoMeetingActive = { eventId: ev.id, endTime: ev.end, summary: ev.summary };
+    if (chatWindow && !chatWindow.isDestroyed()) {
+      chatWindow.webContents.send('meeting-start-result', { result, err: null });
+    }
+    const state = loadAutoMeetingState();
+    state.recordedEventIds = [...new Set([...(state.recordedEventIds || []), ev.id])].slice(-200);
+    saveAutoMeetingState(state);
+  });
+}
+
+function autoStopMeeting() {
+  const finished = autoMeetingActive;
+  autoMeetingActive = null;
+  console.log(`[auto-meeting] stopping recording for "${finished.summary}"`);
+  stopMeetingRecording((result, err) => {
+    // auto:true tells the renderer NOT to also call /transcribe-local-meeting
+    // itself (its normal manual-stop behavior) -- this function already does
+    // that below, and running both would transcribe the same file twice.
+    if (chatWindow && !chatWindow.isDestroyed()) {
+      chatWindow.webContents.send('meeting-stop-result', { result, err, auto: true });
+    }
+    if (err || !result || result.error || !result.file) return;
+
+    // Same call the manual Stop Recording flow makes -- this is the whole
+    // point of "auto": a transcript shows up with nobody having clicked
+    // anything.
+    const req = http.request(
+      { hostname: 'localhost', port: 11200, path: '/transcribe-local-meeting',
+        method: 'POST', headers: { 'Content-Type': 'application/json' } },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          if (!chatWindow || chatWindow.isDestroyed()) return;
+          try {
+            chatWindow.webContents.send('meeting-transcript-ready', JSON.parse(data));
+          } catch (e) { /* Meetings view just won't get a live update; the file is still on disk */ }
+        });
+      }
+    );
+    req.on('error', () => {});
+    req.write(JSON.stringify({ filepath: result.file }));
+    req.end();
+  });
+}
+
+function checkAutoMeetings() {
+  fetchDaemonJson('http://localhost:11200/settings', (settings, err) => {
+    if (err || !settings || !settings.auto_record_scheduled_meetings) return;
+
+    fetchDaemonJson('http://localhost:11200/google/calendar?days=1&max_results=20', (data, err2) => {
+      if (err2 || !data || data.error) return;
+      const events = data.events || [];
+      const now = Date.now();
+
+      if (autoMeetingActive) {
+        // Stop once the event's own scheduled end time has passed, not on a
+        // fixed duration -- a 30-minute meeting and a 2-hour one both just
+        // end when their calendar entry says they do.
+        if (now >= Date.parse(autoMeetingActive.endTime)) autoStopMeeting();
+        return;  // one auto-recording at a time
+      }
+
+      const state = loadAutoMeetingState();
+      const recorded = new Set(state.recordedEventIds || []);
+      const due = events.find((ev) =>
+        ev.has_meet && !ev.all_day && !recorded.has(ev.id) &&
+        now >= Date.parse(ev.start) && now < Date.parse(ev.end)
+      );
+      if (due) autoStartMeeting(due);
+    });
+  });
+}
+
+function startAutoMeetingWatcher() {
+  if (autoMeetingTimer) return;
+  autoMeetingTimer = setInterval(checkAutoMeetings, AUTO_MEETING_POLL_MS);
+  checkAutoMeetings();  // don't wait a full interval for the first check
+}
 
 // ---------- Reminders IPC (Dump Box action items) ----------
 // Reminders access lives here rather than in the daemon -- see reminders.js for
@@ -1178,6 +1310,7 @@ function runOCR() {
 app.whenReady().then(() => {
   createWindow();
   startPredictiveTyping();
+  startAutoMeetingWatcher();
 
   // The notch is created and shown once here, in its resting idle state, and
   // then runs for the lifetime of the app -- every other notch function
