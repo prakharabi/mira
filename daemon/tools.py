@@ -108,12 +108,14 @@ def _tool_list_calendar(days: int = 7, **_):
 
 
 def _tool_create_calendar_event(summary: str = "", start: str = "", end: str = "",
-                                description: str = "", **_):
+                                description: str = "", location: str = "",
+                                attendees: list = None, add_meet: bool = False, **_):
     import google_integration as g
     if not g.is_connected():
         return {"error": "Google account isn't connected. Connect it in Mira > Google."}
     try:
-        return g.calendar_create_event(summary, start, end, description)
+        return g.calendar_create_event(summary, start, end, description,
+                                       location, attendees, add_meet)
     except Exception as e:
         return {"error": str(e)}
 
@@ -293,8 +295,11 @@ TOOLS = [
     },
     {
         "name": "create_calendar_event",
-        "summary": "add events to Google Calendar",
-        "description": "Create an event on the user's primary Google Calendar.",
+        "summary": "schedule meetings and add events to Google Calendar, optionally with a Google Meet link",
+        "description": "Create an event on the user's primary Google Calendar. "
+                       "Set add_meet to true to attach a Google Meet video call to it -- "
+                       "this is how to 'schedule a meeting' or 'set up a Google Meet' rather than "
+                       "just a plain calendar entry.",
         "parameters": {
             "type": "object",
             "properties": {
@@ -302,6 +307,11 @@ TOOLS = [
                 "start": {"type": "string", "description": "ISO 8601 start datetime"},
                 "end": {"type": "string", "description": "ISO 8601 end datetime"},
                 "description": {"type": "string"},
+                "location": {"type": "string"},
+                "attendees": {"type": "array", "items": {"type": "string"},
+                             "description": "Email addresses to invite"},
+                "add_meet": {"type": "boolean",
+                            "description": "Attach a Google Meet video call to the event"},
             },
             "required": ["summary", "start"],
         },
