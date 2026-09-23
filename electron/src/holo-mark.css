@@ -1,0 +1,116 @@
+/* Mira's holographic brand mark -- replaces the old flat gradient-squircle
+   "M" everywhere it appeared (result.html, quick_capture.html, workspace.html
+   sidebar) and adds it to notch.html, which never had a mark at all.
+
+   Deliberately NOT a circular pulsing "arc reactor" (that's Iron Man/Jarvis's
+   signature look) -- this keeps Mira's own squircle-M glyph as the readable
+   core and wraps it in a diamond-shaped rotating lattice plus a diagonal
+   scanline sweep, so it reads as "the same Mira mark, projected as a
+   hologram" rather than a different mascot.
+
+   Usage: <span class="holo-mark" style="width:16px;height:16px;">
+            <span class="holo-halo"></span>
+            <span class="holo-lattice"></span>
+            <svg class="mark" ...>...(unchanged Mira glyph)...</svg>
+            <span class="holo-scan"></span>
+          </span>
+   Size is set on the outer .holo-mark via inline width/height (it varies per
+   call site); everything inside fills that box. */
+
+.holo-mark {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+  isolation: isolate;
+}
+.holo-mark svg.mark {
+  position: relative;
+  z-index: 2;
+  display: block;
+  width: 100%;
+  height: 100%;
+  filter: drop-shadow(0 0 3px rgba(103, 232, 249, 0.65))
+          drop-shadow(0 0 7px rgba(139, 92, 246, 0.45));
+  animation: holoFlicker 4600ms ease-in-out infinite;
+}
+
+/* Soft rotating conic glow behind the glyph -- the "projected light" feel. */
+.holo-halo {
+  position: absolute;
+  inset: -55%;
+  z-index: 1;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg,
+    rgba(139, 92, 246, 0) 0deg,
+    rgba(139, 92, 246, 0.5) 90deg,
+    rgba(6, 182, 212, 0.55) 180deg,
+    rgba(139, 92, 246, 0) 300deg);
+  filter: blur(3px);
+  mix-blend-mode: screen;
+  opacity: 0.8;
+  animation: holoSpin 5200ms linear infinite;
+  pointer-events: none;
+}
+
+/* Thin rotating diamond outline -- the part that reads as "not a circle,
+   not Jarvis's reactor ring". Counter-rotates against the halo so the two
+   layers never look like one solid spinning object. */
+.holo-lattice {
+  position: absolute;
+  inset: -30%;
+  z-index: 1;
+  border: 1px solid rgba(125, 211, 252, 0.5);
+  clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%);
+  opacity: 0.6;
+  animation: holoSpinReverse 7800ms linear infinite;
+  pointer-events: none;
+}
+
+/* A bright hairline sweeping down through the glyph on a loop, like a
+   hologram being re-scanned -- clipped to the glyph's own rounded-square
+   footprint so it never spills past the mark's edges. */
+.holo-scan {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: 23%;
+  overflow: hidden;
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+.holo-scan::before {
+  content: "";
+  position: absolute;
+  left: -25%;
+  right: -25%;
+  height: 26%;
+  top: -35%;
+  background: linear-gradient(180deg,
+    rgba(255, 255, 255, 0) 0%,
+    rgba(186, 243, 255, 0.65) 50%,
+    rgba(255, 255, 255, 0) 100%);
+  animation: holoScan 3400ms cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes holoSpin { to { transform: rotate(360deg); } }
+@keyframes holoSpinReverse { from { transform: rotate(360deg); } to { transform: rotate(0deg); } }
+@keyframes holoScan {
+  0%   { top: -35%; }
+  60%  { top: 120%; }
+  100% { top: 120%; }
+}
+@keyframes holoFlicker {
+  0%, 89%, 100% { opacity: 1; }
+  90% { opacity: 0.5; }
+  91% { opacity: 1; }
+  94% { opacity: 0.72; }
+  95% { opacity: 1; }
+}
+
+/* Motion-sensitive users get a static (still holographic-looking, via the
+   glow/gradient) mark instead of a spinning/scanning one. */
+@media (prefers-reduced-motion: reduce) {
+  .holo-halo, .holo-lattice, .holo-scan::before, .holo-mark svg.mark {
+    animation: none;
+  }
+}

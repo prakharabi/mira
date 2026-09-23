@@ -39,7 +39,9 @@ How to behave:
 - If you need current information, search instead of guessing or saying your knowledge is outdated.
 - When you learn something durable about {owner}, their business, or their preferences, save it to memory.
 - If a request is ambiguous in a way that matters, ask one short question instead of guessing.
-- Reply in the language {owner} used -- Hindi in, Hindi out; Hinglish in, reply naturally in the same mixed register rather than switching to pure Hindi or pure English on your own."""
+- Reply in the language {owner} used -- Hindi in, Hindi out; Hinglish in, reply naturally in the same mixed register rather than switching to pure Hindi or pure English on your own.
+- Greetings and anything you say unprompted (a morning digest, a proactive alert, the first line of a fresh conversation) should be personal, not generic -- use {owner}'s name or a natural honorific ("Good morning, {owner}", "Morning, sir" -- match whatever register the rest of the conversation is in) rather than a flat "Hey there" or "Hello". Mid-conversation replies don't need the name repeated every turn -- that reads as stiff, not personal.
+- Never claim a tool call failed, or describe why, unless its result actually contains an error -- check for one before saying anything went wrong. If it does, quote or closely paraphrase that specific error text; don't substitute a different-sounding explanation that isn't in the result, even one that sounds plausible or matches something that failed earlier in this same conversation. A scheduling conflict, an invalid email, a missing permission, and "the API is down" are different problems with different fixes, and {owner} can only act on the real one. If a result has no error field, it succeeded -- report what it actually returned, not a guess. If the failure is something you can resolve yourself (e.g. a time slot was taken -- try a different time; a value doesn't match what a listing tool returned -- re-check that list), do that before giving up and offering a workaround."""
 
 
 def build_system_prompt(user_message: str = "", owner: str = "the user",
@@ -213,9 +215,29 @@ def _final_text(msg, messages, settings, groq_key, use_cloud, tools_used) -> str
     if text:
         return text
 
-    # The work already happened -- the tool ran. Confirming it plainly beats
-    # both a blank bubble and a recital of internal tool names.
     if tools_used:
+        # "A tool ran" is not "the tool succeeded" -- this used to return
+        # "Done." unconditionally here, which was a confident lie whenever
+        # the model went silent (the reasoning-field quirk above) right
+        # after a tool call that actually FAILED (e.g. create_calcom_booking
+        # hitting a real Cal.com error). Walk back over this round's tool
+        # results -- the unbroken run of "tool" messages at the end of the
+        # transcript -- and if any of them came back with an error, say so
+        # instead of declaring victory over a failure nobody saw.
+        recent_errors = []
+        for m in reversed(messages):
+            if m.get("role") != "tool":
+                break
+            try:
+                payload = json.loads(m.get("content") or "{}")
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if isinstance(payload, dict) and payload.get("error"):
+                recent_errors.append(str(payload["error"]))
+        if recent_errors:
+            return "That didn't actually go through -- " + recent_errors[0]
+        # Confirming plainly beats both a blank bubble and a recital of
+        # internal tool names, but only once we know nothing here failed.
         return "Done."
     return "I didn't get a usable answer back that time. Try rephrasing?"
 

@@ -13,11 +13,58 @@ for that specific endpoint.
 """
 
 import datetime
+import os
 
 import requests
 
 API_BASE = "https://api.cal.com/v2"
 REQUEST_TIMEOUT = 20
+
+
+def _local_offset() -> datetime.timezone:
+    """This machine's real UTC offset, e.g. +05:30 -- not tzname()'s "IST",
+    which is an ambiguous abbreviation (also Irish Standard Time) that isn't
+    a valid Cal.com timeZone value."""
+    return datetime.datetime.now().astimezone().tzinfo
+
+
+def _local_iana_zone() -> str:
+    """The actual IANA zone id (e.g. "Asia/Kolkata"), read off /etc/localtime
+    the same way the `tzdata`-free stdlib itself has no cross-platform way to
+    get one -- Cal.com's `attendee.timeZone` wants this, not an offset or an
+    ambiguous abbreviation like "IST"."""
+    try:
+        real = os.path.realpath("/etc/localtime")
+        return real.split("zoneinfo/", 1)[1]
+    except (OSError, IndexError):
+        return "UTC"
+
+
+def _resolve_start(start: str) -> str:
+    """A user asking to book "1pm tomorrow" means 1pm in THEIR timezone, not
+    UTC -- but the tool used to ask the model for a UTC ISO string directly,
+    which meant the model itself had to do the local-to-UTC conversion in
+    its head on every single booking. That is exactly the kind of arithmetic
+    LLMs get wrong silently: a request for 1pm IST was going out as
+    literally "13:00Z" (1pm UTC = 6:30pm IST), landing outside business
+    hours and coming back as a false "not available" -- confirmed directly
+    against this account's real /slots response, which listed 1pm IST as
+    open while 6:30pm IST was not.
+
+    So: a bare local datetime with no timezone marker (no trailing Z, no
+    +HH:MM/-HH:MM offset) is now assumed to already be in this machine's own
+    local time -- which is the user's time, since Mira runs on their own
+    Mac -- and gets the real local offset attached here, in code, instead of
+    asking a model to compute it. A caller that already included a proper
+    offset or "Z" is trusted as-is and passed through untouched."""
+    s = start.strip()
+    try:
+        parsed = datetime.datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError(f"start must be an ISO 8601 datetime, got {start!r}")
+    if parsed.tzinfo is not None:
+        return s  # already carries an explicit offset/Z -- trust it as-is
+    return parsed.replace(tzinfo=_local_offset()).isoformat()
 
 # Each endpoint's response shape is versioned independently -- these are the
 # versions this module's parsing was written against.
@@ -103,7 +150,15 @@ def find_event_type(name_or_slug: str) -> dict:
     for et in flat:
         if needle in et.get("title", "").lower() or needle in et.get("slug", "").lower():
             return et
-    raise ValueError(f"No Cal.com event type matches \"{name_or_slug}\"")
+    # Naming the real options here, not just rejecting the guess, is what
+    # lets a model that skipped list_calcom_event_types self-correct on the
+    # next tool call instead of reporting back "the tool doesn't work" --
+    # this was the actual create_calcom_booking failure mode being fixed.
+    available = ", ".join(f"\"{et.get('title')}\"" for et in flat) or "none configured"
+    raise ValueError(
+        f"No Cal.com event type matches \"{name_or_slug}\". "
+        f"Real event types on this account: {available}."
+    )
 
 
 def list_event_types() -> list:
@@ -126,12 +181,12 @@ def create_booking(event_type: str, start_iso: str, attendee_name: str,
 
     et = find_event_type(event_type)
     body = {
-        "start": start_iso,
+        "start": _resolve_start(start_iso),
         "eventTypeId": et["id"],
         "attendee": {
             "name": attendee_name,
             "email": attendee_email,
-            "timeZone": attendee_timezone or (datetime.datetime.now().astimezone().tzname() or "UTC"),
+            "timeZone": attendee_timezone or _local_iana_zone(),
         },
         # Undocumented as of this writing (cal.com's own docs' example body
         # omits it entirely): an event type with a custom "title" booking

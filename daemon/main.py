@@ -61,6 +61,16 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[main] Could not start telegram bot: {e}", flush=True)
 
+    try:
+        _reconcile_orphaned_recording()
+    except Exception as e:
+        print(f"[main] recording reconciliation failed: {e}", flush=True)
+
+    try:
+        threading.Thread(target=_watch_recording_duration, daemon=True).start()
+    except Exception as e:
+        print(f"[main] could not start recording duration watchdog: {e}", flush=True)
+
     yield
     # shutdown (nothing needed here currently)
 
@@ -154,7 +164,7 @@ DEFAULT_SETTINGS = {
     "proactive_delivery": "auto",  # "auto" | "telegram" | "voice"
     # Shown to Mira so she can address her owner by name. Blank falls back to
     # "the user" -- this ships in an open-source repo, so it can't be hardcoded.
-    "owner_name": ""
+    "owner_name": "",
 }
 
 def load_settings():
@@ -262,9 +272,13 @@ def update_settings(
     if predictive_personalization_enabled is not None:
         settings["predictive_personalization_enabled"] = predictive_personalization_enabled
     if google_client_id is not None:
-        settings["google_client_id"] = google_client_id
+        # .strip() -- a copy-paste from Google Cloud Console's own "copy"
+        # button has been observed to carry a trailing newline, which turns
+        # into a byte-for-byte-wrong client_id/secret that Google's own
+        # error for ("invalid_client") gives no hint is a whitespace issue.
+        settings["google_client_id"] = google_client_id.strip()
     if google_client_secret is not None:
-        settings["google_client_secret"] = google_client_secret
+        settings["google_client_secret"] = google_client_secret.strip()
     if reminders_list is not None:
         settings["reminders_list"] = reminders_list
     if n8n_base_url is not None:
@@ -314,7 +328,6 @@ def update_settings(
         settings["telegram_bot_token"] = telegram_bot_token
     if telegram_owner_chat_id is not None:
         settings["telegram_owner_chat_id"] = telegram_owner_chat_id.strip()
-
     save_settings(settings)
     result = dict(settings)
     result["cloud_api_key_set"] = bool(settings.get("cloud_api_key"))
@@ -421,9 +434,30 @@ MIC_CONTROL_FILE = Path("/tmp/mira_mic_control")
 # (see meeting_recorder.js) and writes to the same _system.wav path the daemon
 # expects, so /meeting/stop below just waits for that file to exist before merging.
 
-# tracks the currently running mic recording process, if any
+# tracks the currently running mic recording process, if any.
+# active_mic_process (a Popen) is only ever set when THIS daemon process did the
+# spawning; active_mic_pid is the authoritative one, since it also covers a
+# recording re-adopted from a marker file after a restart (see
+# _reconcile_orphaned_recording) -- there's no Popen handle to recover for a
+# process this instance didn't itself start.
 active_mic_process = None
+active_mic_pid = None
 active_meeting_base = None
+active_recording_started_at = None
+
+# Persisted so a recording survives the daemon restarting out from under it --
+# in-memory globals alone used to mean ANY restart while a meeting was being
+# recorded (a settings change, a crash, `launchctl kickstart`) silently forgot
+# the recording while its mic_helper process kept running, unmonitored,
+# forever. That's not hypothetical: one from Sept 18 ran for 2+ days straight
+# before anyone noticed, and on a Bluetooth input device, an open mic session
+# forces the whole Bluetooth link into phone-call-quality mode -- degrading
+# completely unrelated music playback the entire time.
+ACTIVE_RECORDING_FILE = MEETINGS_DIR / "active_recording.json"
+# Safety net independent of the restart-survival fix above: nothing legitimate
+# runs this long uninterrupted, so a recording older than this gets force-
+# stopped automatically regardless of how it lost proper tracking.
+MAX_RECORDING_SECONDS = 6 * 3600
 
 
 @app.get("/health")
@@ -825,18 +859,28 @@ def transcribe_with_whisper_cpp(filepath: Path, mode: str = "translate"):
     return None, {"error": "no transcription output found"}
 
 
-def transcribe_smart(filepath: Path):
+def transcribe_smart(filepath: Path, mode_override: str = None):
     """
     Tries the engine set in Settings ("stt_prefer") first, falling back to the
     other one on failure (cloud fallback also requires internet). Local whisper.cpp
     is the default preference: it's proven to translate non-English speech (e.g.
     Hindi) correctly, whereas Groq's cloud /translations endpoint has been observed
     to only transliterate (romanize) it instead of actually translating.
+
+    `mode_override` bypasses the settings.transcription_mode default for callers
+    that need one behavior regardless of what the user has configured for dictation
+    -- the wake-word voice pipeline always wants "native" (see wakeword_listener.py):
+    the system prompt already says "Hindi in, Hindi out", but that only works if the
+    agent actually SEES Hindi. With the global default ("translate"), a spoken Hindi
+    request arrived as already-English text, so the agent correctly replied in
+    English to what it was given -- matching text, wrong language versus what was
+    actually spoken.
+
     Returns (text, engine_used, error_info).
     """
     settings = load_settings()
     prefer = settings.get("stt_prefer", "local")
-    mode = settings.get("transcription_mode", "translate")
+    mode = mode_override or settings.get("transcription_mode", "translate")
 
     def try_local():
         return transcribe_with_whisper_cpp(filepath, mode)
@@ -1125,6 +1169,124 @@ def generate_minutes(transcript: str = Body(...), model: str = Body("auto")):
     return {"minutes": reply, "model_used": used_model}
 
 
+def _pid_alive(pid: int) -> bool:
+    if not pid or pid < 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:
+        return True  # exists, just not signalable by us (won't happen -- same user)
+    return True
+
+
+def _pid_is_mic_helper(pid: int) -> bool:
+    """Guards against PID reuse: a marker pointing at a PID that's alive but
+    is now some unrelated process (the original long since exited and the OS
+    recycled the number) must not be treated as a live recording."""
+    try:
+        out = subprocess.run(["ps", "-p", str(pid), "-o", "command="],
+                             capture_output=True, text=True, timeout=5)
+        return "mic_helper" in out.stdout
+    except (subprocess.SubprocessError, OSError):
+        return False
+
+
+def _write_recording_marker():
+    try:
+        ACTIVE_RECORDING_FILE.write_text(json.dumps({
+            "pid": active_mic_pid,
+            "base_path": str(active_meeting_base),
+            "started_at": active_recording_started_at,
+        }))
+    except OSError as e:
+        print(f"[main] could not write recording marker: {e}", flush=True)
+
+
+def _clear_recording_marker():
+    try:
+        ACTIVE_RECORDING_FILE.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def _reconcile_orphaned_recording():
+    """Runs once at daemon startup, before anything else touches recording
+    state. Three outcomes:
+
+    1. The marker says a recording was in progress and that process is
+       genuinely still alive -- re-adopt it. Global state is restored exactly
+       as if this daemon process had started it; the recording keeps going
+       straight through the restart, nothing interrupted mid-meeting.
+    2. The marker exists but its process is gone (crashed, or was manually
+       killed) -- stale, just clear it.
+    3. No marker, but a mic_helper is running anyway -- this is the bug
+       itself (a recording orphaned before this fix existed, or a crash path
+       that skipped writing/clearing the marker). Kill it rather than let it
+       sit holding the mic open indefinitely, degrading Bluetooth audio for
+       anyone using it.
+    """
+    global active_mic_pid, active_meeting_base, active_recording_started_at
+
+    marker = None
+    if ACTIVE_RECORDING_FILE.exists():
+        try:
+            marker = json.loads(ACTIVE_RECORDING_FILE.read_text())
+        except (json.JSONDecodeError, OSError):
+            marker = None
+
+    if marker and _pid_alive(marker.get("pid") or -1) and _pid_is_mic_helper(marker["pid"]):
+        active_mic_pid = marker["pid"]
+        active_meeting_base = Path(marker["base_path"])
+        active_recording_started_at = marker.get("started_at") or time.time()
+        print(f"[main] re-adopted an in-progress meeting recording (pid {active_mic_pid}) "
+              f"that survived a daemon restart -- still recording.", flush=True)
+        return
+
+    if marker:
+        print("[main] clearing a stale recording marker (its process is gone).", flush=True)
+        _clear_recording_marker()
+
+    try:
+        out = subprocess.run(["pgrep", "-f", "MicHelper.app/Contents/MacOS/mic_helper"],
+                             capture_output=True, text=True, timeout=5)
+        for pid_str in out.stdout.split():
+            pid = int(pid_str)
+            print(f"[main] killing orphaned mic_helper (pid {pid}) -- no matching recording "
+                  f"is tracked for it.", flush=True)
+            try:
+                os.kill(pid, 9)
+            except ProcessLookupError:
+                pass
+    except (subprocess.SubprocessError, OSError, ValueError) as e:
+        print(f"[main] orphaned mic_helper sweep failed: {e}", flush=True)
+
+
+def _watch_recording_duration():
+    """Safety net independent of the restart-survival fix above: even a
+    correctly-tracked recording should never legitimately run past
+    MAX_RECORDING_SECONDS. Catches the cases re-adoption can't -- a real
+    meeting whose stop button never got clicked (Electron crashed, the UI
+    action failed silently) rather than a daemon restart."""
+    while True:
+        time.sleep(300)
+        if active_recording_started_at is None:
+            continue
+        age = time.time() - active_recording_started_at
+        if age > MAX_RECORDING_SECONDS:
+            print(f"[main] a meeting recording has run for {age / 3600:.1f}h -- "
+                  f"auto-stopping as a safety net.", flush=True)
+            try:
+                meeting_stop()
+                from wakeword_listener import notify
+                notify("Mira stopped a long-running recording",
+                       "A meeting recording ran unusually long and was auto-stopped. "
+                       "Check the Meetings section.")
+            except Exception as e:
+                print(f"[main] auto-stop of long-running recording failed: {e}", flush=True)
+
+
 # ---------- Live meeting recording control ----------
 # Mic recording is managed here (daemon). System audio recording is managed by
 # Electron directly (see meeting_recorder.js) -- Electron tells us the base_path
@@ -1132,9 +1294,9 @@ def generate_minutes(transcript: str = Body(...), model: str = Body("auto")):
 # briefly for Electron's system-audio file to finish appearing before merging.
 @app.post("/meeting/start")
 def meeting_start():
-    global active_mic_process, active_meeting_base
+    global active_mic_process, active_mic_pid, active_meeting_base, active_recording_started_at
 
-    if active_mic_process is not None and active_mic_process.poll() is None:
+    if active_mic_pid is not None and _pid_alive(active_mic_pid):
         return {"error": "a meeting recording is already in progress"}
 
     base_name = f"meeting_{int(time.time())}"
@@ -1150,7 +1312,10 @@ def meeting_start():
         [str(MIC_HELPER_PATH), "start", str(mic_path)],
         stdout=mic_log, stderr=subprocess.STDOUT, text=True
     )
+    active_mic_pid = active_mic_process.pid
     active_meeting_base = base_path
+    active_recording_started_at = time.time()
+    _write_recording_marker()
 
     # base_path is returned so Electron can derive the exact same _system.wav path
     # and spawn system_audio_helper against it
@@ -1158,21 +1323,39 @@ def meeting_start():
 
 @app.post("/meeting/stop")
 def meeting_stop():
-    global active_mic_process, active_meeting_base
+    global active_mic_process, active_mic_pid, active_meeting_base, active_recording_started_at
 
-    if active_mic_process is None:
+    if active_mic_pid is None:
         return {"error": "no meeting recording in progress"}
 
     subprocess.run([str(MIC_HELPER_PATH), "stop"])
 
-    try:
-        active_mic_process.wait(timeout=10)
-    except subprocess.TimeoutExpired:
-        active_mic_process.kill()
+    # active_mic_process is only set when THIS daemon process did the
+    # spawning; a recording re-adopted from the marker after a restart has no
+    # Popen to wait() on, so fall back to polling the bare PID. Either way,
+    # the "stop" call above already told the real running instance to exit
+    # via the shared control file -- this just waits for it to actually go.
+    if active_mic_process is not None:
+        try:
+            active_mic_process.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            active_mic_process.kill()
+    else:
+        deadline = time.time() + 10
+        while _pid_alive(active_mic_pid) and time.time() < deadline:
+            time.sleep(0.25)
+        if _pid_alive(active_mic_pid):
+            try:
+                os.kill(active_mic_pid, 9)
+            except ProcessLookupError:
+                pass
 
     base_path = active_meeting_base
     active_mic_process = None
+    active_mic_pid = None
     active_meeting_base = None
+    active_recording_started_at = None
+    _clear_recording_marker()
 
     if base_path is None:
         return {"error": "no recording file tracked"}
@@ -1607,14 +1790,27 @@ def google_gmail_summarize(query: str = Body(""), max_results: int = Body(10),
     if not messages:
         return {"summary": "No messages matched.", "count": 0, "model_used": "none"}
 
-    lines = [
-        f"{i}. From: {m['from']} | Subject: {m['subject']}\n   {m['snippet'][:300]}"
-        for i, m in enumerate(messages, 1)
-    ]
+    # gmail_list only ever returns metadata + Gmail's own short auto-generated
+    # snippet, not the real body -- summarizing off just that produced
+    # something that read as a rephrasing of the preview rather than an
+    # actual summary of the mail. Fetch each message's real body first (capped
+    # so a big inbox doesn't turn into 10+ extra API round-trips), falling
+    # back to the snippet for any that fail.
+    lines = []
+    for i, m in enumerate(messages, 1):
+        body = None
+        if i <= 10:
+            try:
+                body = _google.gmail_get(m["id"]).get("body")
+            except (RuntimeError, requests.RequestException, KeyError):
+                pass
+        content = (body or m.get("snippet", "") or "")[:1200]
+        lines.append(f"{i}. From: {m['from']} | Subject: {m['subject']}\n   {content}")
     prompt = (
         "Summarize this inbox for a busy founder. Group related mail, call out anything "
         "that clearly needs a reply or has a deadline, and keep it under 200 words. "
-        "Do not invent senders or details that aren't listed.\n\n" + "\n".join(lines)
+        "Summarize in your own words -- don't just rephrase or read back the message "
+        "text. Do not invent senders or details that aren't listed.\n\n" + "\n".join(lines)
     )
 
     try:
@@ -1788,6 +1984,42 @@ import telegram_bot as _telegram
 @app.get("/telegram/status")
 def telegram_status():
     return _telegram.status()
+
+
+@app.post("/notify/blog-published")
+def notify_blog_published(payload: dict = Body(...)):
+    """Called locally by n8n (KrishiVerse Blog Automation) after a successful
+    publish. n8n never touches the Telegram bot token -- it just hands Mira
+    the raw facts, and Mira composes and sends the message itself, in the
+    same summarized, forwardable style as its other Telegram notices."""
+    topic = (payload.get("topic") or "").strip()
+    title = (payload.get("title") or "").strip()
+    summary = (payload.get("summary") or "").strip()
+    url = (payload.get("url") or "").strip()
+
+    lines = ["New KrishiVerse blog published: " + (title or topic or "(untitled)")]
+    if summary:
+        lines.append(summary)
+    if url:
+        lines.append(url)
+    else:
+        lines.append("(no Shopify URL was captured for this post)")
+    text = "\n\n".join(lines)
+
+    status = _telegram.status()
+    if not status.get("linked"):
+        return {"ok": False, "error": "Telegram not linked in Mira Settings"}
+
+    settings = load_settings()
+    try:
+        _telegram._send_message(
+            settings.get("telegram_bot_token"),
+            settings.get("telegram_owner_chat_id"),
+            text,
+        )
+        return {"ok": True}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 @app.post("/telegram/test")

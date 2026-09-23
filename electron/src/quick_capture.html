@@ -2,23 +2,31 @@
 <html>
 <head>
 <meta charset="utf-8">
+<link rel="stylesheet" href="holo-mark.css">
 <style>
   :root {
     color-scheme: light dark;
     --text-primary: rgba(0,0,0,0.87);
     --text-tertiary: rgba(0,0,0,0.38);
     --hairline: rgba(0,0,0,0.10);
-    --accent: #6366f1;
-    --ok: #30a46c;
-    --err: #e5484d;
+    --accent: #0A84FF;
+    --ok: #248a57;
+    --err: #d93a3f;
+    --glass-fill: rgba(0,0,0,0.035);
+    --glass-fill-hover: rgba(0,0,0,0.06);
+    --glass-border: rgba(0,0,0,0.09);
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --text-primary: rgba(255,255,255,0.92);
       --text-tertiary: rgba(255,255,255,0.38);
       --hairline: rgba(255,255,255,0.10);
-      --ok: #3dd68c;
-      --err: #ff6369;
+      --accent: #0A84FF;
+      --ok: #30D158;
+      --err: #FF453A;
+      --glass-fill: rgba(255,255,255,0.07);
+      --glass-fill-hover: rgba(255,255,255,0.13);
+      --glass-border: rgba(255,255,255,0.12);
     }
   }
 
@@ -44,10 +52,21 @@
     padding: 13px 16px 9px;
     flex-shrink: 0;
   }
-  #head .mark { width: 15px; height: 15px; opacity: 0.9; }
-  #head .title { font-size: 12px; font-weight: 600; letter-spacing: -0.01em; }
+  #head .holo-mark { width: 15px; height: 15px; opacity: 0.9; }
+  #head .title { font-size: 12.5px; font-weight: 600; letter-spacing: -0.01em; }
   #head .spacer { flex: 1; }
-  #head .hint { font-size: 11px; color: var(--text-tertiary); }
+  #head .hint {
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+    background: var(--glass-fill);
+    border: 1px solid var(--glass-border);
+    border-radius: 5px;
+    padding: 2px 7px;
+    -webkit-app-region: no-drag;
+  }
 
   #input {
     -webkit-app-region: no-drag;
@@ -68,7 +87,7 @@
   #foot {
     flex-shrink: 0;
     border-top: 1px solid var(--hairline);
-    padding: 8px 16px 10px;
+    padding: 9px 16px 11px;
     display: flex; align-items: center; gap: 10px;
     font-size: 11px;
     color: var(--text-tertiary);
@@ -77,9 +96,11 @@
   kbd {
     font-family: inherit;
     font-size: 10.5px;
-    padding: 1.5px 5px;
-    border-radius: 4px;
-    border: 1px solid var(--hairline);
+    font-weight: 600;
+    padding: 1.5px 5.5px;
+    border-radius: 4.5px;
+    background: var(--glass-fill);
+    border: 1px solid var(--glass-border);
     color: var(--text-tertiary);
   }
   #status.ok { color: var(--ok); }
@@ -88,20 +109,21 @@
   #mic {
     -webkit-app-region: no-drag;
     display: inline-flex; align-items: center; gap: 5px;
-    background: transparent;
-    border: 1px solid var(--hairline);
-    border-radius: 6px;
-    padding: 3px 9px;
+    background: var(--glass-fill);
+    border: 1px solid var(--glass-border);
+    border-radius: 7px;
+    padding: 4px 10px;
     font: inherit;
     font-size: 11px;
     font-weight: 600;
     color: var(--text-tertiary);
     cursor: default;
     flex-shrink: 0;
-    transition: color 120ms, border-color 120ms, background 120ms;
+    transition: color 140ms ease, border-color 140ms ease, background 140ms ease, transform 140ms ease;
   }
   #mic svg { width: 12px; height: 12px; }
-  #mic:hover { color: var(--text-primary); }
+  #mic:hover { color: var(--text-primary); background: var(--glass-fill-hover); }
+  #mic:active { transform: scale(0.96); }
   #mic:disabled { opacity: 0.5; }
   #mic.recording {
     color: var(--err);
@@ -125,17 +147,22 @@
 <body>
   <div id="panel">
     <div id="head">
-      <svg class="mark" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <linearGradient id="qc-g" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#06b6d4"/>
-          </linearGradient>
-        </defs>
-        <rect width="128" height="128" rx="30" fill="url(#qc-g)"/>
-        <circle cx="64" cy="30" r="6.5" fill="#fff"/>
-        <path d="M36 90 V46 L64 76 L92 46 V90" fill="none" stroke="#fff" stroke-width="11"
-              stroke-linecap="round" stroke-linejoin="round"/>
-      </svg>
+      <span class="holo-mark">
+        <span class="holo-halo"></span>
+        <span class="holo-lattice"></span>
+        <svg class="mark" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+          <defs>
+            <linearGradient id="qc-g" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#06b6d4"/>
+            </linearGradient>
+          </defs>
+          <rect width="128" height="128" rx="30" fill="url(#qc-g)"/>
+          <circle cx="64" cy="30" r="6.5" fill="#fff"/>
+          <path d="M36 90 V46 L64 76 L92 46 V90" fill="none" stroke="#fff" stroke-width="11"
+                stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <span class="holo-scan"></span>
+      </span>
       <div class="title">Quick Capture</div>
       <div class="spacer"></div>
       <div class="hint">Dump Box</div>

@@ -34,8 +34,8 @@
     align-items: center;
     gap: 5px;
     background: transparent;
-    border: none;
-    border-radius: 8px;
+    border: 1px solid transparent;
+    border-radius: 9px;
     padding: 7px 10px;
     font: inherit;
     font-size: 12px;
@@ -43,15 +43,15 @@
     color: var(--fg, rgba(255,255,255,0.92));
     cursor: default;
     white-space: nowrap;
-    transition: background 120ms ease;
+    transition: background 140ms ease, border-color 140ms ease, transform 140ms ease;
   }
   /* The author `display: flex` above beats the UA stylesheet's
      `[hidden] { display: none }`, so without this the Call button would show
      on every copy regardless of the attribute. */
   button[hidden] { display: none; }
-  button:hover { background: rgba(127,127,127,0.22); }
-  button:active { transform: scale(0.97); }
-  button svg { width: 13px; height: 13px; opacity: 0.75; }
+  button:hover { background: rgba(127,127,127,0.20); border-color: rgba(127,127,127,0.14); }
+  button:active { transform: scale(0.96); }
+  button svg { width: 13px; height: 13px; opacity: 0.78; }
 
   .sep {
     width: 1px;
