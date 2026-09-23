@@ -152,6 +152,23 @@ def _tool_list_calcom_bookings(status: str = "upcoming", **_):
         return {"error": str(e)}
 
 
+def _tool_list_calcom_event_types(**_):
+    """The one thing create_calcom_booking actually needs before it can be
+    called: the real, existing event types on this Cal.com account (their
+    exact title/slug and length) -- not a guess at what one might be called.
+    Without this, "book a 30 min offline meeting" had no way to become a
+    valid event_type string; the model was left to invent one, which
+    find_event_type() then rejects since it isn't fuzzy about matching
+    something that was never a real event type to begin with."""
+    import calcom_integration as c
+    if not c.is_connected():
+        return {"error": "Cal.com isn't connected. Add an API key in Settings."}
+    try:
+        return {"event_types": c.list_event_types()}
+    except Exception as e:
+        return {"error": str(e)}
+
+
 def _tool_create_calcom_booking(event_type: str = "", start: str = "",
                                 attendee_name: str = "", attendee_email: str = "", **_):
     import calcom_integration as c
@@ -416,16 +433,42 @@ TOOLS = [
         "fn": _tool_list_calcom_bookings,
     },
     {
+        "name": "list_calcom_event_types",
+        "summary": "see the exact event types that exist on the user's Cal.com page",
+        "description": "List the real event types configured on the user's Cal.com page -- each one's "
+                       "exact title, slug, and length in minutes. ALWAYS call this before "
+                       "create_calcom_booking unless you already know the exact title/slug from earlier "
+                       "in this conversation: event_type has to match one of these real event types "
+                       "exactly (or closely enough to fuzzy-match), not a description of what the user "
+                       "asked for -- a request like \"a 30 min offline meeting\" is not itself a valid "
+                       "event_type, since Cal.com only knows about types that actually exist on the "
+                       "account (e.g. \"30 Min Meeting\", \"Quick Chat\"). If nothing here matches what "
+                       "the user described, say so and ask which of the real ones they meant instead of "
+                       "guessing a name and letting the booking fail.",
+        "parameters": {"type": "object", "properties": {}},
+        "fn": _tool_list_calcom_event_types,
+    },
+    {
         "name": "create_calcom_booking",
         "summary": "book a slot on the user's Cal.com page for someone",
-        "description": "Create a booking on the user's Cal.com page. event_type is the event's name or "
-                       "slug as it appears on their Cal.com page (e.g. '30 Min Meeting') -- list it with "
-                       "list_calcom_bookings or ask the user if unsure.",
+        "description": "Create a booking on the user's Cal.com page. event_type must be the exact title "
+                       "or slug of a REAL event type on the account, as returned by "
+                       "list_calcom_event_types -- call that tool first if you haven't already seen the "
+                       "list in this conversation. Do not invent or paraphrase an event_type from the "
+                       "user's own wording (e.g. \"30 min offline meeting\"); if none of the real event "
+                       "types match what they described, ask them which one they meant.",
         "parameters": {
             "type": "object",
             "properties": {
-                "event_type": {"type": "string"},
-                "start": {"type": "string", "description": "ISO 8601 start datetime, UTC"},
+                "event_type": {"type": "string",
+                               "description": "Exact title or slug from list_calcom_event_types."},
+                "start": {"type": "string",
+                          "description": "ISO 8601 datetime WITHOUT a timezone offset or trailing Z "
+                                         "(e.g. '2026-09-18T13:00:00') -- give it in the user's own "
+                                         "local time exactly as they said it (\"1pm\" -> "
+                                         "T13:00:00), not converted to UTC. The tool attaches this "
+                                         "machine's real local offset itself; a model-computed UTC "
+                                         "conversion has produced wrong times before."},
                 "attendee_name": {"type": "string"},
                 "attendee_email": {"type": "string"},
             },

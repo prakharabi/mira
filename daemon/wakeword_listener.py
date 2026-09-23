@@ -166,7 +166,13 @@ def handle_wake_detected(pa: pyaudio.PyAudio, chime: bool = False):
         import agent
 
         voice_state.set_state("thinking")
-        text, _engine_used, _err = transcribe_smart(audio_path)
+        # "native", not settings.transcription_mode's default of "translate" --
+        # the agent's system prompt replies in whatever language it's given
+        # ("Hindi in, Hindi out"), which only works if speech Mira hears in
+        # Hindi still reads as Hindi by the time it reaches the model instead
+        # of arriving pre-translated to English. See transcribe_smart's own
+        # docstring for the bug this fixes.
+        text, _engine_used, _err = transcribe_smart(audio_path, mode_override="native")
 
         if not text or not text.strip():
             log("[wakeword] No speech detected in command window, ignoring.")
@@ -219,6 +225,32 @@ def _audio_duration(filepath: Path) -> float:
     return 0
 
 
+# Mic-based barge-in (auto-detecting speech over Mira's own playback via RMS)
+# was tried and pulled: even calibrated against a live noise floor, it read
+# too much of this room's own ambient/echo as "someone talking" to trust.
+# What replaced it is deliberate, not automatic: pressing the same
+# trigger that starts listening (the shortcut, or the wake word again) while
+# Mira is mid-reply stops her and starts a new listening turn -- see
+# _stop_speaking() and its call at the top of handle_wake_detected().
+
+_playback_lock = threading.Lock()
+_playback_proc = None  # the afplay Popen currently playing a reply, if any
+
+
+def _stop_speaking() -> bool:
+    """Kills whatever reply is currently playing, if any. Returns True if it
+    actually stopped something. Used so a fresh trigger while Mira is
+    mid-sentence interrupts her instead of queuing behind her."""
+    global _playback_proc
+    with _playback_lock:
+        proc = _playback_proc
+        if proc is not None and proc.poll() is None:
+            log("[wakeword] New trigger while speaking -- interrupting.")
+            proc.terminate()
+            return True
+        return False
+
+
 def speak_reply(text: str):
     """Uses the same macOS `say` mechanism as the /speak endpoint, but plays directly
     since this runs inside the daemon process (no HTTP round-trip needed)."""
@@ -229,7 +261,8 @@ def speak_reply(text: str):
     TTS_DIR.mkdir(parents=True, exist_ok=True)
     filepath = TTS_DIR / f"{uuid.uuid4().hex}.aiff"
 
-    voice = resolve_tts_voice(text, load_settings())
+    settings = load_settings()
+    voice = resolve_tts_voice(text, settings)
     cmd = ["say", "-o", str(filepath)]
     if voice:
         cmd += ["-v", voice]
@@ -244,9 +277,25 @@ def speak_reply(text: str):
     # word-by-word caption reveal that actually tracks the audio instead of
     # drifting out of sync on a long or short reply.
     voice_state.set_state("speaking", text, _audio_duration(filepath))
+
+    # Duck whatever's playing (Spotify/Music) before Mira talks over it, and
+    # put it back exactly where it was once she's done -- see
+    # app_control.duck_for_speech for why this goes through the system output
+    # volume rather than scripting the player app directly. Best-effort: if
+    # Automation permission isn't granted, is_music_playing() just can't tell
+    # and this becomes a no-op rather than blocking speech on it.
+    import app_control
+    ducked_from = app_control.duck_for_speech()
+
+    global _playback_proc
     try:
-        subprocess.run(["afplay", str(filepath)])
+        with _playback_lock:
+            _playback_proc = subprocess.Popen(["afplay", str(filepath)])
+        _playback_proc.wait()
     finally:
+        with _playback_lock:
+            _playback_proc = None
+        app_control.restore_volume(ducked_from)
         voice_state.set_state("idle")
 
 
@@ -285,7 +334,15 @@ class WakewordController:
         loop is already running, this just flags it to handle the next iteration
         (reusing that loop's own mic stream, exactly like a real wake-word detection
         would). If the listener is currently paused, spins up a one-off mic session
-        instead so the manual trigger still works even with wake-word listening off."""
+        instead so the manual trigger still works even with wake-word listening off.
+
+        Also doubles as "stop talking and listen again": if Mira is mid-reply
+        when the shortcut is pressed, _stop_speaking() cuts her off immediately
+        (runs on this call's own thread, so it isn't stuck waiting behind
+        whatever the listener loop is busy doing) and the trigger below still
+        goes through, so a fresh listening turn starts right after instead of
+        the press just queuing silently behind the rest of her sentence."""
+        _stop_speaking()
         if self.is_running():
             self._manual_trigger.set()
         else:

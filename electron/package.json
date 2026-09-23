@@ -1,7 +1,7 @@
 {
   "name": "mira",
   "productName": "Mira",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Mira — a CEO's personal AI assistant for Mac",
   "main": "src/main.js",
   "scripts": {

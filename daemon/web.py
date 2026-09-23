@@ -131,8 +131,15 @@ def search(query: str, max_results: int = 5, tavily_key: str = "") -> dict:
         ("duckduckgo-api", lambda: _search_ddg_api(query, max_results)),
         ("wikipedia", lambda: _search_wikipedia(query, max_results)),
     ]
+    # Tavily is a paid API -- it belongs at the back of the queue as a last
+    # resort, only reached when every free source above came back empty, not
+    # ahead of them. This used to be providers.insert(0, ...), which put it
+    # FIRST whenever a key was configured -- exactly backwards from the
+    # provider-agnostic, key-free-by-default intent described above, and the
+    # reason a configured Tavily key was being billed on every search instead
+    # of just the rare one DuckDuckGo/Wikipedia couldn't answer.
     if tavily_key:
-        providers.insert(0, ("tavily", lambda: _search_tavily(query, max_results, tavily_key)))
+        providers.append(("tavily", lambda: _search_tavily(query, max_results, tavily_key)))
 
     errors = []
     for name, fn in providers:

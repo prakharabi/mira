@@ -166,6 +166,7 @@ def run_automation(automation_id: str, payload: dict = None) -> dict:
 
     target["last_run"] = datetime.datetime.now().isoformat(timespec="seconds")
     target["last_status"] = "success" if result.get("success") else "failed"
+    target["last_output"] = (result.get("response") or result.get("error") or "")[:2000]
     _save_all(items)
 
     result["automation"] = _public(target)

@@ -215,6 +215,81 @@ def now_playing() -> dict:
     return {"success": True, "now_playing": result.stdout.strip()}
 
 
+_PLAYING_CHECK_SCRIPT = """
+on run
+    tell application "System Events"
+        set spotifyRunning to (exists (processes where name is "Spotify"))
+        set musicRunning to (exists (processes where name is "Music"))
+    end tell
+    if spotifyRunning then
+        tell application "Spotify"
+            if player state is playing then return "yes"
+        end tell
+    end if
+    if musicRunning then
+        tell application "Music"
+            if player state is playing then return "yes"
+        end tell
+    end if
+    return "no"
+end run
+"""
+
+
+def is_music_playing() -> bool:
+    """Best-effort, same Automation-permission caveat as now_playing() above --
+    a denied/ungranted prompt just means this can't tell, so it reports False
+    (don't duck) rather than raising. Used to decide whether to duck system
+    volume before Mira speaks (see duck_for_speech below); a false negative
+    here just means a reply plays without ducking, not that it fails."""
+    try:
+        result = subprocess.run(["osascript", "-e", _PLAYING_CHECK_SCRIPT],
+                                capture_output=True, text=True, timeout=10)
+    except (subprocess.SubprocessError, OSError):
+        return False
+    return result.returncode == 0 and result.stdout.strip() == "yes"
+
+
+def get_volume() -> int:
+    """Current system output volume 0-100, or -1 if it couldn't be read."""
+    script = "output volume of (get volume settings)"
+    try:
+        result = subprocess.run(["osascript", "-e", script],
+                                capture_output=True, text=True, timeout=10)
+        return int(result.stdout.strip())
+    except (subprocess.SubprocessError, OSError, ValueError):
+        return -1
+
+
+# How far to duck, as a fraction of the current volume -- not a fixed level,
+# so someone who normally listens quiet doesn't get ducked to silence while
+# someone who listens loud still gets a real, noticeable dip.
+DUCK_FACTOR = 0.35
+
+
+def duck_for_speech():
+    """If music is audibly playing, lowers system volume before Mira speaks
+    and returns what to hand back to restore_volume() afterward. Returns None
+    when there's nothing to duck (no music, or volume couldn't be read) --
+    callers should treat None as "nothing to restore" and skip the restore
+    step entirely rather than calling set_volume with it."""
+    if not is_music_playing():
+        return None
+    current = get_volume()
+    if current < 0:
+        return None
+    ducked = max(5, round(current * DUCK_FACTOR))
+    if set_volume(ducked).get("success"):
+        return current
+    return None
+
+
+def restore_volume(previous):
+    if previous is None:
+        return
+    set_volume(previous)
+
+
 def list_running_apps() -> dict:
     """Visible apps the user could be asked about, via LaunchServices only."""
     script = ('tell application "System Events" to get name of every process '

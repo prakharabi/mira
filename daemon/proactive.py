@@ -17,6 +17,8 @@ people switch alerting off and never turn it back on:
 
 import datetime
 import json
+import random
+import re
 import subprocess
 import threading
 import time
@@ -115,7 +117,69 @@ def _speak(text: str) -> bool:
         return False
 
 
-def deliver(text: str) -> str:
+# Alert lines are built for READING -- emoji markers, bullet-per-item,
+# newline-separated blocks (see _check_calendar/_check_email/etc.). Fed
+# straight into `say`, that comes out as a flat, robotic recitation
+# ("emoji calendar emoji Meeting starts at...") with no sense that anyone is
+# actually talking to you. _speakify() is the one place that turns those
+# lines into something with the shape of a person mentioning something,
+# picking a different opener each time so it doesn't read as a canned
+# script on the second or third alert of the day.
+_LEAD_INS_SINGLE = [
+    "Hey, quick heads up —",
+    "Just so you know,",
+    "One thing for you —",
+    "Heads up —",
+    "Quick note for you —",
+    "So,",
+]
+_LEAD_INS_MULTI = [
+    "Hey, a few things for you.",
+    "Got a couple of updates for you.",
+    "Quick rundown for you —",
+    "A few things came up.",
+    "So, a couple of updates.",
+]
+_CONNECTORS = ["Also,", "And,", "On top of that,", "One more thing —", "Plus,"]
+
+# Covers the emoji this module actually prefixes alerts with (📅 ✉️ 🗓️ 📬)
+# plus the general pictograph/symbol/flag blocks, so a `say` voice never
+# tries to sound out a glyph it has no pronunciation for.
+_EMOJI_RE = re.compile(
+    "[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF]+",
+    flags=re.UNICODE,
+)
+
+
+def _speakify(alerts: list) -> str:
+    """Alert lines -> one spoken-sounding utterance. Telegram/notification
+    delivery keeps the original formatting (see deliver()); only this path
+    needs to sound like Mira talking rather than a feed being read aloud."""
+    cleaned = []
+    for a in alerts:
+        text = _EMOJI_RE.sub("", a).strip()
+        # A multi-line alert (calendar's optional location line, the email
+        # digest's own paragraphs) reads as one breath, not a hard stop --
+        # full sentence breaks stay wherever the text already has them.
+        text = re.sub(r"\n+", ". ", text)
+        text = re.sub(r"\s{2,}", " ", text).strip(" .")
+        if text:
+            cleaned.append(text)
+
+    if not cleaned:
+        return ""
+    if len(cleaned) == 1:
+        return f"{random.choice(_LEAD_INS_SINGLE)} {cleaned[0]}."
+
+    parts = [f"{random.choice(_LEAD_INS_MULTI)} {cleaned[0]}."]
+    remaining = cleaned[1:]
+    connectors = random.sample(_CONNECTORS, k=min(len(_CONNECTORS), len(remaining)))
+    for item, connector in zip(remaining, connectors + _CONNECTORS):
+        parts.append(f"{connector} {item}.")
+    return " ".join(parts)
+
+
+def deliver(alerts: list) -> str:
     """Send an alert wherever it will actually be seen.
 
     Delivery mode is a setting, "auto" by default: locked screen means
@@ -124,28 +188,56 @@ def deliver(text: str) -> str:
     message you have to go read). "telegram" and "voice" pin one or the
     other regardless of lock state, for anyone who'd rather choose than have
     Mira guess.
+
+    Takes the raw list of alert lines, not a pre-joined string: Telegram and
+    the local notification want the original emoji/bullet formatting (built
+    for reading), while speech wants the humanized version from _speakify()
+    -- one alert, one message, two different renderings of it.
     """
     from main import load_settings
     mode = load_settings().get("proactive_delivery", "auto")
+    text = "\n\n".join(alerts)
 
     if mode == "telegram":
         if _send_telegram(text):
             return "telegram"
     elif mode == "voice":
-        if _speak(text):
+        if _speak(_speakify(alerts)):
             return "voice"
     else:  # auto
         if is_screen_locked():
             if _send_telegram(text):
                 return "telegram"
         else:
-            if _speak(text):
+            if _speak(_speakify(alerts)):
                 return "voice"
             if _send_telegram(text):  # spoken failed (e.g. muted) -- still get it to them
                 return "telegram"
 
     _notify_mac("Mira", text)
     return "notification"
+
+
+def _google_reconnect_alert(seen: set, error: Exception) -> list:
+    """Once a day, one clear alert instead of a silent retry loop.
+
+    An expired/revoked Google token (Google's own "invalid_grant" response --
+    routinely hit within a week when the OAuth consent screen is still in
+    Testing mode, since Google auto-expires those refresh tokens) breaks
+    calendar, email AND the digest all at once, every 5 minutes, forever,
+    with nothing but a log line to show for it -- is_connected() only checks
+    that a refresh token is stored, not that Google still honors it. This is
+    the one place that turns that into something the user actually sees.
+    """
+    text = str(error)
+    if "invalid_grant" not in text and "expired or revoked" not in text:
+        return []
+    key = f"google-reconnect:{datetime.date.today().isoformat()}"
+    if key in seen:
+        return []
+    seen.add(key)
+    return ["Mira's Google connection has expired -- calendar, mail, and the "
+            "morning digest are paused until you reconnect it in Settings > Google."]
 
 
 def _check_calendar(seen: set) -> list:
@@ -157,7 +249,7 @@ def _check_calendar(seen: set) -> list:
         events = g.calendar_list_events(days=1, max_results=20)
     except Exception as e:
         log(f"calendar check failed: {e}")
-        return []
+        return _google_reconnect_alert(seen, e)
 
     now = datetime.datetime.now(datetime.timezone.utc)
     alerts = []
@@ -202,7 +294,7 @@ def _check_email(seen: set) -> list:
         messages = g.gmail_list("is:unread to:me newer_than:1d", max_results=5)
     except Exception as e:
         log(f"email check failed: {e}")
-        return []
+        return _google_reconnect_alert(seen, e)
 
     alerts = []
     for m in messages:
@@ -231,7 +323,35 @@ def _save_digest_state(state: dict):
     DIGEST_STATE_PATH.write_text(json.dumps(state))
 
 
-def _check_email_digest(settings: dict) -> list:
+# Only the first N messages get a full-body fetch -- one extra Gmail API call
+# each, on top of the listing call gmail_list already made, and a busy inbox
+# digest already caps at 30 messages. Past this the marginal message is
+# usually a newsletter/notification where the snippet alone is genuinely
+# enough, so the extra round-trips aren't worth it.
+DIGEST_FULL_BODY_LIMIT = 15
+DIGEST_BODY_CHARS = 1200
+
+
+def _digest_entry(m: dict, index: int, g) -> str:
+    """One mail's listing entry, with its real body when we bothered to fetch
+    it (see DIGEST_FULL_BODY_LIMIT) and the bare snippet otherwise -- the
+    fallback a fetch failure lands on too, so one bad message can't sink the
+    whole digest."""
+    body = None
+    if index < DIGEST_FULL_BODY_LIMIT and m.get("id"):
+        try:
+            body = g.gmail_get(m["id"]).get("body")
+        except Exception as e:
+            log(f"email digest body fetch failed for {m.get('id')}: {e}")
+
+    content = (body or m.get("snippet", "") or "").strip()[:DIGEST_BODY_CHARS]
+    return (
+        f"- From: {m.get('from', '')}\n  Subject: {m.get('subject', '(no subject)')}\n"
+        f"  Content: {content}"
+    )
+
+
+def _check_email_digest(settings: dict, seen: set) -> list:
     """Once a day at a fixed hour, one summarized readout of the last 24h of
     mail instead of a ping per message -- see proactive_email above for that
     other, per-message mode this is meant as an alternative to.
@@ -260,7 +380,7 @@ def _check_email_digest(settings: dict) -> list:
         messages = g.gmail_list("newer_than:1d to:me", max_results=30)
     except Exception as e:
         log(f"email digest fetch failed: {e}")
-        return []
+        return _google_reconnect_alert(seen, e)
 
     # Mark today as done regardless of what follows -- an empty inbox or a
     # summarization failure shouldn't make this retry every 5 minutes for the
@@ -271,19 +391,23 @@ def _check_email_digest(settings: dict) -> list:
     if not messages:
         return []
 
-    listing = "\n".join(
-        f"- From: {m.get('from', '')}\n  Subject: {m.get('subject', '(no subject)')}\n"
-        f"  Preview: {m.get('snippet', '')}"
-        for m in messages
-    )
+    # gmail_list only ever fetched metadata + Gmail's own auto-generated
+    # snippet (~100-200 chars) -- summarizing off just that gave back
+    # something that read as a slight rephrasing of the preview rather than
+    # an actual summary, since for a short email the snippet effectively IS
+    # the whole message. _digest_entry fetches each message's real body
+    # first (capped below) so there's something to actually summarize.
+    listing = "\n".join(_digest_entry(m, i, g) for i, m in enumerate(messages))
     prompt = (
         "Here is all the mail from the last 24 hours, already fetched -- do not "
         "call any tools, just work with what's below.\n\n"
         f"{listing}\n\n"
         "Write a short spoken-style morning digest: summarize what came in, "
         "grouped naturally rather than email-by-email, and call out anything "
-        "that looks like it actually needs a reply or action from me. If "
-        "nothing needs action, say so plainly instead of inventing something."
+        "that looks like it actually needs a reply or action from me. Summarize "
+        "in your own words -- don't just rephrase or read back the message "
+        "text. If nothing needs action, say so plainly instead of inventing "
+        "something."
     )
 
     try:
@@ -400,13 +524,13 @@ def run_checks(force: bool = False) -> dict:
         alerts.extend(_check_tasks(seen))
     if settings.get("proactive_calcom_bookings", True):
         alerts.extend(_check_calcom_bookings(seen))
-    alerts.extend(_check_email_digest(settings))
+    alerts.extend(_check_email_digest(settings, seen))
 
     delivered_via = None
     if alerts:
         # One message, not one per item -- five separate pings for five emails
         # is how an assistant becomes something you mute.
-        delivered_via = deliver("\n\n".join(alerts))
+        delivered_via = deliver(alerts)
         _save_seen(seen)
         log(f"delivered {len(alerts)} alert(s) via {delivered_via}")
     else:

@@ -185,6 +185,14 @@ function ensureNotchWindow() {
 
   notchWindow.setAlwaysOnTop(true, 'screen-saver');
   notchWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  // Starts click-through: this window sits at screen-saver z-level, above
+  // literally everything including other apps' title/tab bars, and with no
+  // mouse-event handling of its own it was swallowing clicks meant for
+  // whatever's underneath (browser tabs, most visibly) across its full
+  // bounds -- even while idle and showing nothing. `forward: true` still
+  // delivers move events through to the OS (needed for anything under the
+  // cursor to redraw hover states normally); only clicks pass through.
+  notchWindow.setIgnoreMouseEvents(true, { forward: true });
 
   notchWindow.loadFile('src/notch.html');
   notchWindow.on('closed', () => { notchWindow = null; });
@@ -206,6 +214,19 @@ ipcMain.on('notch-resize', (event, { height, idle }) => {
   // transition instead of an instant jump between sizes, matching how the
   // reference UI grows/shrinks smoothly rather than snapping.
   notchWindow.setBounds({ x, y, width, height: h }, true);
+  // The single, authoritative place click-through gets decided -- this
+  // fires after EVERY state change (every show*/goIdle call in notch.html
+  // ends in reportSize()), driven by the renderer's own DOM measurement of
+  // whether there's real content on screen, not by which of several main.js
+  // functions happened to be called on the way here. Scattering
+  // setIgnoreMouseEvents(false) across each individual show* function
+  // instead of here left a real gap: any transition that reached an active
+  // state WITHOUT going through one of those exact call sites (or a timing
+  // race between them) could leave the window uninterruptable while
+  // invisible -- which is the "can't click what's under the notch" bug this
+  // replaces. `idle` here is `!contentShown && !hovering` from the
+  // renderer, so this can never disagree with what's actually on screen.
+  notchWindow.setIgnoreMouseEvents(!!idle, { forward: true });
 });
 
 // The notch is a permanent fixture, not a per-use popup -- Escape/the close
@@ -253,6 +274,7 @@ ipcMain.on('notch-action', (event, { action, text }) => {
 // happening at all.
 function showNotchWorking(label) {
   const w = ensureNotchWindow();
+  w.setIgnoreMouseEvents(false);
   w.setHasShadow(true);
   w.setBounds(notchGeometry(NOTCH_COLLAPSED_HEIGHT, NOTCH_ACTIVE_WIDTH), true);
   w.showInactive();
@@ -263,6 +285,7 @@ function showNotchWorking(label) {
 
 function showNotchWithText(text) {
   const w = ensureNotchWindow();
+  w.setIgnoreMouseEvents(false);
   const send = () => w.webContents.send('notch-context', text);
   if (w.webContents.isLoadingMainFrame()) w.webContents.once('did-finish-load', send);
   else send();
@@ -271,6 +294,7 @@ function showNotchWithText(text) {
 
 function showNotchListening() {
   const w = ensureNotchWindow();
+  w.setIgnoreMouseEvents(false);
   w.setHasShadow(true);
   w.setBounds(notchGeometry(NOTCH_COLLAPSED_HEIGHT, NOTCH_ACTIVE_WIDTH), true);
   w.showInactive();
@@ -281,6 +305,7 @@ function showNotchListening() {
 
 function showNotchSpeaking(text, duration) {
   const w = ensureNotchWindow();
+  w.setIgnoreMouseEvents(false);
   w.setHasShadow(true);
   w.setBounds(notchGeometry(NOTCH_COLLAPSED_HEIGHT, NOTCH_ACTIVE_WIDTH), true);
   w.showInactive();
@@ -296,6 +321,7 @@ function showNotchSpeaking(text, duration) {
 // Asking a typed question is the one flow where taking focus is the point.
 function showNotchAsk() {
   const w = ensureNotchWindow();
+  w.setIgnoreMouseEvents(false);
   w.setHasShadow(true);
   w.setBounds(notchGeometry(NOTCH_COLLAPSED_HEIGHT, NOTCH_ACTIVE_WIDTH), true);
   w.show();
@@ -349,6 +375,10 @@ function goNotchIdle() {
   notchWindow.setHasShadow(false);
   notchWindow.setBounds(notchGeometry(NOTCH_IDLE_HEIGHT, NOTCH_IDLE_WIDTH), true);
   notchWindow.webContents.send('notch-idle');
+  // Back to click-through -- true rest means nothing is shown AND nothing
+  // is clickable, so whatever's underneath (a browser tab, anything) gets
+  // its clicks back instead of losing them to an invisible pill.
+  notchWindow.setIgnoreMouseEvents(true, { forward: true });
 }
 
 // ---------- NEW: Chat window ----------
@@ -539,9 +569,9 @@ function refreshTrayMenu() {
     // Actions. Every accelerator below is a real globalShortcut registration
     // (see app.whenReady), so showing it here is accurate rather than
     // decorative -- a tray menu's accelerator does not itself bind anything.
-    { label: 'Ask Mira', accelerator: 'Command+Shift+L', click: triggerWakewordManually },
-    { label: 'Quick Capture…', accelerator: 'Command+Shift+D', click: showQuickCapture },
-    { label: 'Capture Text (OCR)', accelerator: 'Command+Shift+O', click: runOCR },
+    { label: 'Ask Mira', accelerator: 'Control+A', click: triggerWakewordManually },
+    { label: 'Quick Capture…', accelerator: 'Control+D', click: showQuickCapture },
+    { label: 'Capture Text (OCR)', accelerator: 'Control+Q', click: runOCR },
     { type: 'separator' },
 
     { label: 'Open Mira', accelerator: 'Control+Space', click: () => {
@@ -959,6 +989,47 @@ ipcMain.handle('predictive-restart', async () => ({
   ...(await restartPredictiveTyping()),
   accessibilityTrusted: systemPreferences.isTrustedAccessibilityClient(false),
 }));
+
+// Clears the stale Accessibility grant itself (see reset_permissions.sh,
+// which this runs the same tccutil command as) rather than just opening the
+// System Settings pane -- an ad-hoc rebuild leaves a grant sitting there
+// that LOOKS fine (Mira is still listed, still checked) but no longer
+// matches the running binary's new code hash, so nothing short of an actual
+// reset gets the "add it again" prompt to fire on next launch. Only
+// Accessibility, not the other services reset_permissions.sh covers -- this
+// button lives next to Restart specifically for predictive typing.
+ipcMain.handle('reset-accessibility-permission', () => {
+  return new Promise((resolve) => {
+    execFile('/usr/bin/tccutil', ['reset', 'Accessibility', 'com.mira.desktop'],
+      (err) => {
+        // tccutil exits non-zero when there's nothing to reset for that
+        // bundle id -- not a real failure, just an empty no-op (same
+        // reasoning reset_permissions.sh's `set -uo pipefail`, not `-e`,
+        // documents). Only a launch failure (the binary itself missing) is
+        // worth reporting back as an error.
+        if (err && err.code === 'ENOENT') {
+          resolve({ success: false, error: 'tccutil not found' });
+          return;
+        }
+        resolve({
+          success: true,
+          accessibilityTrusted: systemPreferences.isTrustedAccessibilityClient(false),
+        });
+      });
+  });
+});
+
+// Screen Recording (OCR) status for the Settings panel -- same rationale as
+// the Accessibility row above: getMediaAccessStatus can't be prompted like
+// Accessibility can (there's no equivalent "ask" call for it), so the button
+// just opens the pane directly. See the comment on ocrPermissionDenied().
+ipcMain.handle('ocr-permission-status', () => ({
+  status: systemPreferences.getMediaAccessStatus('screen'),
+}));
+ipcMain.handle('open-screen-recording-settings', () => {
+  return require('electron').shell.openExternal(
+    'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+});
 
 // ---------- Apple speech recognition ----------
 // Runs from here, not the daemon: Speech Recognition is TCC-gated and a
@@ -1479,8 +1550,50 @@ function showPill(text) {
 // pill already built for selected text -- no separate UI needed for OCR results.
 let ocrInProgress = false;
 
+// screencapture is spawned as Mira's own child process, so macOS resolves the
+// Screen Recording permission it needs against Mira.app's identity -- same
+// "responsible process" rule already documented above for Accessibility (see
+// open-accessibility-settings). Two things make this look like "granted it
+// and it still doesn't work" in practice, and neither leaves any visible
+// error without this check:
+//   1. An ad-hoc signed dev build gets a new code hash every rebuild, and
+//      macOS keys the grant to that hash, so a rebuild silently revokes it.
+//   2. Unlike Accessibility, macOS caches a denied/undetermined Screen
+//      Recording check for the lifetime of the process -- granting it in
+//      System Settings does NOT take effect until Mira is fully quit and
+//      reopened, not just refocused.
+// Without this gate, a denied grant made screencapture -i either silently
+// fail or hand back a truncated/black image, and runOCR had nothing to show
+// for it beyond a bare "Reading..." that never resolved.
+function ocrPermissionDenied() {
+  const status = systemPreferences.getMediaAccessStatus('screen');
+  return status !== 'granted';
+}
+
+function showNotchPermissionError(message) {
+  const w = ensureNotchWindow();
+  w.setIgnoreMouseEvents(false);
+  const send = () => w.webContents.send('notch-ask-response', message);
+  if (w.webContents.isLoadingMainFrame()) w.webContents.once('did-finish-load', send);
+  else send();
+  w.showInactive();
+}
+
 function runOCR() {
   if (ocrInProgress) return;
+
+  if (ocrPermissionDenied()) {
+    showNotchPermissionError(
+      'Mira needs Screen Recording access for OCR.\n\n' +
+      'Grant it in System Settings → Privacy & Security → Screen Recording, ' +
+      'then fully quit and reopen Mira (a refocus is not enough -- macOS only ' +
+      'applies the change on next launch). Opening Settings now…'
+    );
+    require('electron').shell.openExternal(
+      'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture');
+    return;
+  }
+
   ocrInProgress = true;
 
   const tmpImage = path.join(os.tmpdir(), `mira_ocr_${Date.now()}.png`);
@@ -1556,12 +1669,13 @@ app.whenReady().then(() => {
     toggleChatWindow();
   });
 
-  // Control+Shift+A triggers a "Hey Mira" voice command instantly, without
+  // Control+A triggers a "Hey Mira" voice command instantly, without
   // needing to say the wake word -- works system-wide, from any app.
-  // (Was Command+Shift+L; a bare Control+Option isn't a valid Electron
-  // accelerator -- it requires a real key alongside modifiers, not just
-  // modifiers alone -- so this is the key the user chose instead.)
-  globalShortcut.register('Control+Shift+A', () => {
+  // (Was Control+Shift+A -> Command+Shift+L before that; a bare
+  // Control+Option isn't a valid Electron accelerator -- it requires a real
+  // key alongside modifiers, not just modifiers alone -- so this is the key
+  // the user chose instead.)
+  globalShortcut.register('Control+A', () => {
     triggerWakewordManually();
   });
 
@@ -1571,16 +1685,17 @@ app.whenReady().then(() => {
     showNotchAsk();
   });
 
-  // Command+Shift+O starts a system-wide OCR capture -- drag-select any
-  // region of the screen, recognized text lands on the clipboard and pops up
-  // the same action pill used for selected text
-  globalShortcut.register('Command+Shift+O', () => {
+  // Control+Q starts a system-wide OCR capture -- drag-select any region of
+  // the screen, recognized text lands on the clipboard and pops up the same
+  // action pill used for selected text. (Was Command+Shift+O.)
+  globalShortcut.register('Control+Q', () => {
     runOCR();
   });
 
-  // Control+Shift+D opens Quick Capture -- dump a thought into the Dump Box
-  // from any app without opening the main window. (Was Command+Shift+D.)
-  globalShortcut.register('Control+Shift+D', () => {
+  // Control+D opens Quick Capture -- dump a thought into the Dump Box from
+  // any app without opening the main window. (Was Control+Shift+D ->
+  // Command+Shift+D before that.)
+  globalShortcut.register('Control+D', () => {
     showQuickCapture();
   });
 

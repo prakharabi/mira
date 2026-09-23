@@ -2,6 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
+<link rel="stylesheet" href="holo-mark.css">
 <style>
   :root { color-scheme: light dark; }
 
@@ -27,26 +28,44 @@
     width: 100%;
     position: relative;
     /* Chrome-less by default -- truly not visible at rest, not just small.
-       body.active is what draws the dark pill (background/border/shadow);
+       body.active is what draws the glass pill (background/border/shadow);
        without this split, a "resting" window was still a visible rounded
        rectangle sitting below the notch even with nothing in it. */
     background: transparent;
     border: 1px solid transparent;
-    border-radius: 18px;
+    border-radius: 20px;
     overflow: hidden;
     color: rgba(255,255,255,0.92);
     box-sizing: border-box;
     transition: background 280ms cubic-bezier(0.22, 1, 0.36, 1),
                 border-color 280ms cubic-bezier(0.22, 1, 0.36, 1),
-                box-shadow 280ms cubic-bezier(0.22, 1, 0.36, 1);
+                box-shadow 280ms cubic-bezier(0.22, 1, 0.36, 1),
+                backdrop-filter 280ms cubic-bezier(0.22, 1, 0.36, 1);
   }
+  /* Apple "liquid glass": a blurred, saturated view of whatever is behind
+     the pill (desktop, other windows) rather than a flat dark fill -- this
+     window is transparent (see main.js) specifically so backdrop-filter has
+     real content to refract. Two layers do the work: the backdrop-filter
+     blurs+saturates the world behind it, and the background gradient adds
+     the faint top-lit sheen glass actually has. A hairline border plus an
+     inset top highlight reads as a lit edge catching light, which is what
+     sells "glass" over "dark plastic". */
   body.active #shell {
-    background: rgba(22,22,26,0.96);
-    border-color: rgba(255,255,255,0.1);
+    background:
+      linear-gradient(180deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.05) 14%, rgba(255,255,255,0.02) 45%, rgba(20,20,24,0.10) 100%),
+      rgba(28,28,32,0.42);
+    backdrop-filter: blur(38px) saturate(190%);
+    -webkit-backdrop-filter: blur(38px) saturate(190%);
+    border-color: rgba(255,255,255,0.16);
     /* Rounded on every side, floating just clear of the menu bar rather than
        flush-mounted to it -- reads as a pill extending down from the notch,
        matching the reference, instead of a drawer welded to the bar. */
-    box-shadow: 0 10px 28px rgba(0,0,0,0.4);
+    box-shadow:
+      inset 0 1px 0 rgba(255,255,255,0.28),
+      inset 0 0 0 1px rgba(255,255,255,0.05),
+      0 1px 1px rgba(0,0,0,0.15),
+      0 14px 34px rgba(0,0,0,0.38),
+      0 2px 8px rgba(0,0,0,0.22);
   }
 
   /* Every state swap below cross-fades + rises slightly rather than
@@ -78,6 +97,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    gap: 7px;
     height: 1px;
     transition: height 280ms cubic-bezier(0.22, 1, 0.36, 1);
   }
@@ -92,11 +112,19 @@
   body.active #idle-hint { display: block; }
   #idle-hint kbd {
     font: inherit;
-    background: rgba(255,255,255,0.12);
-    border-radius: 4px;
+    background: rgba(255,255,255,0.14);
+    border: 1px solid rgba(255,255,255,0.12);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.2);
+    border-radius: 5px;
     padding: 1px 5px;
     margin: 0 1px;
   }
+
+  /* Mira's holographic mark -- the notch never had any brand mark before;
+     one size fits every state it appears in here (idle hint, collapsed
+     spinner row, listening/speaking/ask rows) since they're all the same
+     34-40px-tall single line. */
+  .holo-mark { width: 13px; height: 13px; }
 
   #collapsed {
     display: flex;
@@ -114,8 +142,8 @@
   .spinner {
     width: 11px; height: 11px;
     border-radius: 50%;
-    border: 1.6px solid rgba(255,255,255,0.25);
-    border-top-color: rgba(255,255,255,0.85);
+    border: 1.6px solid rgba(255,255,255,0.22);
+    border-top-color: #0A84FF;
     animation: spin 0.7s linear infinite;
     flex-shrink: 0;
   }
@@ -148,8 +176,8 @@
     border-radius: 2px;
     animation: voicebar 900ms ease-in-out infinite;
   }
-  #listening .voice-bars span { background: #6ea8ff; }
-  #speaking .voice-bars span { background: #7cffb0; }
+  #listening .voice-bars span { background: #0A84FF; }
+  #speaking .voice-bars span { background: #30D158; }
   /* Seven bars, each a different phase/duration of the same keyframe so
      none of them are ever in lockstep -- a uniform pulse reads as a loading
      spinner, not speech. */
@@ -189,8 +217,9 @@
   #ask {
     display: flex;
     align-items: center;
+    gap: 8px;
     height: 34px;
-    padding: 0 14px;
+    padding: 0 10px 0 14px;
   }
   #ask-input {
     flex: 1;
@@ -200,9 +229,27 @@
     font: inherit;
     font-size: 12.5px;
     color: rgba(255,255,255,0.95);
-    caret-color: #6ea8ff;
+    caret-color: #0A84FF;
   }
   #ask-input::placeholder { color: rgba(255,255,255,0.4); }
+
+  /* Opened via Control+S, which is easy to trigger by mistake -- unlike
+     #expanded (context/response), this state had no visible way out besides
+     knowing to hit Escape. Same look as #close so both read as the same
+     affordance. */
+  #ask-close {
+    flex-shrink: 0;
+    width: 20px; height: 20px;
+    display: flex; align-items: center; justify-content: center;
+    border: none; border-radius: 7px;
+    background: rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.5);
+    cursor: default;
+    transition: background 140ms ease, color 140ms ease, transform 140ms ease;
+  }
+  #ask-close:hover { background: rgba(255,69,58,0.26); color: #ff8078; }
+  #ask-close:active { transform: scale(0.92); }
+  #ask-close svg { width: 11px; height: 11px; }
 
   #context-text {
     font-size: 12px;
@@ -216,12 +263,13 @@
     word-break: break-word;
   }
 
-  #actions { display: flex; gap: 5px; flex-wrap: wrap; }
+  #actions { display: flex; gap: 6px; flex-wrap: wrap; }
   #actions button {
     display: flex; align-items: center; gap: 5px;
-    background: rgba(255,255,255,0.08);
-    border: none;
-    border-radius: 8px;
+    background: rgba(255,255,255,0.09);
+    border: 1px solid rgba(255,255,255,0.10);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.14);
+    border-radius: 9px;
     padding: 6px 10px;
     font: inherit;
     font-size: 11.5px;
@@ -229,14 +277,18 @@
     color: rgba(255,255,255,0.9);
     cursor: default;
     white-space: nowrap;
+    transition: background 140ms ease, transform 140ms ease, border-color 140ms ease;
   }
   /* button { display:flex } beats the UA stylesheet's [hidden] {
      display:none }, so without this the Call button shows regardless of the
      attribute -- same bug already fixed once in pill.html, reintroduced here
      by not carrying it forward into this new file. */
   #actions button[hidden] { display: none; }
-  #actions button:hover { background: rgba(255,255,255,0.16); }
-  #actions svg { width: 12px; height: 12px; opacity: 0.8; }
+  #actions button:hover { background: rgba(255,255,255,0.17); border-color: rgba(255,255,255,0.18); }
+  #actions button:active { transform: scale(0.96); background: rgba(255,255,255,0.13); }
+  #actions svg { width: 12px; height: 12px; opacity: 0.85; }
+  #call-btn { background: rgba(48,209,88,0.20); border-color: rgba(48,209,88,0.28); color: #b6f5c8; }
+  #call-btn:hover { background: rgba(48,209,88,0.30); }
 
   #response-text {
     font-size: 12.5px;
@@ -253,16 +305,19 @@
     gap: 10px;
     margin-top: 10px;
     padding-top: 9px;
-    border-top: 1px solid rgba(255,255,255,0.08);
+    border-top: 1px solid rgba(255,255,255,0.10);
   }
   .text-btn {
     background: none; border: none; cursor: default;
     color: rgba(255,255,255,0.55);
     font: inherit; font-size: 11px; font-weight: 600;
-    padding: 3px 0;
+    padding: 3px 6px;
+    margin: -3px -6px;
+    border-radius: 6px;
+    transition: background 140ms ease, color 140ms ease;
   }
-  .text-btn:hover { color: rgba(255,255,255,0.9); }
-  .text-btn.done { color: #7cffb0; }
+  .text-btn:hover { color: rgba(255,255,255,0.95); background: rgba(255,255,255,0.08); }
+  .text-btn.done { color: #30D158; }
   #foot .spacer { flex: 1; }
   #foot .hint { font-size: 10.5px; color: rgba(255,255,255,0.35); }
 
@@ -271,12 +326,14 @@
     top: 8px; right: 8px;
     width: 20px; height: 20px;
     display: flex; align-items: center; justify-content: center;
-    border: none; border-radius: 6px;
-    background: transparent;
-    color: rgba(255,255,255,0.4);
+    border: none; border-radius: 7px;
+    background: rgba(255,255,255,0.08);
+    color: rgba(255,255,255,0.5);
     cursor: default;
+    transition: background 140ms ease, color 140ms ease, transform 140ms ease;
   }
-  #close:hover { background: rgba(240,68,56,0.22); color: #ff6369; }
+  #close:hover { background: rgba(255,69,58,0.26); color: #ff8078; }
+  #close:active { transform: scale(0.92); }
   #close svg { width: 11px; height: 11px; }
 
   @keyframes fadeInUp { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
@@ -286,19 +343,28 @@
 <body>
   <div id="shell">
     <div id="idle">
-      <span id="idle-hint"><kbd>⌘</kbd><kbd>⇧</kbd><kbd>O</kbd> to ask or do anything</span>
+      <span id="idle-hint"><kbd>⌃</kbd><kbd>S</kbd> to ask or do anything</span>
     </div>
-    <div id="collapsed" hidden><div class="spinner"></div><span id="collapsed-label">Reading…</span></div>
+    <div id="collapsed" hidden>
+      <span class="holo-mark"><span class="holo-halo"></span><span class="holo-lattice"></span><svg class="mark" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="ng-collapsed" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#06b6d4"/></linearGradient></defs><rect width="128" height="128" rx="30" fill="url(#ng-collapsed)"/><circle cx="64" cy="30" r="6.5" fill="#fff"/><path d="M36 90 V46 L64 76 L92 46 V90" fill="none" stroke="#fff" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="holo-scan"></span></span>
+      <div class="spinner"></div><span id="collapsed-label">Reading…</span>
+    </div>
     <div id="listening" hidden>
+      <span class="holo-mark"><span class="holo-halo"></span><span class="holo-lattice"></span><svg class="mark" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="ng-listening" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#06b6d4"/></linearGradient></defs><rect width="128" height="128" rx="30" fill="url(#ng-listening)"/><circle cx="64" cy="30" r="6.5" fill="#fff"/><path d="M36 90 V46 L64 76 L92 46 V90" fill="none" stroke="#fff" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="holo-scan"></span></span>
       <div class="voice-bars"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
       <span id="listening-label" class="voice-label-text">Listening…</span>
     </div>
     <div id="speaking" hidden>
+      <span class="holo-mark"><span class="holo-halo"></span><span class="holo-lattice"></span><svg class="mark" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="ng-speaking" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#06b6d4"/></linearGradient></defs><rect width="128" height="128" rx="30" fill="url(#ng-speaking)"/><circle cx="64" cy="30" r="6.5" fill="#fff"/><path d="M36 90 V46 L64 76 L92 46 V90" fill="none" stroke="#fff" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="holo-scan"></span></span>
       <div class="voice-bars"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
       <span id="voice-label" class="voice-label-text"></span>
     </div>
     <div id="ask" hidden>
+      <span class="holo-mark"><span class="holo-halo"></span><span class="holo-lattice"></span><svg class="mark" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="ng-ask" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#06b6d4"/></linearGradient></defs><rect width="128" height="128" rx="30" fill="url(#ng-ask)"/><circle cx="64" cy="30" r="6.5" fill="#fff"/><path d="M36 90 V46 L64 76 L92 46 V90" fill="none" stroke="#fff" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="holo-scan"></span></span>
       <input id="ask-input" type="text" placeholder="Ask Mira anything…" spellcheck="false">
+      <button id="ask-close" title="Dismiss (esc)">
+        <svg viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
     </div>
     <div id="expanded" hidden>
       <button id="close" title="Dismiss (esc)">
@@ -643,6 +709,7 @@
     });
 
     document.getElementById('close').addEventListener('click', () => ipcRenderer.send('notch-close'));
+    document.getElementById('ask-close').addEventListener('click', () => ipcRenderer.send('notch-close'));
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') ipcRenderer.send('notch-close');
     });

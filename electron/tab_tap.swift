@@ -13,11 +13,20 @@ var swallowedTabDown = false
 
 let kVK_Tab: Int64 = 48
 
+// Modifiers held alongside Tab mean the user is reaching for a system/app
+// shortcut (Cmd+Tab app switcher, Ctrl+Tab browser-tab cycling, Cmd+Shift+Tab
+// reverse-cycle, etc.), not accepting a suggestion -- a bare Tab is the only
+// combination that should ever be swallowed. Caps Lock and Fn are excluded on
+// purpose: neither implies "this Tab means something else" the way Cmd/Ctrl/
+// Option/Shift do.
+let modifierMask: CGEventFlags = [.maskCommand, .maskControl, .maskAlternate, .maskShift]
+
 func eventTapCallback(proxy: CGEventTapProxy, type: CGEventType, event: CGEvent, refcon: UnsafeMutableRawPointer?) -> Unmanaged<CGEvent>? {
     let keyCode = event.getIntegerValueField(.keyboardEventKeycode)
 
     if type == .keyDown {
-        if keyCode == kVK_Tab && suggestionActive {
+        let hasModifier = !event.flags.intersection(modifierMask).isEmpty
+        if keyCode == kVK_Tab && suggestionActive && !hasModifier {
             // swallow Tab: notify Node via stdout, don't pass the event through
             swallowedTabDown = true
             print("TAB_PRESSED")

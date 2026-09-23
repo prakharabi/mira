@@ -2,6 +2,7 @@
 <html>
 <head>
 <meta charset="UTF-8">
+<link rel="stylesheet" href="holo-mark.css">
 <style>
   /* Light appearance is the default here and dark is applied via the media
      query below, so the window follows the system setting the way a native app
@@ -29,12 +30,21 @@
     --accent-gradient: linear-gradient(135deg, #8b5cf6 0%, #6366f1 45%, #06b6d4 100%);
     --danger: #e5484d;
     --success: #30a46c;
-    /* macOS uses tighter corner radii than the previous look did */
-    --radius-lg: 12px;
-    --radius-md: 8px;
-    --radius-sm: 6px;
+    /* Liquid Glass reads rounder and more "continuous" than the flatter
+       macOS Big Sur-era radii this used to carry -- bumped up across the
+       board so cards, fields and buttons feel poured rather than cut. */
+    --radius-lg: 18px;
+    --radius-md: 12px;
+    --radius-sm: 9px;
     --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
     --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+    /* Glass surfaces catch light along their top edge and lose it toward the
+       bottom -- these two, layered as inset box-shadows on top of the normal
+       border, are what make a flat translucent rect read as curved glass
+       instead of tinted plastic. */
+    --glass-highlight: rgba(255,255,255,0.55);
+    --glass-shade: rgba(0,0,0,0.04);
+    --glass-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 10px 24px rgba(0,0,0,0.06);
   }
 
   @media (prefers-color-scheme: dark) {
@@ -53,6 +63,9 @@
       --output-bg: rgba(0,0,0,0.22);
       --danger: #ff6369;
       --success: #3dd68c;
+      --glass-highlight: rgba(255,255,255,0.16);
+      --glass-shade: rgba(0,0,0,0.18);
+      --glass-shadow: 0 1px 1px rgba(0,0,0,0.2), 0 12px 28px rgba(0,0,0,0.32);
     }
   }
 
@@ -148,12 +161,10 @@
     gap: 8px;
     padding: 0 8px 14px;
   }
-  #brand .mark {
+  #brand .holo-mark {
     width: 20px;
     height: 20px;
-    flex-shrink: 0;
   }
-  #brand .mark svg { width: 100%; height: 100%; display: block; }
   #brand .name {
     font-size: 13px;
     font-weight: 600;
@@ -178,6 +189,7 @@
     height: 30px;
     border-radius: var(--radius-sm);
     background: var(--sidebar-selected);
+    box-shadow: inset 0 1px 0 var(--glass-highlight);
     z-index: 0;
     pointer-events: none;
   }
@@ -269,11 +281,19 @@
   }
 
   /* ---------- glass card ---------- */
+  /* Liquid Glass panels: a saturated blur of what's behind them (not just a
+     brightness blur -- saturate() is what keeps colors from washing out
+     under heavy blur), a bright hairline along the top where light would
+     catch a curved edge, and a soft two-layer shadow that reads as the
+     panel floating slightly above the material behind it. */
   .card {
+    position: relative;
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    backdrop-filter: blur(20px);
+    backdrop-filter: blur(24px) saturate(180%);
+    -webkit-backdrop-filter: blur(24px) saturate(180%);
+    box-shadow: inset 0 1px 0 var(--glass-highlight), var(--glass-shadow);
   }
 
   /* ---------- Home view ---------- */
@@ -329,6 +349,10 @@
   .action-btn .sub { font-size: 11px; color: var(--text-tertiary); }
 
   /* ---------- generic inputs / buttons ---------- */
+  /* Pill-shaped controls are where Liquid Glass shows up most -- every
+     text field, round icon button and segmented control below gets the same
+     inset top highlight as .card, at 999px radius so it reads as a lozenge
+     of glass rather than a rounded rectangle. */
   .text-field {
     flex: 1;
     background: var(--field-bg);
@@ -338,9 +362,12 @@
     color: var(--text-primary);
     font-size: 13px;
     outline: none;
-    transition: border-color 150ms var(--ease-standard), background 150ms var(--ease-standard);
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    box-shadow: inset 0 1px 0 var(--glass-highlight);
+    transition: border-color 150ms var(--ease-standard), background 150ms var(--ease-standard), box-shadow 150ms var(--ease-standard);
   }
-  .text-field:focus { border-color: rgba(139,92,246,0.5); background: var(--bg-elevated-2); }
+  .text-field:focus { border-color: rgba(139,92,246,0.5); background: var(--bg-elevated-2); box-shadow: inset 0 1px 0 var(--glass-highlight), 0 0 0 3px rgba(139,92,246,0.16); }
   .text-field::placeholder { color: var(--text-tertiary); }
 
   .btn-primary {
@@ -352,9 +379,10 @@
     flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
     cursor: pointer;
-    transition: transform 100ms var(--ease-standard), filter 150ms var(--ease-standard);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.4), 0 4px 14px rgba(139,92,246,0.35);
+    transition: transform 100ms var(--ease-standard), filter 150ms var(--ease-standard), box-shadow 150ms var(--ease-standard);
   }
-  .btn-primary:hover { filter: brightness(1.12); }
+  .btn-primary:hover { filter: brightness(1.12); box-shadow: inset 0 1px 0 rgba(255,255,255,0.4), 0 6px 18px rgba(139,92,246,0.45); }
   .btn-primary:active { transform: scale(0.94); }
   .btn-primary svg { width: 15px; height: 15px; }
 
@@ -367,6 +395,9 @@
     display: flex; align-items: center; justify-content: center;
     cursor: pointer;
     flex-shrink: 0;
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    box-shadow: inset 0 1px 0 var(--glass-highlight);
     transition: transform 100ms var(--ease-standard), background 150ms var(--ease-standard), border-color 150ms var(--ease-standard);
   }
   .icon-btn svg { width: 16px; height: 16px; }
@@ -392,6 +423,9 @@
     border-radius: 999px;
     padding: 3px;
     gap: 2px;
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    box-shadow: inset 0 1px 0 var(--glass-highlight);
   }
   .segmented .seg-indicator {
     position: absolute;
@@ -399,6 +433,7 @@
     left: 3px;
     border-radius: 999px;
     background: var(--accent-gradient);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), 0 2px 8px rgba(139,92,246,0.3);
     z-index: 0;
   }
   .segmented button {
@@ -452,6 +487,7 @@
     background: var(--accent-gradient);
     color: white;
     border-bottom-right-radius: 6px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.3), 0 4px 14px rgba(139,92,246,0.22);
   }
   .msg.assistant {
     align-self: flex-start;
@@ -459,6 +495,9 @@
     border: 1px solid var(--border);
     color: #ececf1;
     border-bottom-left-radius: 6px;
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    box-shadow: inset 0 1px 0 var(--glass-highlight);
   }
   .msg.system {
     align-self: center;
@@ -490,11 +529,12 @@
     font-size: 12.5px;
     font-weight: 600;
     cursor: pointer;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), 0 3px 10px rgba(139,92,246,0.25);
     transition: transform 100ms var(--ease-standard), filter 150ms var(--ease-standard);
   }
   .full-btn:hover { filter: brightness(1.1); }
   .full-btn:active { transform: scale(0.98); }
-  .full-btn.danger { background: linear-gradient(135deg, #f04438, #dc2626); }
+  .full-btn.danger { background: linear-gradient(135deg, #f04438, #dc2626); box-shadow: inset 0 1px 0 rgba(255,255,255,0.3), 0 3px 10px rgba(240,68,56,0.25); }
   .full-btn:disabled { opacity: 0.5; cursor: default; }
   .ghost-btn {
     background: var(--bg-elevated-2);
@@ -505,9 +545,12 @@
     font-size: 12.5px;
     font-weight: 600;
     cursor: pointer;
+    backdrop-filter: blur(14px) saturate(160%);
+    -webkit-backdrop-filter: blur(14px) saturate(160%);
+    box-shadow: inset 0 1px 0 var(--glass-highlight);
     transition: background 150ms var(--ease-standard), transform 100ms var(--ease-standard);
   }
-  .ghost-btn:hover { background: var(--bg-elevated-2); }
+  .ghost-btn:hover { background: var(--bg-elevated-3); }
   .ghost-btn:active { transform: scale(0.98); }
 
   .output-box {
@@ -535,6 +578,9 @@
     padding: 4px;
     margin-bottom: 16px;
     align-self: flex-start;
+    backdrop-filter: blur(16px) saturate(160%);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    box-shadow: inset 0 1px 0 var(--glass-highlight);
   }
   .subtab {
     padding: 7px 16px;
@@ -555,10 +601,13 @@
     border-radius: var(--radius-md);
     padding: 13px 15px;
     margin-bottom: 8px;
-    transition: border-color 150ms var(--ease-standard), transform 150ms var(--ease-standard);
+    backdrop-filter: blur(18px) saturate(170%);
+    -webkit-backdrop-filter: blur(18px) saturate(170%);
+    box-shadow: inset 0 1px 0 var(--glass-highlight);
+    transition: border-color 150ms var(--ease-standard), transform 150ms var(--ease-standard), box-shadow 150ms var(--ease-standard);
     animation: view-in 260ms var(--ease-out);
   }
-  .list-row:hover { border-color: var(--border); }
+  .list-row:hover { border-color: var(--border); box-shadow: inset 0 1px 0 var(--glass-highlight), 0 6px 16px rgba(0,0,0,0.08); transform: translateY(-1px); }
   .list-row .row-top {
     display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
   }
@@ -607,9 +656,10 @@
     font-size: 11.5px;
     font-weight: 600;
     cursor: pointer;
+    box-shadow: inset 0 1px 0 var(--glass-highlight);
     transition: background 150ms var(--ease-standard), transform 100ms var(--ease-standard);
   }
-  .mini-btn-sm:hover { background: var(--bg-elevated-2); }
+  .mini-btn-sm:hover { background: var(--bg-elevated-3); }
   .mini-btn-sm:active { transform: scale(0.97); }
   .mini-btn-sm:disabled { opacity: 0.45; cursor: default; }
   .mini-btn-sm.accent { background: var(--accent-gradient); border-color: transparent; color: #fff; }
@@ -630,6 +680,18 @@
   }
   .inline-note.error { color: #fca5a5; }
   .inline-note.ok { color: #86efac; }
+
+  .auto-output { margin-top: 8px; }
+  .auto-output summary {
+    font-size: 11px; color: var(--text-tertiary); cursor: pointer; user-select: none;
+  }
+  .auto-output summary:hover { color: var(--text-secondary); }
+  .auto-output pre {
+    margin-top: 6px; padding: 8px 10px;
+    background: var(--bg-elevated-2); border: 1px solid var(--border); border-radius: var(--radius-sm);
+    font-size: 11px; line-height: 1.5; color: var(--text-secondary);
+    white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow-y: auto;
+  }
 
   .textarea-field {
     width: 100%;
@@ -823,15 +885,17 @@
     position: absolute; cursor: pointer; inset: 0;
     background: var(--bg-elevated-3);
     border-radius: 24px;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.12);
     transition: background 200ms var(--ease-standard);
   }
   .toggle-slider:before {
     position: absolute; content: "";
     height: 17px; width: 17px; left: 3px; bottom: 3px;
     background: white; border-radius: 50%;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.6);
     transition: transform 250ms var(--ease-out);
   }
-  .toggle-switch input:checked + .toggle-slider { background: var(--accent-gradient); }
+  .toggle-switch input:checked + .toggle-slider { background: var(--accent-gradient); box-shadow: inset 0 1px 0 rgba(255,255,255,0.3); }
   .toggle-switch input:checked + .toggle-slider:before { transform: translateX(17px); }
 
   /* ---------- n8n panel ---------- */
@@ -933,6 +997,19 @@
   .rect-field:focus { border-color: rgba(139,92,246,0.5); }
   .rect-field::placeholder { color: var(--text-tertiary); }
 
+  /* ---------- shared glass treatment for plain surfaces ---------- */
+  /* All of these rows/panels/fields paint the same flat --bg-elevated card
+     look as .card but live outside it as their own classes -- rather than
+     restate the highlight/blur trio five different times, one rule covers
+     the whole family so a mem row, a task row, a settings block and a
+     dropdown all read as the same material. */
+  .mem-row, .task-row, .setting-row, #n8n-panel, .setting-block, .model-row,
+  select.text-field, .dropdown-select, .rect-field, .textarea-field {
+    backdrop-filter: blur(18px) saturate(170%);
+    -webkit-backdrop-filter: blur(18px) saturate(170%);
+    box-shadow: inset 0 1px 0 var(--glass-highlight);
+  }
+
   .model-list { display: flex; flex-direction: column; gap: 6px; }
   .model-row {
     display: flex; align-items: center; justify-content: space-between;
@@ -998,8 +1075,10 @@
 
     <div id="sidebar">
       <div id="brand">
-        <div class="mark">
-          <svg viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+        <span class="holo-mark">
+          <span class="holo-halo"></span>
+          <span class="holo-lattice"></span>
+          <svg class="mark" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
             <defs>
               <linearGradient id="mira-bg" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse">
                 <stop offset="0%" stop-color="#8b5cf6"/>
@@ -1011,7 +1090,8 @@
             <circle cx="64" cy="30" r="6.5" fill="#ffffff"/>
             <path d="M36 90 V46 L64 76 L92 46 V90" fill="none" stroke="#ffffff" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/>
           </svg>
-        </div>
+          <span class="holo-scan"></span>
+        </span>
         <div class="name">Mira</div>
       </div>
 
@@ -1386,7 +1466,17 @@
             </div>
             <div style="display:flex; gap:6px; flex-shrink:0;">
               <button class="mini-btn-sm" id="predictive-access-btn" hidden>Open Accessibility…</button>
+              <button class="mini-btn-sm danger" id="predictive-reset-btn" title="Clears Mira's Accessibility grant so macOS re-prompts for it -- fixes a stale grant left over from a rebuild">Reset Accessibility…</button>
               <button class="mini-btn-sm" id="predictive-restart-btn">Restart</button>
+            </div>
+          </div>
+          <div class="setting-row">
+            <div class="grow">
+              <div class="label">OCR capture (⌃Q)</div>
+              <div class="sublabel" id="ocr-status-text">Checking…</div>
+            </div>
+            <div style="display:flex; gap:6px; flex-shrink:0;">
+              <button class="mini-btn-sm" id="ocr-access-btn" hidden>Open Screen Recording…</button>
             </div>
           </div>
           <div class="setting-row">
@@ -1945,7 +2035,7 @@
     document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === name + '-view'));
     const activeItem = navItems.find(i => i.dataset.view === name);
     if (activeItem) positionIndicator(activeItem, animateNav);
-    if (name === 'settings') { loadSettings(); refreshPredictiveStatus(); refreshLogo(); }
+    if (name === 'settings') { loadSettings(); refreshPredictiveStatus(); refreshOcrStatus(); refreshLogo(); }
     if (name === 'memory') loadMemory();
     if (name === 'tasks') loadTasks();
     if (name === 'chat') { loadSessions(); document.getElementById('text-input').focus(); }
@@ -3531,6 +3621,10 @@
             <button class="mini-btn-sm danger" data-auto-delete="${esc(a.id)}">Delete</button>
           </div>
           <div class="inline-note" data-auto-msg="${esc(a.id)}"></div>
+          ${a.last_output ? `<details class="auto-output">
+            <summary>Last output</summary>
+            <pre>${esc(a.last_output)}</pre>
+          </details>` : ''}
         </div>`).join('');
     } catch (e) {
       el.innerHTML = '<div class="empty-state">Could not reach Mira daemon.</div>';
@@ -3967,6 +4061,58 @@
     const res = await ipcRenderer.invoke('predictive-request-accessibility');
     if (!res.trusted) await ipcRenderer.invoke('open-accessibility-settings');
     setTimeout(refreshPredictiveStatus, 800);
+  };
+
+  // ==================== OCR / Screen Recording status ====================
+  async function refreshOcrStatus() {
+    const textEl = document.getElementById('ocr-status-text');
+    const btn = document.getElementById('ocr-access-btn');
+    try {
+      const { status } = await ipcRenderer.invoke('ocr-permission-status');
+      const granted = status === 'granted';
+      textEl.textContent = granted
+        ? 'Ready — Screen Recording granted.'
+        : `Not granted (${status}) — Circle-to-read won't work until this is ` +
+          `on. After granting, fully quit and reopen Mira; refocusing the ` +
+          `window is not enough for macOS to pick it up.`;
+      btn.hidden = granted;
+    } catch (e) {
+      textEl.textContent = 'Could not read status';
+    }
+  }
+
+  document.getElementById('ocr-access-btn').onclick = async () => {
+    await ipcRenderer.invoke('open-screen-recording-settings');
+    setTimeout(refreshOcrStatus, 800);
+  };
+
+  document.getElementById('predictive-reset-btn').onclick = async (e) => {
+    if (!confirm(
+      "This clears Mira's Accessibility permission entirely (tccutil reset " +
+      "Accessibility com.mira.desktop) -- predictive typing and Tab-to-accept " +
+      "stop working until you grant it again. Use this after a rebuild left a " +
+      "stale grant that looks fine in System Settings but no longer matches " +
+      "the running app. Continue?"
+    )) return;
+
+    const btn = e.currentTarget;
+    const el = document.getElementById('predictive-status-text');
+    btn.disabled = true;
+    const label = btn.textContent;
+    btn.textContent = 'Resetting…';
+    el.textContent = 'Resetting Accessibility permission…';
+    try {
+      const res = await ipcRenderer.invoke('reset-accessibility-permission');
+      if (!res.success) {
+        el.textContent = 'Reset failed: ' + (res.error || 'unknown error');
+      } else {
+        renderPredictive({ ...(await ipcRenderer.invoke('predictive-status')), accessibilityTrusted: res.accessibilityTrusted });
+      }
+    } catch (err) {
+      el.textContent = 'Reset failed: ' + err.message;
+    }
+    btn.disabled = false;
+    btn.textContent = label;
   };
 
   document.getElementById('predictive-restart-btn').onclick = async (e) => {
