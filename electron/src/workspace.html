@@ -1767,6 +1767,32 @@
           <div class="setting-block">
             <div class="setting-block-row">
               <div>
+                <div class="label">Lead finder</div>
+                <div class="sublabel">Find businesses of a type in an area — ask Mira “find dentists in Indiranagar, Bangalore”</div>
+              </div>
+            </div>
+            <div class="setting-block-body">
+              <div class="inline-note" id="leads-scraper-status">Checking…</div>
+              <div>
+                <label class="field-label">Google Places API key (optional)</label>
+                <input type="password" class="rect-field" id="places-api-key" placeholder="Enter to set" style="width:100%;">
+              </div>
+              <div class="field-row">
+                <button class="mini-btn-sm" id="save-places-key-btn">Save</button>
+              </div>
+              <div class="inline-note">
+                The Maps scraper is free and runs on this Mac only while a search is running.
+                A Places API key is an alternative that runs nothing locally but has no emails:
+                enable “Places API (New)” in your Google Cloud project, create a key, and set a
+                daily quota so you stay inside the free monthly allowance.
+              </div>
+              <div class="inline-note" id="places-key-msg"></div>
+            </div>
+          </div>
+
+          <div class="setting-block">
+            <div class="setting-block-row">
+              <div>
                 <div class="label">Reminders list</div>
                 <div class="sublabel">Where Dump Box action items get saved</div>
               </div>
@@ -2362,6 +2388,9 @@
       document.getElementById('calcom-api-key').placeholder =
         data.cal_com_api_key_set ? 'Saved — enter to replace' : 'Enter to set';
       document.getElementById('calcom-notify-toggle').checked = data.proactive_calcom_bookings !== false;
+      document.getElementById('places-api-key').placeholder =
+        data.google_places_api_key_set ? 'Saved — enter to replace' : 'Enter to set';
+      refreshLeadsStatus();
       document.getElementById('n8n-base-url').value = data.n8n_base_url || '';
       document.getElementById('telegram-enabled-toggle').checked = !!data.telegram_enabled;
       document.getElementById('telegram-bot-token').placeholder =
@@ -3177,6 +3206,43 @@
   };
   document.getElementById('calcom-notify-toggle').addEventListener('change', (e) =>
     updateSetting('proactive_calcom_bookings', e.target.checked));
+
+  async function refreshLeadsStatus() {
+    const el = document.getElementById('leads-scraper-status');
+    try {
+      const res = await fetch(`${DAEMON_URL}/leads/status`);
+      const data = await res.json();
+      let text = data.scraper_installed
+        ? 'Maps scraper: installed.'
+        : 'Maps scraper: not installed — run ./scripts/install_scraper.sh once from the Mira folder.';
+      if (data.running) text += ` Searching now: ${data.running.name}.`;
+      el.className = 'inline-note' + (data.scraper_installed || data.places_configured ? ' ok' : '');
+      el.textContent = text;
+    } catch (e) {
+      el.className = 'inline-note error';
+      el.textContent = 'Could not reach the daemon.';
+    }
+  }
+
+  document.getElementById('save-places-key-btn').onclick = async () => {
+    const msg = document.getElementById('places-key-msg');
+    const keyEl = document.getElementById('places-api-key');
+    if (!keyEl.value.trim()) { msg.className = 'inline-note'; msg.textContent = 'Enter a key to save.'; return; }
+    try {
+      await fetch(`${DAEMON_URL}/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ google_places_api_key: keyEl.value.trim() })
+      });
+      keyEl.value = '';
+      msg.className = 'inline-note ok';
+      msg.textContent = 'Saved.';
+      loadSettings();
+    } catch (e) {
+      msg.className = 'inline-note error';
+      msg.textContent = 'Could not save.';
+    }
+  };
 
   // ---------- local model memory ----------
   function formatBytes(n) {

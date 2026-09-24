@@ -157,6 +157,10 @@ DEFAULT_SETTINGS = {
     # directly to the account owner.
     "cal_com_api_key": "",
     "proactive_calcom_bookings": True,
+    # Optional second source for the lead finder (leads.py): the user's own
+    # Places API (New) key from their Google Cloud project. Blank = the local
+    # scraper only. Mira ships no key, same as every other integration.
+    "google_places_api_key": "",
     "dumpbox_auto_process": True,
     "dumpbox_auto_reminders": True,
     "dictation_engine": "apple",
@@ -189,11 +193,13 @@ def get_settings():
     masked["google_client_secret_set"] = bool(settings.get("google_client_secret"))
     masked["telegram_bot_token_set"] = bool(settings.get("telegram_bot_token"))
     masked["cal_com_api_key_set"] = bool(settings.get("cal_com_api_key"))
+    masked["google_places_api_key_set"] = bool(settings.get("google_places_api_key"))
     masked.pop("cloud_api_key", None)
     masked.pop("tavily_api_key", None)
     masked.pop("google_client_secret", None)
     masked.pop("telegram_bot_token", None)
     masked.pop("cal_com_api_key", None)
+    masked.pop("google_places_api_key", None)
     return masked
 
 @app.post("/settings")
@@ -229,6 +235,7 @@ def update_settings(
     auto_record_scheduled_meetings: bool = Body(None),
     cal_com_api_key: str = Body(None),
     proactive_calcom_bookings: bool = Body(None),
+    google_places_api_key: str = Body(None),
     dumpbox_auto_process: bool = Body(None),
     dumpbox_auto_reminders: bool = Body(None),
     dictation_engine: str = Body(None),
@@ -301,6 +308,8 @@ def update_settings(
         settings["cal_com_api_key"] = cal_com_api_key
     if proactive_calcom_bookings is not None:
         settings["proactive_calcom_bookings"] = proactive_calcom_bookings
+    if google_places_api_key is not None:
+        settings["google_places_api_key"] = google_places_api_key.strip()
     if dumpbox_auto_process is not None:
         settings["dumpbox_auto_process"] = dumpbox_auto_process
     if dumpbox_auto_reminders is not None:
@@ -334,10 +343,12 @@ def update_settings(
     result["tavily_api_key_set"] = bool(settings.get("tavily_api_key"))
     result["google_client_secret_set"] = bool(settings.get("google_client_secret"))
     result["telegram_bot_token_set"] = bool(settings.get("telegram_bot_token"))
+    result["google_places_api_key_set"] = bool(settings.get("google_places_api_key"))
     result.pop("cloud_api_key", None)
     result.pop("tavily_api_key", None)
     result.pop("google_client_secret", None)
     result.pop("telegram_bot_token", None)
+    result.pop("google_places_api_key", None)
     return result
 
 
@@ -1975,6 +1986,66 @@ def automations_run(automation_id: str, payload: dict = Body(None, embed=True)):
         return _automations.run_automation(automation_id, payload)
     except KeyError:
         return {"error": "not found"}
+
+
+# ---------- Lead finder (see leads.py) ----------
+import leads as _leads
+
+
+@app.get("/leads/status")
+def leads_status():
+    return _leads.status()
+
+
+@app.get("/leads/lists")
+def leads_lists():
+    return {"lists": _leads.list_lists()}
+
+
+@app.post("/leads/search")
+def leads_search(business_type: str = Body(...), area: str = Body(...),
+                 source: str = Body("auto"), depth: int = Body(_leads.DEFAULT_DEPTH)):
+    from tools import _notify_leads_ready
+    try:
+        return {"started": True,
+                "list": _leads.start_search(business_type, area, source, depth,
+                                            on_done=_notify_leads_ready)}
+    except (ValueError, RuntimeError) as e:
+        return {"started": False, "error": str(e)}
+
+
+@app.post("/leads/cancel")
+def leads_cancel():
+    return {"cancelled": _leads.cancel_search()}
+
+
+@app.get("/leads/lists/{list_id}")
+def leads_get(list_id: str):
+    record = _leads.get_list(list_id)
+    return record if record else {"error": "not found"}
+
+
+@app.get("/leads/lists/{list_id}/csv")
+def leads_csv(list_id: str):
+    from fastapi.responses import Response
+    record = _leads.get_list(list_id)
+    if not record:
+        return {"error": "not found"}
+    return Response(_leads.to_csv(record), media_type="text/csv",
+                    headers={"Content-Disposition": f'attachment; filename="leads-{list_id}.csv"'})
+
+
+@app.post("/leads/lists/{list_id}/export")
+def leads_export(list_id: str):
+    record = _leads.get_list(list_id)
+    if not record:
+        return {"error": "not found"}
+    return {"path": _leads.export_csv(record)}
+
+
+@app.delete("/leads/lists/{list_id}")
+def leads_delete(list_id: str):
+    return {"deleted": _leads.delete_list(list_id)}
 
 
 # ---------- Telegram ----------

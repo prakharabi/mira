@@ -14,6 +14,7 @@ electron/dist/
 
 # Third-party (re-fetch via setup steps, not tracked)
 whisper.cpp/
+daemon/bin/
 
 # Runtime / personal data
 daemon/meetings/
@@ -28,6 +29,8 @@ daemon/google_tokens.json
 daemon/automations.json
 daemon/dumpbox/
 daemon/memory_store/
+# lead lists hold scraped phone numbers and emails -- personal data
+daemon/leads/
 daemon/telegram_voice/
 daemon/wakeword/command_recording.wav
 daemon/wakeword/command_recording.converted.wav

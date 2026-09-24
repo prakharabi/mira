@@ -266,6 +266,66 @@ def _tool_run_automation(name: str = "", **_):
             "error": result.get("error", "")}
 
 
+def _notify_leads_ready(summary: dict):
+    import leads
+    import proactive
+    proactive.deliver([leads.completion_message(summary)])
+
+
+def _tool_find_businesses(business_type: str = "", area: str = "", source: str = "auto",
+                          depth: int = 0, **_):
+    import leads
+    try:
+        summary = leads.start_search(business_type, area, source=source,
+                                     depth=depth or leads.DEFAULT_DEPTH,
+                                     on_done=_notify_leads_ready)
+    except (ValueError, RuntimeError) as e:
+        return {"started": False, "error": str(e)}
+    return {"started": True, "list": summary["name"], "list_id": summary["id"],
+            "source": summary["source"],
+            "note": "Runs in the background and usually takes 2-10 minutes. The user is "
+                    "notified when it finishes -- do not call this again or poll for it."}
+
+
+def _tool_list_lead_lists(**_):
+    import leads
+    lists = leads.list_lists()[:15]
+    return {"lists": [{k: s[k] for k in ("id", "name", "status", "count", "with_phone",
+                                         "with_email", "created_at", "error")}
+                      for s in lists],
+            "running": leads.status()["running"]}
+
+
+def _tool_show_leads(list: str = "", filter: str = "all", min_rating: float = 0,
+                     limit: int = 15, **_):
+    import leads
+    record = leads.find_list(list)
+    if not record:
+        return {"error": "No lead list matches that. List them first, or run a search."}
+    if record.get("status") in ("running", "enriching"):
+        return {"list": record["name"], "status": record["status"],
+                "note": "Still running -- the user will be notified when it's done."}
+    rows = leads.filter_leads(record.get("leads", []), filter, min_rating or None)
+    limit = max(1, min(int(limit or 15), 50))
+    return {
+        "list": record["name"], "list_id": record["id"],
+        "total_in_list": len(record.get("leads", [])), "matching": len(rows),
+        "leads": [{"name": l["name"], "phone": l["phone"], "emails": l["emails"],
+                   "website": l["website"], "rating": l["rating"], "reviews": l["reviews"],
+                   "instagram": l["instagram"]} for l in rows[:limit]],
+    }
+
+
+def _tool_export_leads(list: str = "", **_):
+    import leads
+    record = leads.find_list(list)
+    if not record:
+        return {"error": "No lead list matches that."}
+    if not record.get("leads"):
+        return {"error": f"'{record['name']}' has no leads to export ({record.get('status')})."}
+    return {"exported": True, "path": leads.export_csv(record), "count": len(record["leads"])}
+
+
 # ---------- registry ----------
 # `summary` is what a non-tool-calling model sees in its system prompt, so it
 # must read as a plain capability statement, not as API documentation.
@@ -614,6 +674,63 @@ TOOLS = [
             "required": ["name"],
         },
         "fn": _tool_run_automation,
+    },
+    {
+        "name": "find_businesses",
+        "summary": "find businesses of a type in an area (from Google Maps) and save them as a lead list with phones, emails and websites",
+        "description": "Search Google Maps for businesses of one type in one area -- e.g. 'dentists' in "
+                       "'Indiranagar, Bangalore' -- and save them as a lead list with phone, email, "
+                       "website and social links. Runs in the background for a few minutes; the user "
+                       "is notified when it's done, so call it once and tell them that. Only one "
+                       "search runs at a time.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "business_type": {"type": "string", "description": "What kind of business, e.g. 'dentists', 'gyms', 'cafes'"},
+                "area": {"type": "string", "description": "Neighbourhood and city, e.g. 'Indiranagar, Bangalore'"},
+                "source": {"type": "string", "enum": ["auto", "scraper", "places"],
+                           "description": "Leave as auto unless the user asks for one"},
+                "depth": {"type": "integer",
+                          "description": "How far down the results to go, 1-15 (default 5). Higher finds more but is slower."},
+            },
+            "required": ["business_type", "area"],
+        },
+        "fn": _tool_find_businesses,
+    },
+    {
+        "name": "list_lead_lists",
+        "summary": "list saved lead lists and whether a search is still running",
+        "description": "List the lead lists found so far (newest first) with how many have a phone or email, "
+                       "and any search still running.",
+        "parameters": {"type": "object", "properties": {}},
+        "fn": _tool_list_lead_lists,
+    },
+    {
+        "name": "show_leads",
+        "summary": "show the businesses in a lead list, optionally only those with an email, phone or no website",
+        "description": "Show businesses from a saved lead list.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "list": {"type": "string", "description": "Words from the list's name, or its id. Blank = the newest list."},
+                "filter": {"type": "string", "enum": ["all", "with_email", "with_phone", "with_website", "no_website"]},
+                "min_rating": {"type": "number", "description": "Only businesses rated at least this (e.g. 4)"},
+                "limit": {"type": "integer", "description": "How many to show (default 15, max 50)"},
+            },
+        },
+        "fn": _tool_show_leads,
+    },
+    {
+        "name": "export_leads",
+        "summary": "export a lead list as a CSV file (opens in Excel or Google Sheets)",
+        "description": "Save a lead list as a CSV in the user's Downloads folder and return its path.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "list": {"type": "string", "description": "Words from the list's name, or its id. Blank = the newest list."},
+            },
+        },
+        "fn": _tool_export_leads,
     },
 ]
 

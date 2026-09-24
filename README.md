@@ -46,6 +46,12 @@ and generates minutes.
 against how you describe them. The Automations view shows whether n8n is
 actually running, and starts it.
 
+**Finds leads.** "Find dentists in Indiranagar, Bangalore" becomes a saved
+list of businesses with phone, email, website and social links, pulled from
+Google Maps and each business's own site. It runs in the background and tells
+you when it's done; then ask to see the ones with an email, the ones without a
+website, or export the list as a CSV.
+
 **Proactive.** Optionally speaks first — a meeting starting soon, mail addressed
 directly to you — delivered over Telegram so it reaches you with the lid shut.
 
@@ -162,13 +168,22 @@ accounts:
 - **Google** — your own OAuth client for Gmail/Calendar/Drive ([setup guide](docs/google-setup.md))
 - **Telegram** — your own bot from @BotFather
 - **n8n** — your own webhook URLs; `./scripts/n8n.sh` runs one locally
+- **Lead finder** — `./scripts/install_scraper.sh` builds
+  [gosom/google-maps-scraper](https://github.com/gosom/google-maps-scraper)
+  (MIT) natively; it needs Go (`brew install go`) and runs only while a search
+  is running. Or add your own Google Places API key in Settings instead: nothing
+  runs locally, but it returns no emails and bills past Google's free monthly
+  allowance. Scraping Google Maps is against Google's terms, and heavy use can
+  get your IP temporarily rate-limited. Scraped phone numbers and emails are
+  personal data, so follow the privacy and anti-spam rules where the businesses
+  are if you contact them.
 
 Web search needs no key at all.
 
 ## Privacy
 
-Chat history, memory, settings, recordings, transcripts and captures all stay
-on disk in `daemon/` and are gitignored. The local model path never leaves the
+Chat history, memory, settings, recordings, transcripts, captures and lead
+lists all stay on disk in `daemon/` and are gitignored. The local model path never leaves the
 machine. The cloud model is used only when routing selects it, and memory
 extraction always runs locally.
 

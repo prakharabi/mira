@@ -3,6 +3,30 @@
 Entries are grouped by date; releases from v1.1.0 onward are also tagged in
 git and published as GitHub Releases.
 
+## Unreleased
+
+### Added
+- **Lead finder** — ask for businesses of a type in an area ("find dentists in
+  Indiranagar, Bangalore") and Mira saves them as a lead list with phone,
+  email, website and Instagram/Facebook/LinkedIn links. Four new tools, which
+  work in chat, on Telegram and by voice: `find_businesses`,
+  `list_lead_lists`, `show_leads` (filter by has-email, has-phone,
+  no-website, minimum rating) and `export_leads` (CSV to ~/Downloads).
+  Searches run in the background, one at a time, and report back through the
+  usual proactive delivery path.
+  - Default source is [gosom/google-maps-scraper](https://github.com/gosom/google-maps-scraper),
+    built natively by `scripts/install_scraper.sh` rather than run in Docker,
+    whose VM holds gigabytes of RAM while idle on a Mac. It starts only for
+    the length of a search, with one browser at low CPU priority, and exits
+    when done.
+  - Optional alternative: the user's own Google Places API (New) key, set in
+    Settings > Lead finder.
+  - Emails and socials come from one plain HTTP fetch of each business's site
+    (plus its contact page if needed), the same way for both sources.
+  - Lead lists are stored in `daemon/leads/` (gitignored), and every lead
+    carries a `stage` field (`new` for now) for the outreach work that comes
+    next.
+
 ## v1.1.0 — 2026-09-23
 
 ### Added
