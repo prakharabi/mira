@@ -62,6 +62,13 @@ async def lifespan(app: FastAPI):
         print(f"[main] Could not start telegram bot: {e}", flush=True)
 
     try:
+        from outreach import start_background as start_outreach_background
+        start_outreach_background()
+        print("[main] outreach scheduler started", flush=True)
+    except Exception as e:
+        print(f"[main] Could not start outreach scheduler: {e}", flush=True)
+
+    try:
         _reconcile_orphaned_recording()
     except Exception as e:
         print(f"[main] recording reconciliation failed: {e}", flush=True)
@@ -2046,6 +2053,204 @@ def leads_export(list_id: str):
 @app.delete("/leads/lists/{list_id}")
 def leads_delete(list_id: str):
     return {"deleted": _leads.delete_list(list_id)}
+
+
+# ---------- Outreach (see outreach.py) ----------
+import outreach as _outreach
+import outreach_mail as _mailbox
+from fastapi import Header
+
+
+def _err(e: Exception) -> dict:
+    if isinstance(e, KeyError):
+        return {"error": "not found"}
+    return {"error": str(e)}
+
+
+@app.get("/outreach/overview")
+def outreach_overview():
+    return _outreach.overview()
+
+
+@app.get("/outreach/config")
+def outreach_config_get():
+    cfg = _outreach.public_config()
+    cfg["placeholders"] = _outreach.PLACEHOLDERS
+    cfg["default_steps"] = _outreach.DEFAULT_STEPS
+    return cfg
+
+
+@app.post("/outreach/config")
+def outreach_config_set(changes: dict = Body(...)):
+    try:
+        return _outreach.update_config(changes)
+    except (ValueError, TypeError) as e:
+        return _err(e)
+
+
+@app.post("/outreach/config/check-mailbox")
+def outreach_check_mailbox():
+    return _mailbox.check(_outreach.load_config())
+
+
+@app.get("/outreach/campaigns")
+def outreach_campaigns():
+    return {"campaigns": _outreach.list_campaigns()}
+
+
+@app.post("/outreach/campaigns")
+def outreach_campaign_create(data: dict = Body(...)):
+    try:
+        return _outreach.create_campaign(data)
+    except (ValueError, TypeError) as e:
+        return _err(e)
+
+
+@app.get("/outreach/campaigns/{campaign_id}")
+def outreach_campaign_get(campaign_id: str):
+    c = _outreach.get_campaign(campaign_id)
+    if not c:
+        return {"error": "not found"}
+    c["leads"] = _outreach.campaign_leads(campaign_id)
+    return c
+
+
+@app.post("/outreach/campaigns/{campaign_id}")
+def outreach_campaign_update(campaign_id: str, data: dict = Body(...)):
+    try:
+        return _outreach.update_campaign(campaign_id, data)
+    except (ValueError, TypeError, KeyError) as e:
+        return _err(e)
+
+
+@app.delete("/outreach/campaigns/{campaign_id}")
+def outreach_campaign_delete(campaign_id: str):
+    return {"deleted": _outreach.delete_campaign(campaign_id)}
+
+
+@app.post("/outreach/campaigns/{campaign_id}/preview")
+def outreach_campaign_preview(campaign_id: str, lead_id: str = Body("", embed=True),
+                              personalize: bool = Body(None, embed=True)):
+    try:
+        return _outreach.preview(campaign_id, lead_id, personalize)
+    except (ValueError, KeyError) as e:
+        return _err(e)
+
+
+@app.post("/outreach/campaigns/{campaign_id}/test")
+def outreach_campaign_test(campaign_id: str):
+    try:
+        return _outreach.send_test(campaign_id)
+    except (ValueError, KeyError, _mailbox.MailboxError) as e:
+        return _err(e)
+
+
+@app.post("/outreach/campaigns/{campaign_id}/activate")
+def outreach_campaign_activate(campaign_id: str, mode: str = Body(None, embed=True),
+                               skip_test: bool = Body(False, embed=True)):
+    try:
+        return _outreach.activate(campaign_id, mode, skip_test)
+    except (ValueError, KeyError) as e:
+        return _err(e)
+
+
+@app.post("/outreach/campaigns/{campaign_id}/pause")
+def outreach_campaign_pause(campaign_id: str):
+    try:
+        return _outreach.pause(campaign_id)
+    except KeyError as e:
+        return _err(e)
+
+
+@app.get("/outreach/pending")
+def outreach_pending(campaign_id: str = ""):
+    return {"messages": _outreach.pending(campaign_id)}
+
+
+@app.post("/outreach/pending/approve-all")
+def outreach_approve_all(campaign_id: str = Body("", embed=True)):
+    return {"approved": _outreach.approve_all(campaign_id)}
+
+
+@app.post("/outreach/messages/{msg_id}/approve")
+def outreach_approve(msg_id: str, text: str = Body(None), subject: str = Body(None)):
+    try:
+        return _outreach.approve(msg_id, text, subject)
+    except KeyError as e:
+        return _err(e)
+
+
+@app.post("/outreach/messages/{msg_id}/skip")
+def outreach_skip(msg_id: str):
+    try:
+        _outreach.skip(msg_id)
+        return {"skipped": True}
+    except KeyError as e:
+        return _err(e)
+
+
+@app.get("/outreach/replies")
+def outreach_replies(limit: int = 50, label: str = ""):
+    return {"replies": _outreach.replies(limit, label)}
+
+
+@app.get("/outreach/leads/{list_id}/{lead_id}")
+def outreach_timeline(list_id: str, lead_id: str):
+    try:
+        return _outreach.timeline(list_id, lead_id)
+    except KeyError as e:
+        return _err(e)
+
+
+@app.post("/outreach/leads/{list_id}/{lead_id}/stage")
+def outreach_set_stage(list_id: str, lead_id: str, stage: str = Body(..., embed=True)):
+    try:
+        return _outreach.set_stage(list_id, lead_id, stage)
+    except (ValueError, KeyError) as e:
+        return _err(e)
+
+
+# The WhatsApp extension's side of the contract (docs/whatsapp-extension.md).
+# Every call carries X-Mira-Token: the daemon has no auth of its own, and
+# without it any page open in the browser could post fake replies.
+
+@app.get("/outreach/whatsapp/token")
+def outreach_whatsapp_token():
+    return {"token": _outreach.whatsapp_token()}
+
+
+@app.post("/outreach/whatsapp/token/rotate")
+def outreach_whatsapp_token_rotate():
+    return {"token": _outreach.whatsapp_token(rotate=True)}
+
+
+def _bridge_auth(token: str):
+    if not _outreach.check_token(token):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="bad or missing X-Mira-Token")
+
+
+@app.get("/outreach/whatsapp/next")
+def outreach_whatsapp_next(x_mira_token: str = Header("")):
+    _bridge_auth(x_mira_token)
+    return _outreach.bridge_next()
+
+
+@app.post("/outreach/whatsapp/sent")
+def outreach_whatsapp_sent(id: str = Body(...), ok: bool = Body(...), error: str = Body(""),
+                           not_on_whatsapp: bool = Body(False), x_mira_token: str = Header("")):
+    _bridge_auth(x_mira_token)
+    try:
+        return _outreach.bridge_result(id, ok, error, not_on_whatsapp)
+    except KeyError as e:
+        return _err(e)
+
+
+@app.post("/outreach/whatsapp/incoming")
+def outreach_whatsapp_incoming(phone: str = Body(...), text: str = Body(...), id: str = Body(""),
+                               name: str = Body(""), x_mira_token: str = Header("")):
+    _bridge_auth(x_mira_token)
+    return _outreach.bridge_incoming(phone, text, id, name)
 
 
 # ---------- Telegram ----------

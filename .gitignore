@@ -31,6 +31,8 @@ daemon/dumpbox/
 daemon/memory_store/
 # lead lists hold scraped phone numbers and emails -- personal data
 daemon/leads/
+# outreach config (mailbox app password), campaigns, message log, do-not-contact list
+daemon/outreach/
 daemon/telegram_voice/
 daemon/wakeword/command_recording.wav
 daemon/wakeword/command_recording.converted.wav

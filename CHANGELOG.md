@@ -26,6 +26,33 @@ git and published as GitHub Releases.
   - Lead lists are stored in `daemon/leads/` (gitignored), and every lead
     carries a `stage` field (`new` for now) for the outreach work that comes
     next.
+- **Outreach campaigns** — a new Outreach view (Campaigns, Review, Replies,
+  Setup) that turns a lead list into a sequence of emails and WhatsApp
+  messages. Setup: `docs/outreach-setup.md`.
+  - Default sequence: email day 0, WhatsApp day 1, same-thread follow-ups on
+    days 4 and 9. Steps, days, channels and messages are editable. Each step
+    is timed from the previous one actually going out.
+  - Messages come from the user's templates with placeholders (`{business}`,
+    `{rating}`, `{area}`, `{offer}`, `{cta}`…). Optionally the model tailors
+    each one, falling back to the template if it drops a link or the name.
+  - Test first: "Send test to me" sends every step, written for real leads, to
+    the user's own email/WhatsApp. A campaign won't start untested unless told
+    to. Modes: automatic, or hold each message for approval.
+  - Sending from a separate brand Gmail over SMTP with an app password
+    (`daemon/outreach_mail.py`), with a warm-up ramp, a daily cap, sending
+    hours and days, random gaps, a List-Unsubscribe header and an opt-out line.
+  - Replies are read from that inbox over IMAP (read-only), matched by thread
+    headers, and classified: interested / question / not interested /
+    unsubscribe / out of office / bounce. A reply stops that business's
+    sequence and notifies the user; STOP adds them to a do-not-contact list
+    that every future campaign respects; bounces mark the address bad.
+  - WhatsApp: token-protected endpoints (`/outreach/whatsapp/next`, `/sent`,
+    `/incoming`) for a WhatsApp Web extension, documented in
+    `docs/whatsapp-extension.md`. Pacing is decided by Mira, not the extension.
+  - New tools: `outreach_status`, `send_campaign_test`, `start_campaign`,
+    `pause_campaign`, `set_outreach_sending`, `approve_outreach`,
+    `show_replies`, `mark_lead`.
+  - Everything is stored in `daemon/outreach/` (gitignored).
 
 ## v1.1.0 — 2026-09-23
 

@@ -76,15 +76,18 @@ SITE_WORKERS = 4
 USER_AGENT = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
               "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
 
-# Where a lead is in the outreach pipeline. Only "new" is set in this phase;
-# the rest exist so outreach can move leads along without a data migration.
-STAGES = ("new", "contacted", "replied", "proposal_sent", "won", "lost", "do_not_contact")
+# Where a lead is in the outreach pipeline. outreach.py moves leads along as
+# messages go out and replies come in; the user can also set any of them.
+STAGES = ("new", "contacted", "replied", "interested", "proposal_sent", "won", "lost",
+          "do_not_contact")
 
 LEAD_COLUMNS = ["name", "phone", "emails", "website", "category", "address",
                 "rating", "reviews", "instagram", "facebook", "linkedin",
                 "maps_url", "stage"]
 
-_lock = threading.Lock()          # guards the files in LEADS_DIR
+# Guards the files in LEADS_DIR. Re-entrant so update_lead() can hold it
+# across its whole read-modify-write while _save() takes it again inside.
+_lock = threading.RLock()
 _job_lock = threading.Lock()      # guards _current
 _current = {"list_id": None, "proc": None, "cancelled": False}
 
@@ -190,6 +193,37 @@ def find_list(ref: str = ""):
         if hits > best_hits:
             best, best_hits = r, hits
     return best
+
+
+def update_lead(list_id: str, lead_id: str, **fields):
+    """Change fields on one lead (its outreach stage, a bounced address...) and
+    return the updated lead, or None if it no longer exists."""
+    with _lock:
+        record = _load(list_id)
+        if not record:
+            return None
+        for lead in record.get("leads", []):
+            if lead.get("id") == lead_id:
+                lead.update(fields)
+                _save(record)
+                return lead
+    return None
+
+
+def find_lead(name: str):
+    """(list record, lead) for a business by name, newest list first -- for
+    "mark Smile Dental as won" said without saying which list it came from."""
+    words = set(re.findall(r"[a-z0-9]+", (name or "").lower()))
+    if not words:
+        return None, None
+    best, best_score = (None, None), 0.0
+    for record in _all_records():
+        for lead in record.get("leads", []):
+            have = set(re.findall(r"[a-z0-9]+", lead.get("name", "").lower()))
+            score = len(words & have) / max(len(words), 1)
+            if score > best_score:
+                best, best_score = (record, lead), score
+    return best if best_score >= 0.5 else (None, None)
 
 
 def delete_list(list_id: str) -> bool:

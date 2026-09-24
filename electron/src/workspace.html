@@ -916,6 +916,48 @@
   .n8n-dot.off { background: rgba(240,68,56,0.85); }
   #n8n-actions { display: flex; gap: 6px; flex-shrink: 0; }
 
+  /* ---------- outreach view ---------- */
+  #outreach-panel {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: 13px 15px;
+    margin-bottom: 14px;
+  }
+  #outreach-panel .grow { flex: 1; min-width: 0; }
+  /* .label/.sublabel are only sized inside settings rows elsewhere; this view
+     uses them in its own panels too */
+  #outreach-view .label { font-size: 13px; font-weight: 550; }
+  #outreach-view .sublabel { font-size: 11.5px; color: var(--text-tertiary); line-height: 1.5; }
+  .or-step {
+    background: var(--field-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 11px 12px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .or-step .textarea-field { min-height: 110px; }
+  .or-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+  .or-chip {
+    font-size: 10.5px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    padding: 3px 7px; border-radius: 6px; cursor: pointer;
+    background: var(--bg-elevated-2); color: var(--text-secondary); border: 1px solid var(--border);
+  }
+  .or-chip:hover { color: var(--text-primary); }
+  .or-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; margin: 12px 0; }
+  .or-stat { background: var(--field-bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 9px 11px; }
+  .or-stat .n { font-size: 17px; font-weight: 650; letter-spacing: -0.01em; }
+  .or-stat .l { font-size: 10.5px; color: var(--text-tertiary); text-transform: uppercase; letter-spacing: 0.04em; margin-top: 2px; }
+  .or-msg { white-space: pre-wrap; font-size: 12px; line-height: 1.55; color: var(--text-secondary); margin-top: 6px; }
+  .or-timeline { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .or-bubble { padding: 8px 10px; border-radius: 10px; font-size: 12px; line-height: 1.5; white-space: pre-wrap; max-width: 88%; }
+  .or-bubble.out { background: var(--bg-elevated-2); align-self: flex-end; }
+  .or-bubble.in { background: rgba(139,92,246,0.14); align-self: flex-start; }
+  .or-bubble .meta { font-size: 10px; color: var(--text-tertiary); margin-bottom: 3px; }
+  .or-days { display: flex; gap: 5px; flex-wrap: wrap; }
+  .or-days label { font-size: 11.5px; color: var(--text-secondary); display: flex; align-items: center; gap: 4px; }
+
   /* ---------- logo picker ---------- */
   .logo-preview {
     width: 46px; height: 46px; flex-shrink: 0;
@@ -1120,6 +1162,10 @@
         <div class="nav-item" data-view="automations">
           <svg viewBox="0 0 20 20" fill="none"><path d="M11 2.5L4.5 11H9l-1 6.5L15.5 9H11l1-6.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
           <span>Automations</span>
+        </div>
+        <div class="nav-item" data-view="outreach">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M17 3L3 9.2l5.6 2.2L10.8 17 17 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8.6 11.4L17 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <span>Outreach</span>
         </div>
         <div class="nav-item" data-view="tasks">
           <svg viewBox="0 0 20 20" fill="none"><path d="M3.5 6l2 2 3.5-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M3.5 14l2 2 3.5-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M11.5 6.5h5M11.5 14.5h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
@@ -1999,6 +2045,246 @@
         <div id="auto-list"></div>
       </div>
 
+      <!-- ---------- OUTREACH ---------- -->
+      <div class="view" id="outreach-view">
+        <div class="view-header">
+          <h1 class="view-title">Outreach</h1>
+          <p class="view-subtitle">Email and WhatsApp your lead lists in a sequence, and catch every reply.</p>
+        </div>
+
+        <div id="outreach-panel">
+          <span class="n8n-dot" id="or-dot"></span>
+          <div class="grow">
+            <div class="label" id="or-title">Checking outreach…</div>
+            <div class="sublabel" id="or-sub"></div>
+          </div>
+          <label class="toggle-switch" title="Master switch for automatic sending">
+            <input type="checkbox" id="or-enabled">
+            <span class="toggle-slider"></span>
+          </label>
+        </div>
+
+        <div class="subtabs" id="or-tabs">
+          <div class="subtab active" data-ortab="campaigns">Campaigns</div>
+          <div class="subtab" data-ortab="review">Review <span id="or-review-count"></span></div>
+          <div class="subtab" data-ortab="replies">Replies</div>
+          <div class="subtab" data-ortab="setup">Setup</div>
+        </div>
+
+        <div class="or-pane" id="or-pane-campaigns">
+          <div class="field-row" style="justify-content:flex-end; margin-bottom:10px;">
+            <button class="mini-btn-sm accent" id="or-new-btn">New campaign</button>
+          </div>
+          <div id="or-campaign-list"></div>
+        </div>
+
+        <div class="or-pane" id="or-pane-editor" hidden>
+          <div class="card" style="padding:16px;">
+            <div class="setting-block-body" style="margin-top:0;">
+              <div class="label" id="or-editor-title" style="font-size:14px; font-weight:650;">New campaign</div>
+              <div>
+                <label class="field-label">Campaign name</label>
+                <input type="text" class="rect-field" id="or-f-name" placeholder="e.g. Dentists Indiranagar, Sept" style="width:100%;">
+              </div>
+              <div class="field-row">
+                <div style="flex:2;">
+                  <label class="field-label">Lead list</label>
+                  <select class="dropdown-select" id="or-f-list" style="width:100%;"></select>
+                </div>
+                <div style="flex:1;">
+                  <label class="field-label">Which leads</label>
+                  <select class="dropdown-select" id="or-f-filter" style="width:100%;">
+                    <option value="all">All</option>
+                    <option value="with_email">Only with email</option>
+                    <option value="with_phone">Only with phone</option>
+                    <option value="no_website">Only without a website</option>
+                  </select>
+                </div>
+                <div style="width:110px;">
+                  <label class="field-label">Min rating</label>
+                  <input type="number" class="rect-field" id="or-f-rating" min="0" max="5" step="0.1" placeholder="Any" style="width:100%;">
+                </div>
+              </div>
+              <div>
+                <label class="field-label">Your offer <span class="or-chip">{offer}</span></label>
+                <textarea class="textarea-field" id="or-f-offer" style="min-height:64px;" placeholder="What you do for them, in one or two sentences. e.g. I build booking websites for clinics so patients can book online 24/7."></textarea>
+              </div>
+              <div>
+                <label class="field-label">Proof point <span class="or-chip">{proof}</span></label>
+                <input type="text" class="rect-field" id="or-f-proof" placeholder="e.g. Last month a clinic in Koramangala got 40 new bookings through theirs." style="width:100%;">
+              </div>
+              <div>
+                <label class="field-label">Call to action <span class="or-chip">{cta}</span></label>
+                <input type="text" class="rect-field" id="or-f-cta" placeholder="e.g. Book a free 15-minute call: https://cal.com/you/15min" style="width:100%;">
+              </div>
+              <div class="setting-row" style="padding:10px 12px; margin:0;">
+                <div>
+                  <div class="label">Personalise each message</div>
+                  <div class="sublabel">Mira tailors your template to each business. Your offer, links and name are always kept; if anything looks off, your template is sent as written.</div>
+                </div>
+                <label class="toggle-switch"><input type="checkbox" id="or-f-personalize"><span class="toggle-slider"></span></label>
+              </div>
+              <div>
+                <label class="field-label">Extra instructions for Mira (optional)</label>
+                <input type="text" class="rect-field" id="or-f-instructions" placeholder="e.g. Friendly, under 80 words, Indian English" style="width:100%;">
+              </div>
+              <div>
+                <label class="field-label">After testing, send…</label>
+                <select class="dropdown-select" id="or-f-mode" style="width:100%;">
+                  <option value="auto">Automatically</option>
+                  <option value="review">Only after I approve each message</option>
+                </select>
+              </div>
+              <div>
+                <label class="field-label">Sequence</label>
+                <div class="sublabel" style="margin-bottom:6px;">Day counts from the previous step actually going out. A follow-up email with no subject is sent as a reply in the same thread. Anyone who replies stops getting messages. Click a placeholder to insert it where you're typing:</div>
+                <div class="or-chips" id="or-chips"></div>
+              </div>
+              <div id="or-steps" style="display:flex; flex-direction:column; gap:8px;"></div>
+              <div class="field-row">
+                <button class="mini-btn-sm" id="or-add-step">Add step</button>
+                <div style="flex:1;"></div>
+                <button class="mini-btn-sm" id="or-editor-cancel">Cancel</button>
+                <button class="mini-btn-sm" id="or-editor-preview">Preview</button>
+                <button class="mini-btn-sm accent" id="or-editor-save">Save</button>
+              </div>
+              <div class="inline-note" id="or-editor-msg"></div>
+              <div id="or-preview"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="or-pane" id="or-pane-detail" hidden></div>
+
+        <div class="or-pane" id="or-pane-review" hidden>
+          <div class="field-row" style="justify-content:flex-end; margin-bottom:10px;">
+            <button class="mini-btn-sm accent" id="or-approve-all">Approve all</button>
+          </div>
+          <div id="or-review-list"></div>
+        </div>
+
+        <div class="or-pane" id="or-pane-replies" hidden>
+          <div id="or-replies-list"></div>
+        </div>
+
+        <div class="or-pane" id="or-pane-setup" hidden>
+          <div class="setting-block">
+            <div class="setting-block-row">
+              <div>
+                <div class="label">Outreach mailbox</div>
+                <div class="sublabel">A separate Gmail with your brand name. Campaigns send from it and Mira reads its inbox for replies.</div>
+              </div>
+            </div>
+            <div class="setting-block-body">
+              <div class="field-row">
+                <div style="flex:1;"><label class="field-label">Gmail address</label>
+                  <input type="text" class="rect-field" id="or-s-email" placeholder="yourbrand@gmail.com" style="width:100%;"></div>
+                <div style="flex:1;"><label class="field-label">App password</label>
+                  <input type="password" class="rect-field" id="or-s-password" placeholder="Enter to set" style="width:100%;"></div>
+              </div>
+              <div class="field-row">
+                <div style="flex:1;"><label class="field-label">From name <span class="or-chip">{my_name}</span></label>
+                  <input type="text" class="rect-field" id="or-s-from" placeholder="e.g. Prakhar from YourBrand" style="width:100%;"></div>
+                <div style="flex:1;"><label class="field-label">Send test emails to</label>
+                  <input type="text" class="rect-field" id="or-s-test-email" placeholder="your own email" style="width:100%;"></div>
+              </div>
+              <div><label class="field-label">Signature (added to every email)</label>
+                <textarea class="textarea-field" id="or-s-signature" style="min-height:60px;" placeholder="YourBrand · yourbrand.in · +91 …"></textarea></div>
+              <div><label class="field-label">Opt-out line (added to every email)</label>
+                <input type="text" class="rect-field" id="or-s-optout" style="width:100%;"></div>
+              <details>
+                <summary class="sublabel" style="cursor:pointer;">Advanced: another provider</summary>
+                <div class="field-row" style="margin-top:8px;">
+                  <input type="text" class="rect-field" id="or-s-smtp-host" placeholder="SMTP host">
+                  <input type="number" class="rect-field" id="or-s-smtp-port" placeholder="465" style="max-width:90px;">
+                  <input type="text" class="rect-field" id="or-s-imap-host" placeholder="IMAP host">
+                  <input type="number" class="rect-field" id="or-s-imap-port" placeholder="993" style="max-width:90px;">
+                </div>
+              </details>
+              <div class="field-row">
+                <button class="mini-btn-sm accent" id="or-save-mailbox">Save</button>
+                <button class="mini-btn-sm" id="or-check-mailbox">Check connection</button>
+              </div>
+              <div class="inline-note">
+                In that Gmail account: turn on 2-Step Verification, then create an app password
+                (Google Account → Security → App passwords) and paste it here. Also turn on IMAP in
+                Gmail → Settings → Forwarding and POP/IMAP. Start slowly: a new address that
+                suddenly sends a lot goes to spam, so the daily limit ramps up by itself.
+              </div>
+              <div class="inline-note" id="or-mailbox-msg"></div>
+            </div>
+          </div>
+
+          <div class="setting-block">
+            <div class="setting-block-row">
+              <div>
+                <div class="label">WhatsApp</div>
+                <div class="sublabel">Messages are sent and replies logged by the Mira WhatsApp extension, which asks Mira what to send next.</div>
+              </div>
+              <label class="toggle-switch"><input type="checkbox" id="or-s-wa-enabled"><span class="toggle-slider"></span></label>
+            </div>
+            <div class="setting-block-body">
+              <div class="field-row">
+                <div style="flex:1;"><label class="field-label">Send test messages to</label>
+                  <input type="text" class="rect-field" id="or-s-test-phone" placeholder="your own number" style="width:100%;"></div>
+                <div style="width:130px;"><label class="field-label">Country code</label>
+                  <input type="text" class="rect-field" id="or-s-cc" placeholder="91" style="width:100%;"></div>
+              </div>
+              <div>
+                <label class="field-label">Extension token</label>
+                <div class="field-row">
+                  <input type="text" class="rect-field" id="or-s-token" readonly style="flex:1; font-family:ui-monospace,Menlo,monospace; font-size:11.5px;">
+                  <button class="mini-btn-sm" id="or-copy-token">Copy</button>
+                  <button class="mini-btn-sm danger" id="or-rotate-token">New token</button>
+                </div>
+              </div>
+              <div class="field-row"><button class="mini-btn-sm accent" id="or-save-wa">Save</button></div>
+              <div class="inline-note" id="or-wa-status"></div>
+            </div>
+          </div>
+
+          <div class="setting-block">
+            <div class="setting-block-row">
+              <div>
+                <div class="label">Limits and sending hours</div>
+                <div class="sublabel">Nothing goes out outside these hours. Messages are spaced out with a random gap.</div>
+              </div>
+            </div>
+            <div class="setting-block-body">
+              <div class="field-row">
+                <div style="flex:1;"><label class="field-label">Emails per day</label>
+                  <input type="number" class="rect-field" id="or-s-email-cap" min="1" max="500" style="width:100%;"></div>
+                <div style="flex:1;"><label class="field-label">WhatsApp per day</label>
+                  <input type="number" class="rect-field" id="or-s-wa-cap" min="1" max="500" style="width:100%;"></div>
+                <div style="flex:1;"><label class="field-label">From (hour)</label>
+                  <input type="number" class="rect-field" id="or-s-hour-start" min="0" max="23" style="width:100%;"></div>
+                <div style="flex:1;"><label class="field-label">Until (hour)</label>
+                  <input type="number" class="rect-field" id="or-s-hour-end" min="1" max="24" style="width:100%;"></div>
+              </div>
+              <div class="or-days" id="or-s-days"></div>
+              <div class="field-row">
+                <div style="flex:1;"><label class="field-label">Gap between sends, min (seconds)</label>
+                  <input type="number" class="rect-field" id="or-s-gap-min" min="10" style="width:100%;"></div>
+                <div style="flex:1;"><label class="field-label">max (seconds)</label>
+                  <input type="number" class="rect-field" id="or-s-gap-max" min="10" style="width:100%;"></div>
+              </div>
+              <div class="setting-row" style="padding:10px 12px; margin:0;">
+                <div><div class="label">Warm up a new mailbox</div>
+                  <div class="sublabel">Starts at 10 emails a day and adds 5 a day until your limit.</div></div>
+                <label class="toggle-switch"><input type="checkbox" id="or-s-warmup"><span class="toggle-slider"></span></label>
+              </div>
+              <div class="setting-row" style="padding:10px 12px; margin:0;">
+                <div><div class="label">Tell me when someone replies</div>
+                  <div class="sublabel">Over Telegram or out loud, like Mira's other alerts.</div></div>
+                <label class="toggle-switch"><input type="checkbox" id="or-s-notify"><span class="toggle-slider"></span></label>
+              </div>
+              <div class="field-row"><button class="mini-btn-sm accent" id="or-save-limits">Save</button></div>
+              <div class="inline-note" id="or-limits-msg"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
     </div>
   </div>
 
@@ -2068,6 +2354,7 @@
     if (name === 'dumpbox') { loadDumpEntries(); document.getElementById('dump-input').focus(); }
     if (name === 'google') refreshGoogleStatus();
     if (name === 'automations') { loadAutomations(); refreshN8n(); }
+    if (name === 'outreach') loadOutreach();
   }
 
   navItems.forEach(item => item.addEventListener('click', () => switchView(item.dataset.view)));
@@ -4239,6 +4526,548 @@
     if (days === 1) return { text: 'tomorrow', cls: '' };
     return { text: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), cls: '' };
   }
+
+  // ==================== Outreach ====================
+  // Campaigns over a lead list, run by daemon/outreach.py. This view is a thin
+  // client: every rule (hours, caps, who gets what next) lives in the daemon.
+  const OR_LABELS = { interested: 'Interested', question: 'Question', not_interested: 'Not interested',
+                      unsubscribe: 'Opted out', auto_reply: 'Auto-reply', other: 'Reply' };
+  const OR_BADGE = { interested: 'done', question: 'unread', other: 'unread', not_interested: '',
+                     unsubscribe: 'fail', auto_reply: '' };
+  const OR_STATUS = { draft: 'Draft', active: 'Running', paused: 'Paused', finished: 'Finished' };
+  const OR_DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  let orTab = 'campaigns';
+  let orEditingId = null;   // campaign id being edited, '' for a new one
+  let orDetailId = null;
+  let orConfig = null;
+  let orLastField = null;   // where a clicked placeholder chip is inserted
+
+  async function orFetch(path, opts = {}) {
+    const res = await fetch(`${DAEMON_URL}${path}`, {
+      headers: { 'Content-Type': 'application/json' }, ...opts,
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    });
+    return res.json();
+  }
+
+  function showOrPane(name) {
+    document.querySelectorAll('.or-pane').forEach(p => { p.hidden = p.id !== `or-pane-${name}`; });
+    const tab = ['editor', 'detail'].includes(name) ? 'campaigns' : name;
+    document.querySelectorAll('#or-tabs .subtab').forEach(t =>
+      t.classList.toggle('active', t.dataset.ortab === tab));
+  }
+
+  async function loadOutreach() {
+    refreshOrOverview();
+    if (orTab === 'campaigns') {
+      if (orDetailId) openOrDetail(orDetailId); else { showOrPane('campaigns'); loadOrCampaigns(); }
+    } else if (orTab === 'review') { showOrPane('review'); loadOrReview(); }
+    else if (orTab === 'replies') { showOrPane('replies'); loadOrReplies(); }
+    else { showOrPane('setup'); loadOrSetup(); }
+  }
+
+  async function refreshOrOverview() {
+    const dot = document.getElementById('or-dot');
+    try {
+      const o = await orFetch('/outreach/overview');
+      document.getElementById('or-enabled').checked = !!o.enabled;
+      dot.className = 'n8n-dot ' + (o.enabled ? 'on' : 'off');
+      const running = o.campaigns.filter(c => c.status === 'active').length;
+      document.getElementById('or-title').textContent = o.enabled
+        ? `Sending is on · ${running} campaign${running === 1 ? '' : 's'} running`
+        : 'Sending is off: nothing goes out until you switch it on';
+      const parts = [`Today: ${o.today.email}/${o.today.email_cap} emails`];
+      if (o.whatsapp_enabled) parts.push(`${o.today.whatsapp}/${o.today.whatsapp_cap} WhatsApp`
+        + (o.extension_connected ? '' : ' (extension not connected)'));
+      parts.push(`${o.replies_7d} replies this week`);
+      if (!o.mailbox_configured) parts.push('mailbox not set up');
+      else if (!o.in_sending_hours) parts.push('outside sending hours');
+      document.getElementById('or-sub').textContent = parts.join(' · ');
+      document.getElementById('or-review-count').textContent = o.pending_approval ? `(${o.pending_approval})` : '';
+    } catch (e) {
+      dot.className = 'n8n-dot off';
+      document.getElementById('or-title').textContent = 'Could not reach Mira daemon';
+    }
+  }
+
+  document.getElementById('or-enabled').addEventListener('change', async (e) => {
+    await orFetch('/outreach/config', { method: 'POST', body: { enabled: e.target.checked } });
+    refreshOrOverview();
+  });
+
+  document.getElementById('or-tabs').addEventListener('click', (e) => {
+    const t = e.target.closest('.subtab');
+    if (!t) return;
+    orTab = t.dataset.ortab;
+    orDetailId = null;
+    loadOutreach();
+  });
+
+  // ---------- campaigns list ----------
+  async function loadOrCampaigns() {
+    const el = document.getElementById('or-campaign-list');
+    try {
+      const { campaigns } = await orFetch('/outreach/campaigns');
+      if (!campaigns.length) {
+        el.innerHTML = '<div class="empty-state"><div class="big">No campaigns yet</div>'
+          + 'Find some businesses first (ask Mira “find dentists in Indiranagar, Bangalore”), '
+          + 'then create a campaign here to email and WhatsApp them.</div>';
+        return;
+      }
+      el.innerHTML = campaigns.map(c => {
+        const s = c.stats;
+        return `
+        <div class="list-row" data-or-open="${esc(c.id)}" style="cursor:pointer;">
+          <div class="row-top">
+            <div class="row-title">${esc(c.name)}
+              <span class="badge ${c.status === 'active' ? 'done' : c.status === 'paused' ? 'due' : ''}">${esc(OR_STATUS[c.status] || c.status)}</span>
+            </div>
+            <div class="row-meta">${esc(c.list_name)}</div>
+          </div>
+          <div class="row-body">${s.enrolled} leads · ${s.emails_sent} emails · ${s.whatsapp_sent} WhatsApp · ${s.replies} replies${s.interested ? ` · <b>${s.interested} interested</b>` : ''}${s.pending_approval ? ` · ${s.pending_approval} to review` : ''}</div>
+        </div>`;
+      }).join('');
+    } catch (e) {
+      el.innerHTML = '<div class="empty-state">Could not reach Mira daemon.</div>';
+    }
+  }
+
+  document.getElementById('or-campaign-list').addEventListener('click', (e) => {
+    const row = e.target.closest('[data-or-open]');
+    if (row) openOrDetail(row.dataset.orOpen);
+  });
+
+  // ---------- campaign detail ----------
+  async function openOrDetail(id) {
+    orDetailId = id;
+    showOrPane('detail');
+    const el = document.getElementById('or-pane-detail');
+    const c = await orFetch(`/outreach/campaigns/${id}`);
+    if (c.error) { orDetailId = null; showOrPane('campaigns'); loadOrCampaigns(); return; }
+    const s = c.stats;
+    const stat = (n, l) => `<div class="or-stat"><div class="n">${n}</div><div class="l">${l}</div></div>`;
+    const startLabel = c.status === 'paused' ? 'Resume' : 'Start';
+    el.innerHTML = `
+      <div class="card" style="padding:16px;">
+        <div class="row-top" style="display:flex; justify-content:space-between; align-items:baseline; gap:10px;">
+          <div style="font-size:15px; font-weight:650;">${esc(c.name)}
+            <span class="badge ${c.status === 'active' ? 'done' : c.status === 'paused' ? 'due' : ''}">${esc(OR_STATUS[c.status] || c.status)}</span></div>
+          <button class="mini-btn-sm" data-or-back>← All campaigns</button>
+        </div>
+        <div class="sublabel" style="margin-top:4px;">${esc(c.list_name)} · ${c.steps.length} steps ·
+          ${c.mode === 'review' ? 'each message waits for your approval' : 'sends automatically'} ·
+          ${c.tested_at ? 'tested ' + esc(relativeTime(c.tested_at)) : 'not tested yet'}</div>
+        <div class="or-stats">
+          ${stat(s.enrolled, 'Leads')}${stat(s.in_progress, 'In sequence')}${stat(s.emails_sent, 'Emails sent')}
+          ${stat(s.whatsapp_sent, 'WhatsApp sent')}${stat(s.replies, 'Replies')}${stat(s.interested, 'Interested')}
+          ${stat(s.unsubscribed, 'Opted out')}${stat(s.bounced, 'Bounced')}
+        </div>
+        <div class="row-actions" style="display:flex; gap:6px; flex-wrap:wrap;">
+          ${c.status !== 'active' ? '<button class="mini-btn-sm" data-or-edit>Edit</button>' : ''}
+          <button class="mini-btn-sm" data-or-test>Send test to me</button>
+          ${c.status === 'active' ? '<button class="mini-btn-sm" data-or-pause>Pause</button>'
+            : c.status !== 'finished' ? `<button class="mini-btn-sm accent" data-or-start>${startLabel}</button>` : ''}
+          <button class="mini-btn-sm danger" data-or-delete>Delete</button>
+        </div>
+        <div class="inline-note" id="or-detail-msg"></div>
+      </div>
+      <div style="margin-top:14px;">
+        ${c.leads.length ? c.leads.map(l => `
+          <div class="list-row">
+            <div class="row-top">
+              <div class="row-title">${esc(l.business)}
+                ${l.stage && l.stage !== 'new' ? `<span class="badge ${['interested','won'].includes(l.stage) ? 'done' : l.stage === 'do_not_contact' ? 'fail' : ''}">${esc(l.stage.replace(/_/g, ' '))}</span>` : ''}</div>
+              <div class="row-meta">${l.status === 'active' ? `step ${l.step}/${l.steps}` : esc(l.status.replace(/_/g, ' '))}</div>
+            </div>
+            <div class="row-body" style="font-size:11px; color:var(--text-tertiary);">
+              ${l.last ? `${l.last.direction === 'in' ? 'Replied' : 'Last'}: ${esc(l.last.channel || '')} ${esc(l.last.label || l.last.status || '')} · ${esc(relativeTime(l.last.at))}` : 'Nothing sent yet'}
+              ${l.status === 'active' && l.next_due ? ` · next ${esc(new Date(l.next_due).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }))}` : ''}
+            </div>
+            <div class="row-actions"><button class="mini-btn-sm" data-or-timeline="${esc(c.list_id)}|${esc(l.lead_id)}">Conversation</button></div>
+            <div data-or-tl="${esc(l.lead_id)}"></div>
+          </div>`).join('')
+        : '<div class="empty-state">Leads appear here once the campaign starts.</div>'}
+      </div>`;
+  }
+
+  async function orToggleTimeline(btn) {
+    const [listId, leadId] = btn.dataset.orTimeline.split('|');
+    const box = btn.closest('.list-row').querySelector(`[data-or-tl]`);
+    if (box.innerHTML) { box.innerHTML = ''; return; }
+    const t = await orFetch(`/outreach/leads/${listId}/${leadId}`);
+    const msgs = (t.messages || []).filter(m => !m.test && !['cancelled', 'skipped'].includes(m.status));
+    const lead = t.lead || {};
+    const contact = [lead.phone, (lead.emails || []).join(', '), lead.website].filter(Boolean).map(esc).join(' · ');
+    box.innerHTML = `<div class="or-timeline">
+      <div class="sublabel">${contact}</div>
+      ${msgs.length ? msgs.map(m => `<div class="or-bubble ${m.direction === 'in' ? 'in' : 'out'}">`
+        + `<div class="meta">${esc(m.channel)} · ${m.direction === 'in' ? esc(OR_LABELS[m.label] || m.label || '') : esc(m.status)} · ${esc(relativeTime(m.sent_at || m.received_at || m.created_at))}</div>`
+        + `${m.subject ? `<b>${esc(m.subject)}</b>\n` : ''}${esc(m.text)}</div>`).join('')
+        : '<div class="sublabel">No messages yet.</div>'}
+      <div class="field-row" style="margin-top:4px;">
+        <select class="dropdown-select" data-or-stage="${esc(listId)}|${esc(leadId)}" style="max-width:220px;">
+          ${['new','contacted','replied','interested','proposal_sent','won','lost','do_not_contact'].map(s =>
+            `<option value="${s}" ${lead.stage === s ? 'selected' : ''}>${s.replace(/_/g, ' ')}</option>`).join('')}
+        </select>
+        <span class="sublabel">Stage</span>
+      </div></div>`;
+  }
+
+  document.getElementById('or-pane-detail').addEventListener('click', async (e) => {
+    const msg = document.getElementById('or-detail-msg');
+    const note = (text, cls = '') => { if (msg) { msg.className = 'inline-note ' + cls; msg.textContent = text; } };
+    if (e.target.closest('[data-or-back]')) { orDetailId = null; showOrPane('campaigns'); loadOrCampaigns(); return; }
+    if (e.target.closest('[data-or-timeline]')) { orToggleTimeline(e.target.closest('[data-or-timeline]')); return; }
+    if (e.target.closest('[data-or-edit]')) { openOrEditor(orDetailId); return; }
+    if (e.target.closest('[data-or-test]')) {
+      note('Writing and sending the test… this can take a minute.');
+      const r = await orFetch(`/outreach/campaigns/${orDetailId}/test`, { method: 'POST' });
+      if (r.error) return note(r.error, 'error');
+      note(`Sent ${r.emails_sent} test emails to you${r.whatsapp_queued ? ` and queued ${r.whatsapp_queued} WhatsApp messages` : ''}. ${(r.notes || []).join(' ')}`, 'ok');
+      return;
+    }
+    if (e.target.closest('[data-or-start]')) {
+      let r = await orFetch(`/outreach/campaigns/${orDetailId}/activate`, { method: 'POST', body: {} });
+      if (r.error && /test first/i.test(r.error)) {
+        if (!confirm('This campaign has not been tested. Start it anyway?')) return;
+        r = await orFetch(`/outreach/campaigns/${orDetailId}/activate`, { method: 'POST', body: { skip_test: true } });
+      }
+      if (r.error) return note(r.error, 'error');
+      await openOrDetail(orDetailId);
+      const warn = (r.warnings || []).join(' ');
+      note(`Started with ${r.enrolled || 'its'} leads. ${warn}`, warn ? '' : 'ok');
+      refreshOrOverview();
+      return;
+    }
+    if (e.target.closest('[data-or-pause]')) {
+      await orFetch(`/outreach/campaigns/${orDetailId}/pause`, { method: 'POST' });
+      openOrDetail(orDetailId); refreshOrOverview();
+      return;
+    }
+    if (e.target.closest('[data-or-delete]')) {
+      if (!confirm('Delete this campaign? Messages already sent stay in the log.')) return;
+      await orFetch(`/outreach/campaigns/${orDetailId}`, { method: 'DELETE' });
+      orDetailId = null; showOrPane('campaigns'); loadOrCampaigns(); refreshOrOverview();
+    }
+  });
+
+  document.getElementById('or-pane-detail').addEventListener('change', async (e) => {
+    const sel = e.target.closest('[data-or-stage]');
+    if (!sel) return;
+    const [listId, leadId] = sel.dataset.orStage.split('|');
+    const r = await orFetch(`/outreach/leads/${listId}/${leadId}/stage`, { method: 'POST', body: { stage: sel.value } });
+    if (r.error) alert(r.error);
+  });
+
+  // ---------- campaign editor ----------
+  function orStepHtml(step, i) {
+    const email = step.channel === 'email';
+    return `<div class="or-step" data-step="${i}">
+      <div class="field-row">
+        <span class="sublabel" style="width:48px;">Step ${i + 1}</span>
+        <span class="sublabel">Day</span>
+        <input type="number" class="rect-field" data-k="day" min="0" max="60" value="${Number(step.day) || 0}" style="max-width:70px; flex:none;">
+        <select class="dropdown-select" data-k="channel" style="max-width:130px;">
+          <option value="email" ${email ? 'selected' : ''}>Email</option>
+          <option value="whatsapp" ${!email ? 'selected' : ''}>WhatsApp</option>
+        </select>
+        <div style="flex:1;"></div>
+        <button class="mini-btn-sm danger" data-remove-step="${i}">Remove</button>
+      </div>
+      <input type="text" class="rect-field" data-k="subject" value="${esc(step.subject || '')}"
+             placeholder="Subject (leave blank to reply in the same thread)" ${email ? '' : 'hidden'}>
+      <textarea class="textarea-field" data-k="body" placeholder="Message">${esc(step.body || '')}</textarea>
+    </div>`;
+  }
+
+  function orRenderSteps(steps) {
+    document.getElementById('or-steps').innerHTML = steps.map(orStepHtml).join('');
+  }
+
+  function orCollectSteps() {
+    return Array.from(document.querySelectorAll('#or-steps .or-step')).map(el => ({
+      day: Number(el.querySelector('[data-k=day]').value) || 0,
+      channel: el.querySelector('[data-k=channel]').value,
+      subject: el.querySelector('[data-k=subject]').value,
+      body: el.querySelector('[data-k=body]').value,
+    }));
+  }
+
+  async function openOrEditor(id) {
+    orEditingId = id || '';
+    showOrPane('editor');
+    document.getElementById('or-editor-msg').textContent = '';
+    document.getElementById('or-preview').innerHTML = '';
+    const [cfg, lists] = await Promise.all([orFetch('/outreach/config'), orFetch('/leads/lists')]);
+    orConfig = cfg;
+    document.getElementById('or-chips').innerHTML = Object.entries(cfg.placeholders).map(([k, d]) =>
+      `<span class="or-chip" data-ph="{${esc(k)}}" title="${esc(d)}">{${esc(k)}}</span>`).join('');
+    const c = id ? await orFetch(`/outreach/campaigns/${id}`) : {
+      name: '', list_id: '', lead_filter: 'all', min_rating: 0, offer: '', proof: '', cta: '',
+      personalize: true, instructions: '', mode: 'auto', steps: cfg.default_steps, enrollments: null };
+    document.getElementById('or-editor-title').textContent = id ? `Edit “${c.name}”` : 'New campaign';
+    const done = (lists.lists || []).filter(l => l.status === 'done' && l.count);
+    const listSel = document.getElementById('or-f-list');
+    listSel.innerHTML = done.length
+      ? done.map(l => `<option value="${esc(l.id)}">${esc(l.name)} (${l.count} · ${l.with_email} email · ${l.with_phone} phone)</option>`).join('')
+      : '<option value="">No lead lists yet: ask Mira to find some businesses first</option>';
+    if (c.list_id) listSel.value = c.list_id;
+    listSel.disabled = !!(id && c.stats && c.stats.enrolled);
+    document.getElementById('or-f-name').value = c.name || '';
+    document.getElementById('or-f-filter').value = c.lead_filter || 'all';
+    document.getElementById('or-f-rating').value = c.min_rating || '';
+    document.getElementById('or-f-offer').value = c.offer || '';
+    document.getElementById('or-f-proof').value = c.proof || '';
+    document.getElementById('or-f-cta').value = c.cta || '';
+    document.getElementById('or-f-personalize').checked = c.personalize !== false;
+    document.getElementById('or-f-instructions').value = c.instructions || '';
+    document.getElementById('or-f-mode').value = c.mode || 'auto';
+    orRenderSteps(c.steps || []);
+  }
+
+  function orEditorPayload() {
+    const payload = {
+      name: document.getElementById('or-f-name').value,
+      lead_filter: document.getElementById('or-f-filter').value,
+      min_rating: Number(document.getElementById('or-f-rating').value) || 0,
+      offer: document.getElementById('or-f-offer').value,
+      proof: document.getElementById('or-f-proof').value,
+      cta: document.getElementById('or-f-cta').value,
+      personalize: document.getElementById('or-f-personalize').checked,
+      instructions: document.getElementById('or-f-instructions').value,
+      mode: document.getElementById('or-f-mode').value,
+      steps: orCollectSteps(),
+    };
+    const listSel = document.getElementById('or-f-list');
+    if (!listSel.disabled) payload.list_id = listSel.value;
+    return payload;
+  }
+
+  async function orSaveCampaign() {
+    const msg = document.getElementById('or-editor-msg');
+    const r = orEditingId
+      ? await orFetch(`/outreach/campaigns/${orEditingId}`, { method: 'POST', body: orEditorPayload() })
+      : await orFetch('/outreach/campaigns', { method: 'POST', body: orEditorPayload() });
+    if (r.error) { msg.className = 'inline-note error'; msg.textContent = r.error; return null; }
+    orEditingId = r.id;
+    msg.className = 'inline-note ok';
+    msg.textContent = 'Saved.';
+    return r;
+  }
+
+  document.getElementById('or-new-btn').onclick = () => openOrEditor('');
+  document.getElementById('or-editor-cancel').onclick = () => {
+    if (orEditingId) openOrDetail(orEditingId); else { showOrPane('campaigns'); loadOrCampaigns(); }
+  };
+  document.getElementById('or-editor-save').onclick = async () => {
+    const r = await orSaveCampaign();
+    if (r) openOrDetail(r.id);
+  };
+  document.getElementById('or-editor-preview').onclick = async () => {
+    const r = await orSaveCampaign();
+    if (!r) return;
+    const box = document.getElementById('or-preview');
+    box.innerHTML = '<div class="inline-note">Writing a preview…</div>';
+    const p = await orFetch(`/outreach/campaigns/${r.id}/preview`, { method: 'POST', body: {} });
+    if (p.error) { box.innerHTML = `<div class="inline-note error">${esc(p.error)}</div>`; return; }
+    box.innerHTML = `<div class="sublabel" style="margin:6px 0;">Preview for <b>${esc(p.business)}</b>. Nothing was sent.</div>` +
+      p.steps.map((s, i) => `<div class="list-row">
+        <div class="row-top"><div class="row-title">Step ${i + 1} · day ${s.day} · ${esc(s.channel)}</div>
+          <div class="row-meta">${s.personalized ? 'personalised' : 'as written'}</div></div>
+        ${s.subject ? `<div class="row-body"><b>${esc(s.subject)}</b></div>` : ''}
+        <div class="or-msg">${esc(s.text)}</div>${s.note ? `<div class="inline-note">${esc(s.note)}</div>` : ''}
+      </div>`).join('');
+  };
+  document.getElementById('or-add-step').onclick = () => {
+    const steps = orCollectSteps();
+    const last = steps[steps.length - 1];
+    steps.push({ day: last ? last.day + 3 : 0, channel: 'email', subject: '', body: '' });
+    orRenderSteps(steps);
+  };
+  document.getElementById('or-steps').addEventListener('click', (e) => {
+    const rm = e.target.closest('[data-remove-step]');
+    if (!rm) return;
+    const steps = orCollectSteps();
+    steps.splice(Number(rm.dataset.removeStep), 1);
+    orRenderSteps(steps);
+  });
+  document.getElementById('or-steps').addEventListener('change', (e) => {
+    if (e.target.dataset.k !== 'channel') return;
+    const subject = e.target.closest('.or-step').querySelector('[data-k=subject]');
+    subject.hidden = e.target.value !== 'email';
+  });
+  document.getElementById('or-pane-editor').addEventListener('focusin', (e) => {
+    if (e.target.matches('textarea, input[type=text]')) orLastField = e.target;
+  });
+  document.getElementById('or-chips').addEventListener('mousedown', (e) => {
+    const chip = e.target.closest('[data-ph]');
+    if (!chip || !orLastField) return;
+    e.preventDefault();  // keep focus (and the caret) in the field being edited
+    const f = orLastField;
+    const at = f.selectionStart ?? f.value.length;
+    f.value = f.value.slice(0, at) + chip.dataset.ph + f.value.slice(f.selectionEnd ?? at);
+    f.selectionStart = f.selectionEnd = at + chip.dataset.ph.length;
+  });
+
+  // ---------- review queue ----------
+  async function loadOrReview() {
+    const el = document.getElementById('or-review-list');
+    const { messages } = await orFetch('/outreach/pending');
+    document.getElementById('or-approve-all').hidden = !messages.length;
+    if (!messages.length) {
+      el.innerHTML = '<div class="empty-state"><div class="big">Nothing to review</div>'
+        + 'Campaigns set to “only after I approve” put their messages here before sending.</div>';
+      return;
+    }
+    el.innerHTML = messages.map(m => `
+      <div class="list-row" data-msg="${esc(m.id)}">
+        <div class="row-top"><div class="row-title">${esc(m.business)}</div>
+          <div class="row-meta">${esc(m.channel)} · step ${m.step + 1} · to ${esc(m.to)}</div></div>
+        ${m.channel === 'email' ? `<input type="text" class="rect-field" data-k="subject" value="${esc(m.subject || '')}"
+            placeholder="(reply in the same thread)" style="width:100%; margin-top:8px;">` : ''}
+        <textarea class="textarea-field" data-k="text" style="margin-top:8px; min-height:120px;">${esc(m.text)}</textarea>
+        <div class="row-actions">
+          <button class="mini-btn-sm accent" data-approve>Approve</button>
+          <button class="mini-btn-sm" data-skip>Skip</button>
+        </div>
+      </div>`).join('');
+  }
+
+  document.getElementById('or-review-list').addEventListener('click', async (e) => {
+    const row = e.target.closest('[data-msg]');
+    if (!row) return;
+    const id = row.dataset.msg;
+    if (e.target.closest('[data-approve]')) {
+      const subject = row.querySelector('[data-k=subject]');
+      await orFetch(`/outreach/messages/${id}/approve`, { method: 'POST', body: {
+        text: row.querySelector('[data-k=text]').value, subject: subject ? subject.value : null } });
+    } else if (e.target.closest('[data-skip]')) {
+      await orFetch(`/outreach/messages/${id}/skip`, { method: 'POST' });
+    } else return;
+    row.remove();
+    refreshOrOverview();
+    if (!document.querySelector('#or-review-list [data-msg]')) loadOrReview();
+  });
+  document.getElementById('or-approve-all').onclick = async () => {
+    await orFetch('/outreach/pending/approve-all', { method: 'POST', body: {} });
+    loadOrReview(); refreshOrOverview();
+  };
+
+  // ---------- replies ----------
+  async function loadOrReplies() {
+    const el = document.getElementById('or-replies-list');
+    const { replies } = await orFetch('/outreach/replies?limit=100');
+    if (!replies.length) {
+      el.innerHTML = '<div class="empty-state"><div class="big">No replies yet</div>'
+        + 'Replies to outreach, by email or WhatsApp, show up here as they arrive.</div>';
+      return;
+    }
+    el.innerHTML = replies.map(r => `
+      <div class="list-row">
+        <div class="row-top">
+          <div class="row-title">${esc(r.business)} <span class="badge ${OR_BADGE[r.label] || ''}">${esc(OR_LABELS[r.label] || r.label)}</span></div>
+          <div class="row-meta">${esc(r.channel)} · ${esc(relativeTime(r.received_at))}</div>
+        </div>
+        <div class="or-msg">${esc(r.text)}</div>
+        <div class="row-actions">
+          <button class="mini-btn-sm" data-or-timeline="${esc(r.list_id)}|${esc(r.lead_id)}">Conversation</button>
+          ${r.phone ? `<span class="sublabel">${esc(r.phone)}</span>` : ''}
+        </div>
+        <div data-or-tl="${esc(r.lead_id)}"></div>
+      </div>`).join('');
+  }
+  document.getElementById('or-replies-list').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-or-timeline]');
+    if (btn) orToggleTimeline(btn);
+  });
+  document.getElementById('or-replies-list').addEventListener('change', async (e) => {
+    const sel = e.target.closest('[data-or-stage]');
+    if (!sel) return;
+    const [listId, leadId] = sel.dataset.orStage.split('|');
+    const r = await orFetch(`/outreach/leads/${listId}/${leadId}/stage`, { method: 'POST', body: { stage: sel.value } });
+    if (r.error) alert(r.error);
+  });
+
+  // ---------- setup ----------
+  const orVal = (id) => document.getElementById(id).value;
+  async function loadOrSetup() {
+    const cfg = await orFetch('/outreach/config');
+    orConfig = cfg;
+    const set = (id, v) => { document.getElementById(id).value = v ?? ''; };
+    set('or-s-email', cfg.email_address); set('or-s-from', cfg.from_name);
+    set('or-s-test-email', cfg.test_email); set('or-s-signature', cfg.signature);
+    set('or-s-optout', cfg.optout_line); set('or-s-smtp-host', cfg.smtp_host);
+    set('or-s-smtp-port', cfg.smtp_port); set('or-s-imap-host', cfg.imap_host);
+    set('or-s-imap-port', cfg.imap_port); set('or-s-test-phone', cfg.test_phone);
+    set('or-s-cc', cfg.country_code); set('or-s-email-cap', cfg.email_daily_cap);
+    set('or-s-wa-cap', cfg.whatsapp_daily_cap); set('or-s-hour-start', cfg.send_hours[0]);
+    set('or-s-hour-end', cfg.send_hours[1]); set('or-s-gap-min', cfg.min_gap_seconds);
+    set('or-s-gap-max', cfg.max_gap_seconds);
+    document.getElementById('or-s-password').placeholder = cfg.email_app_password_set ? 'Saved: enter to replace' : 'Enter to set';
+    document.getElementById('or-s-wa-enabled').checked = !!cfg.whatsapp_enabled;
+    document.getElementById('or-s-warmup').checked = !!cfg.warmup;
+    document.getElementById('or-s-notify').checked = !!cfg.notify_replies;
+    document.getElementById('or-s-days').innerHTML = OR_DAYS.map((d, i) =>
+      `<label><input type="checkbox" data-day="${i}" ${cfg.send_days.includes(i) ? 'checked' : ''}> ${d}</label>`).join('');
+    const tok = await orFetch('/outreach/whatsapp/token');
+    set('or-s-token', tok.token);
+    const o = await orFetch('/outreach/overview');
+    document.getElementById('or-wa-status').textContent = o.extension_connected
+      ? 'The extension is connected.'
+      : o.extension_last_seen ? `The extension was last seen ${relativeTime(o.extension_last_seen)}.`
+      : 'No extension has connected yet. Give it the token above (see docs/whatsapp-extension.md).';
+  }
+
+  async function orSaveSetup(changes, msgId, okText) {
+    const msg = document.getElementById(msgId);
+    const r = await orFetch('/outreach/config', { method: 'POST', body: changes });
+    if (r.error) { msg.className = 'inline-note error'; msg.textContent = r.error; return false; }
+    msg.className = 'inline-note ok'; msg.textContent = okText;
+    refreshOrOverview();
+    return true;
+  }
+
+  document.getElementById('or-save-mailbox').onclick = async () => {
+    const ok = await orSaveSetup({
+      email_address: orVal('or-s-email'), email_app_password: orVal('or-s-password'),
+      from_name: orVal('or-s-from'), test_email: orVal('or-s-test-email'),
+      signature: orVal('or-s-signature'), optout_line: orVal('or-s-optout'),
+      smtp_host: orVal('or-s-smtp-host'), smtp_port: Number(orVal('or-s-smtp-port')) || 465,
+      imap_host: orVal('or-s-imap-host'), imap_port: Number(orVal('or-s-imap-port')) || 993,
+    }, 'or-mailbox-msg', 'Saved. Press “Check connection” to make sure it can log in.');
+    if (ok) { document.getElementById('or-s-password').value = ''; loadOrSetup(); }
+  };
+  document.getElementById('or-check-mailbox').onclick = async () => {
+    const msg = document.getElementById('or-mailbox-msg');
+    msg.className = 'inline-note'; msg.textContent = 'Logging in…';
+    const r = await orFetch('/outreach/config/check-mailbox', { method: 'POST' });
+    msg.className = 'inline-note ' + (r.ok ? 'ok' : 'error');
+    msg.textContent = r.ok ? 'Connected: Mira can send and read replies.'
+      : `Sending: ${r.smtp}. Reading replies: ${r.imap}.`;
+  };
+  document.getElementById('or-save-wa').onclick = () => orSaveSetup({
+    whatsapp_enabled: document.getElementById('or-s-wa-enabled').checked,
+    test_phone: orVal('or-s-test-phone'), country_code: orVal('or-s-cc'),
+  }, 'or-wa-status', 'Saved.');
+  document.getElementById('or-copy-token').onclick = () => {
+    navigator.clipboard.writeText(orVal('or-s-token'));
+    document.getElementById('or-wa-status').textContent = 'Token copied.';
+  };
+  document.getElementById('or-rotate-token').onclick = async () => {
+    if (!confirm('Make a new token? The extension will stop working until you give it the new one.')) return;
+    const r = await orFetch('/outreach/whatsapp/token/rotate', { method: 'POST' });
+    document.getElementById('or-s-token').value = r.token;
+  };
+  document.getElementById('or-save-limits').onclick = () => orSaveSetup({
+    email_daily_cap: Number(orVal('or-s-email-cap')) || 40,
+    whatsapp_daily_cap: Number(orVal('or-s-wa-cap')) || 40,
+    send_hours: [Number(orVal('or-s-hour-start')), Number(orVal('or-s-hour-end'))],
+    send_days: Array.from(document.querySelectorAll('#or-s-days [data-day]')).filter(b => b.checked).map(b => Number(b.dataset.day)),
+    min_gap_seconds: Number(orVal('or-s-gap-min')) || 90,
+    max_gap_seconds: Number(orVal('or-s-gap-max')) || 240,
+    warmup: document.getElementById('or-s-warmup').checked,
+    notify_replies: document.getElementById('or-s-notify').checked,
+  }, 'or-limits-msg', 'Saved.');
 
   async function loadTasks() {
     const listEl = document.getElementById('task-list');

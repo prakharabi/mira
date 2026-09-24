@@ -52,6 +52,14 @@ Google Maps and each business's own site. It runs in the background and tells
 you when it's done; then ask to see the ones with an email, the ones without a
 website, or export the list as a CSV.
 
+**Runs outreach.** Turns a lead list into a campaign: email on day 0, WhatsApp
+on day 1, follow-ups in the same email thread on days 4 and 9, each written
+from your template and tailored to the business. Test it on yourself first,
+then let it run by itself, inside your sending hours and daily limits. Every
+reply on either channel lands in one timeline, stops that business's sequence,
+and pings you. Anyone who says STOP is never contacted again.
+([setup](docs/outreach-setup.md))
+
 **Proactive.** Optionally speaks first — a meeting starting soon, mail addressed
 directly to you — delivered over Telegram so it reaches you with the lid shut.
 
@@ -177,13 +185,16 @@ accounts:
   get your IP temporarily rate-limited. Scraped phone numbers and emails are
   personal data, so follow the privacy and anti-spam rules where the businesses
   are if you contact them.
+- **Outreach** — a separate, brand-name Gmail with an app password
+  ([setup guide](docs/outreach-setup.md)); WhatsApp through a browser extension
+  that follows [this contract](docs/whatsapp-extension.md)
 
 Web search needs no key at all.
 
 ## Privacy
 
-Chat history, memory, settings, recordings, transcripts, captures and lead
-lists all stay on disk in `daemon/` and are gitignored. The local model path never leaves the
+Chat history, memory, settings, recordings, transcripts, captures, lead lists
+and outreach logs all stay on disk in `daemon/` and are gitignored. The local model path never leaves the
 machine. The cloud model is used only when routing selects it, and memory
 extraction always runs locally.
 

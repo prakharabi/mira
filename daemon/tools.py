@@ -326,6 +326,102 @@ def _tool_export_leads(list: str = "", **_):
     return {"exported": True, "path": leads.export_csv(record), "count": len(record["leads"])}
 
 
+def _campaign_or_error(ref: str):
+    import outreach
+    c = outreach.find_campaign(ref)
+    if not c:
+        return None, {"error": "No campaign matches that. Campaigns are created in Mira > Outreach."}
+    return c, None
+
+
+def _tool_outreach_status(campaign: str = "", **_):
+    import outreach
+    out = outreach.overview()
+    if campaign:
+        c, err = _campaign_or_error(campaign)
+        if err:
+            return err
+        out["campaign"] = {k: v for k, v in outreach.get_campaign(c["id"]).items()
+                           if k in ("name", "status", "mode", "list_name", "stats", "tested_at")}
+    return out
+
+
+def _tool_send_campaign_test(campaign: str = "", **_):
+    import outreach
+    c, err = _campaign_or_error(campaign)
+    if err:
+        return err
+    try:
+        res = outreach.send_test(c["id"])
+    except Exception as e:
+        return {"error": str(e)}
+    return {"campaign": c["name"], "emails_sent_to_you": res["emails_sent"],
+            "whatsapp_queued_to_you": res["whatsapp_queued"], "notes": res["notes"]}
+
+
+def _tool_start_campaign(campaign: str = "", mode: str = "", skip_test: bool = False, **_):
+    import outreach
+    c, err = _campaign_or_error(campaign)
+    if err:
+        return err
+    try:
+        res = outreach.activate(c["id"], mode or None, bool(skip_test))
+    except Exception as e:
+        return {"started": False, "error": str(e)}
+    return {"started": True, "campaign": c["name"], "mode": res["campaign"]["mode"],
+            "leads_enrolled": res["enrolled"], "warnings": res["warnings"]}
+
+
+def _tool_pause_campaign(campaign: str = "", **_):
+    import outreach
+    if (campaign or "").strip().lower() in ("all", "everything", "all outreach"):
+        outreach.set_enabled(False)
+        return {"paused": "all outreach sending"}
+    c, err = _campaign_or_error(campaign)
+    if err:
+        return err
+    outreach.pause(c["id"])
+    return {"paused": c["name"]}
+
+
+def _tool_set_outreach_sending(enabled: bool = True, **_):
+    import outreach
+    outreach.set_enabled(bool(enabled))
+    return {"outreach_sending": "on" if enabled else "off"}
+
+
+def _tool_approve_outreach(campaign: str = "", **_):
+    import outreach
+    cid = ""
+    if campaign:
+        c, err = _campaign_or_error(campaign)
+        if err:
+            return err
+        cid = c["id"]
+    return {"approved": outreach.approve_all(cid)}
+
+
+def _tool_show_replies(label: str = "", limit: int = 10, **_):
+    import outreach
+    items = outreach.replies(max(1, min(int(limit or 10), 30)), label or "")
+    return {"replies": [{"business": r["business"], "channel": r["channel"], "label": r["label"],
+                         "text": r["text"][:400], "received_at": r.get("received_at"),
+                         "phone": r.get("phone")} for r in items]}
+
+
+def _tool_mark_lead(business: str = "", stage: str = "", **_):
+    import leads
+    import outreach
+    record, lead = leads.find_lead(business)
+    if not lead:
+        return {"error": f"No lead called '{business}' in any lead list."}
+    try:
+        outreach.set_stage(record["id"], lead["id"], stage)
+    except ValueError as e:
+        return {"error": str(e)}
+    return {"business": lead["name"], "stage": stage}
+
+
 # ---------- registry ----------
 # `summary` is what a non-tool-calling model sees in its system prompt, so it
 # must read as a plain capability statement, not as API documentation.
@@ -731,6 +827,110 @@ TOOLS = [
             },
         },
         "fn": _tool_export_leads,
+    },
+    {
+        "name": "outreach_status",
+        "summary": "report on outreach campaigns: what was sent today, replies, pending approvals",
+        "description": "Overview of outreach: whether sending is on, today's emails/WhatsApp sent vs limits, "
+                       "messages waiting for approval, recent replies, and each campaign's status. Pass a "
+                       "campaign name for its detailed numbers.",
+        "parameters": {
+            "type": "object",
+            "properties": {"campaign": {"type": "string", "description": "Optional campaign name"}},
+        },
+        "fn": _tool_outreach_status,
+    },
+    {
+        "name": "send_campaign_test",
+        "summary": "send a test of an outreach campaign to the user's own email and WhatsApp",
+        "description": "Render every step of a campaign for a couple of real leads and send them to the "
+                       "user's own test email / WhatsApp number (from Outreach > Setup), so they can see "
+                       "exactly what businesses will receive. Nothing goes to any business.",
+        "parameters": {
+            "type": "object",
+            "properties": {"campaign": {"type": "string", "description": "Campaign name; blank = the latest"}},
+        },
+        "fn": _tool_send_campaign_test,
+    },
+    {
+        "name": "start_campaign",
+        "summary": "start (or resume) an outreach campaign",
+        "description": "Start or resume an outreach campaign so its messages go out to businesses. "
+                       "Campaigns must be tested first unless the user explicitly says to skip the test. "
+                       "mode 'auto' sends by itself; 'review' holds each message for approval.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "campaign": {"type": "string"},
+                "mode": {"type": "string", "enum": ["auto", "review"]},
+                "skip_test": {"type": "boolean", "description": "Only if the user explicitly asked to skip testing"},
+            },
+            "required": ["campaign"],
+        },
+        "fn": _tool_start_campaign,
+    },
+    {
+        "name": "pause_campaign",
+        "summary": "pause an outreach campaign, or all outreach",
+        "description": "Pause one campaign by name, or pass 'all' to switch off all outreach sending.",
+        "parameters": {
+            "type": "object",
+            "properties": {"campaign": {"type": "string", "description": "Campaign name, or 'all'"}},
+            "required": ["campaign"],
+        },
+        "fn": _tool_pause_campaign,
+    },
+    {
+        "name": "set_outreach_sending",
+        "summary": "switch all outreach sending on or off",
+        "description": "Master switch for automatic outreach sending across every campaign.",
+        "parameters": {
+            "type": "object",
+            "properties": {"enabled": {"type": "boolean"}},
+            "required": ["enabled"],
+        },
+        "fn": _tool_set_outreach_sending,
+    },
+    {
+        "name": "approve_outreach",
+        "summary": "approve outreach messages waiting for review",
+        "description": "Approve every outreach message waiting for review (optionally only one campaign's), "
+                       "so they go out on schedule.",
+        "parameters": {
+            "type": "object",
+            "properties": {"campaign": {"type": "string"}},
+        },
+        "fn": _tool_approve_outreach,
+    },
+    {
+        "name": "show_replies",
+        "summary": "show replies from businesses to outreach (email and WhatsApp)",
+        "description": "Show the latest replies to outreach, newest first, with how each was classified.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "label": {"type": "string", "enum": ["", "interested", "question", "not_interested",
+                                                     "unsubscribe", "auto_reply", "other"]},
+                "limit": {"type": "integer"},
+            },
+        },
+        "fn": _tool_show_replies,
+    },
+    {
+        "name": "mark_lead",
+        "summary": "update where a business is in the sales pipeline (e.g. won, lost, do not contact)",
+        "description": "Set a lead's stage by business name. Anything past 'contacted' stops its campaign "
+                       "sequence; do_not_contact also blocks it from all future outreach.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "business": {"type": "string"},
+                "stage": {"type": "string", "enum": ["new", "contacted", "replied", "interested",
+                                                     "proposal_sent", "won", "lost", "do_not_contact"]},
+            },
+            "required": ["business", "stage"],
+        },
+        "fn": _tool_mark_lead,
     },
 ]
 
