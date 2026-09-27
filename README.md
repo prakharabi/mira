@@ -35,16 +35,58 @@ Separate from Reminders on purpose: these are commitments, not alarms.
 Tab, plus in-word completion and mid-word typo correction. It learns from what
 you actually type, which is also what keeps it fast.
 
-**Captures.** ⌘⇧D opens a Spotlight-style Quick Capture that files a thought
-into the Dump Box, where it becomes a summary and action items. ⌘⇧O runs OCR on
-any region of the screen.
+**Talks back, and stops when you say so.** Control+A (or "Hey Mira") and just
+talk: she listens until you finish, however long the request, with a live
+caption of what she's hearing in the notch. Control+S opens a typed Ask box in
+the notch. While she's speaking, the ✕ in the notch cuts her off, and music
+playing in Spotify or Music is lowered while she talks.
+
+**Captures.** Control+D opens a Spotlight-style Quick Capture that files a
+thought into the Dump Box, where it becomes a summary and action items.
+Control+Q runs OCR on any region of the screen.
+
+**Sees your screen and points.** Ask "what's this error?" or "summarize this
+page" and Mira looks at the display you're working on. Ask "where's the export
+button?" and she draws a highlight around it on the real screen, positioned by
+on-device text recognition so it lands on the exact control. A screenshot goes
+to your cloud model only when you ask about your screen, and is never kept.
+
+**Operates apps for you.** With Computer control on, "export this as CSV" or
+"open Notes and make a note called Groceries" makes Mira click and type in
+your apps herself while you watch. A bar shows each step. Moving the mouse,
+Control+Esc or Stop takes back control, and she asks before anything that
+sends, deletes or pays.
+
+**Payroll and attendance.** Connected to RazorpayX Payroll, "check me in",
+"mark Puja on half-day", "hold Rahul's salary this month" or "what's
+the team due this month?" work by voice, chat or Telegram. Bonuses and
+loss-of-pay deductions can be added and undone the same way.
+
+**Bookings.** With Cal.com connected, list, book, cancel and reschedule
+meetings on your booking page by asking.
 
 **Meetings.** Records mic + system audio, transcribes (locally or via cloud),
 and generates minutes.
 
-**Runs your workflows.** Fires named n8n webhooks by voice or chat, matched
-against how you describe them. The Automations view shows whether n8n is
-actually running, and starts it.
+**Runs your workflows.** Fires named n8n webhooks by voice or chat when you
+ask for one by name ("run the blog automation"). The Automations view shows
+whether n8n is actually running, and starts it. Workflows can report back:
+a published blog post arrives on Telegram with its links and shows up in the
+next morning digest.
+
+**Finds leads.** "Find dentists in Indiranagar, Bangalore" becomes a saved
+list of businesses with phone, email, website and social links, pulled from
+Google Maps and each business's own site. It runs in the background and tells
+you when it's done; then ask to see the ones with an email, the ones without a
+website, or export the list as a CSV.
+
+**Runs outreach.** Turns a lead list into a campaign: email on day 0, WhatsApp
+on day 1, follow-ups in the same email thread on days 4 and 9, each written
+from your template and tailored to the business. Test it on yourself first,
+then let it run by itself, inside your sending hours and daily limits. Every
+reply on either channel lands in one timeline, stops that business's sequence,
+and pings you. Anyone who says STOP is never contacted again.
+([setup](docs/outreach-setup.md))
 
 **Proactive.** Optionally speaks first — a meeting starting soon, mail addressed
 directly to you — delivered over Telegram so it reaches you with the lid shut.
@@ -94,8 +136,8 @@ ollama pull qwen3:1.7b
 
 # app
 cd electron && npm install
-node scripts/build_app.js     # produces dist/Mira.app
-open dist/Mira.app
+npm run install-app           # builds Mira.app and installs it in /Applications
+open /Applications/Mira.app
 ```
 
 The daemon runs on port 11200 as a LaunchAgent (`com.mira.daemon`); Ollama uses
@@ -140,17 +182,19 @@ Accessibility, which predictive typing depends on:
 
 | Permission | Needed for |
 |---|---|
-| Accessibility | predictive typing, text insertion |
+| Accessibility | predictive typing, text insertion, computer control |
 | Microphone | dictation, wake word, meeting recording |
-| Screen Recording | OCR, meeting system audio |
+| Screen Recording | OCR, screen vision, computer control, meeting system audio |
 | Automation (Reminders) | creating reminders |
 
 **Rebuilding revokes permissions.** Builds are signed ad-hoc, so macOS keys
 each grant to a code hash that changes every time you run `build_app.js`. After
 a rebuild, predictive typing usually stops because `tab_tap` can no longer
 create its event tap. Settings → Assistant shows this and links straight to the
-Accessibility pane; re-grant, then press Restart. A real Developer ID signature
-would make grants stick across builds.
+Accessibility pane; re-grant, then press Restart. Settings → Permissions has
+Reset and Grant for each one, and Mira asks for Accessibility and Screen
+Recording on launch when they're missing, which puts her back in those lists.
+A real Developer ID signature would make grants stick across builds.
 
 ### Optional integrations
 
@@ -161,23 +205,45 @@ accounts:
 - **Cloud model** — any OpenAI-compatible endpoint (Groq by default)
 - **Google** — your own OAuth client for Gmail/Calendar/Drive ([setup guide](docs/google-setup.md))
 - **Telegram** — your own bot from @BotFather
+- **Cal.com** — your own API key, in Settings
+- **RazorpayX Payroll** — your own org ID and API key, in Settings > Connected
+  Services. Mira keeps a local name directory (name, email, title, department
+  only) because the payroll API can't list employees
 - **n8n** — your own webhook URLs; `./scripts/n8n.sh` runs one locally
+- **Lead finder** — `./scripts/install_scraper.sh` builds
+  [gosom/google-maps-scraper](https://github.com/gosom/google-maps-scraper)
+  (MIT) natively; it needs Go (`brew install go`) and runs only while a search
+  is running. Or add your own Google Places API key in Settings instead: nothing
+  runs locally, but it returns no emails and bills past Google's free monthly
+  allowance. Scraping Google Maps is against Google's terms, and heavy use can
+  get your IP temporarily rate-limited. Scraped phone numbers and emails are
+  personal data, so follow the privacy and anti-spam rules where the businesses
+  are if you contact them.
+- **Outreach** — a separate, brand-name Gmail with an app password
+  ([setup guide](docs/outreach-setup.md)); WhatsApp through a browser extension
+  that follows [this contract](docs/whatsapp-extension.md)
 
 Web search needs no key at all.
 
 ## Privacy
 
-Chat history, memory, settings, recordings, transcripts and captures all stay
-on disk in `daemon/` and are gitignored. The local model path never leaves the
+Chat history, memory, settings, recordings, transcripts, captures, lead lists
+and outreach logs all stay on disk in `daemon/` and are gitignored. The local model path never leaves the
 machine. The cloud model is used only when routing selects it, and memory
-extraction always runs locally.
+extraction always runs locally. Screenshots are taken only when you ask Mira
+about your screen, sent to your cloud model for that one answer, and deleted
+right after (Settings > Assistant > Screen vision turns it off). Set
+Settings > Assistant > Vision model to *This Mac only* and screenshots are read
+by a local Ollama model (`qwen3.5:9b`) instead, so they never leave the Mac. Computer
+control is off by default and only acts while you can see it working.
 
 ## Development
 
 ```bash
 cd electron && npm start                 # run unpackaged
 MIRA_DEBUG_PREDICTIVE=1 npx electron .   # verbose predictive-typing logging
-npm run build                            # rebuild Mira.app
+npm run build                            # rebuild Mira.app (electron/dist)
+npm run install-app                      # rebuild and install to /Applications
 npm run dmg                              # rebuild and package Mira.dmg
 python3 scripts/generate_icon.py         # regenerate the app icon
 python3 scripts/generate_tray_icon.py    # regenerate the menu bar icon

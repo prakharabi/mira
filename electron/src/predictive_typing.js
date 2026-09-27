@@ -87,19 +87,28 @@ let idleTickCount = 0;
 // work with (the last several words of an actual finished thought, not a
 // half-typed fragment). Any further typing during the wait resets the timer.
 const NEXT_WORD_DEBOUNCE_MS = 250;
-const CONTEXT_WORD_COUNT = 8; // "at least 4-8 words" of context for next-word prediction
+const CONTEXT_WORD_COUNT = 8; // n-gram lookup only -- the model gets the whole sentence (see sentenceContext)
+// The model sees the entire sentence being written, plus a little of what came
+// before it, rather than only the last 8 words -- a suggestion made from the
+// tail of a sentence alone kept missing what the sentence was actually about.
+const PRIOR_CONTEXT_WORDS = 40;
+// A suggestion left on screen after the user stops typing is a trap: the next
+// Tab they press -- to move to the next form field, say -- accepts it. So it
+// only lives this long without further typing.
+const SUGGESTION_IDLE_HIDE_MS = 3000;
 // Next-word prediction is the ONLY thing here that runs a language model, and
 // running it after the first word or two is both the least useful (almost no
 // context to go on) and the most expensive -- each call wakes a multi-gigabyte
 // model that then sits resident. Waiting until there's a real sentence fragment
 // to work with cuts the number of model loads sharply and improves the
-// suggestions that do appear. In-word completion and spellcheck are unaffected:
-// they're local lookups with no model behind them, so they stay instant from
-// the first keystroke.
-const MIN_WORDS_BEFORE_PREDICT = 2;
+// suggestions that do appear. Counted within the CURRENT sentence, so a
+// fresh sentence waits for its own first few words instead of guessing from
+// the previous one's.
+const MIN_WORDS_BEFORE_PREDICT = 3;
 const MIN_PARTIAL_WORD_LEN = 3;
 
 let ghostWindow = null;
+let ghostIdleTimer = null;
 let lastTextBeforeCursor = '';
 // Where a suggestion should be drawn, and how much the position can be trusted.
 //   'caret' -- a real measured caret rect; precise enough to draw inline on the
@@ -247,21 +256,37 @@ function completeWordViaDaemon(partial, callback) {
 
 let activeRequest = null;
 
-function callDaemonForCompletion(contextTail, callback) {
+// Splits what's before the cursor into the sentence currently being written
+// and a capped slice of what came before it.
+function sentenceContext(textBeforeCursor) {
+  const text = textBeforeCursor.replace(/\s+$/, '');
+  const lastEnd = Math.max(text.lastIndexOf('.'), text.lastIndexOf('!'),
+                           text.lastIndexOf('?'), text.lastIndexOf('\n'));
+  const sentence = text.slice(lastEnd + 1).trim();
+  const before = text.slice(0, lastEnd + 1).trim().split(/\s+/).filter(Boolean);
+  return {
+    sentence,
+    sentenceWords: sentence ? sentence.split(/\s+/).length : 0,
+    prior: before.slice(-PRIOR_CONTEXT_WORDS).join(' '),
+  };
+}
+
+function callDaemonForCompletion(ctx, callback) {
   // abort any in-flight request before starting a new one — never let requests stack
   if (activeRequest) {
     activeRequest.destroy();
     activeRequest = null;
   }
 
-  // kept intentionally short -- this whole prompt gets re-processed by the model
-  // on every request, so its length is a direct latency tax. The "no filler
-  // words" line earns its keep specifically: without it the model has a strong
-  // tic of tacking on "now"/"today" onto otherwise-good completions.
-  const prompt = `Continue this sentence with 2-4 plain words, no punctuation. Do not add filler words like now/today/please unless truly needed:
-"${contextTail}"`;
+  // Still kept short -- the whole prompt is re-processed on every request, so
+  // its length is a direct latency tax. The "no filler words" line earns its
+  // keep specifically: without it the model has a strong tic of tacking
+  // "now"/"today" onto otherwise-good completions.
+  const priorLine = ctx.prior ? `Earlier text: "${ctx.prior}"\n` : '';
+  const prompt = `${priorLine}Read the whole sentence below, then continue it with the next 1-3 plain words that fit what it is saying. No punctuation. Do not add filler words like now/today/please unless truly needed:
+"${ctx.sentence}"`;
 
-  const url = `http://localhost:11200/complete?prompt=${encodeURIComponent(prompt)}&context=${encodeURIComponent(contextTail)}`;
+  const url = `http://localhost:11200/complete?prompt=${encodeURIComponent(prompt)}&context=${encodeURIComponent(ctx.sentence)}`;
   const req = http.get(url, (res) => {
     let data = '';
     res.on('data', (chunk) => { data += chunk; });
@@ -407,9 +432,16 @@ function showGhost(payload) {
   ).catch(() => {});
   ghostWindow.showInactive();
   setTabTapActive(true);
+
+  // Any typing re-runs the poll, which hides this and shows a fresh one (with
+  // a fresh timer) -- so this only ever fires once the user has stopped.
+  // Clearing it also releases Tab, which is the actual point.
+  if (ghostIdleTimer) clearTimeout(ghostIdleTimer);
+  ghostIdleTimer = setTimeout(hideGhostText, SUGGESTION_IDLE_HIDE_MS);
 }
 
 function hideGhostText() {
+  if (ghostIdleTimer) { clearTimeout(ghostIdleTimer); ghostIdleTimer = null; }
   suggestionMode = null;
   currentSuggestionWords = [];
   currentInWordSuffix = '';
@@ -627,10 +659,17 @@ function clearNextWordDebounce() {
 }
 
 // ---------- mid-word: fast, local, no debounce (cheap dictionary lookup) ----------
+// Letter-level suggestions (finishing the word being typed, or correcting it
+// mid-word) are switched off: firing on nearly every keystroke, they were
+// more noise than help and crowded out the next-word suggestion. Only
+// next-word suggestions, at word boundaries, remain. Flip this to bring them
+// back -- the code below is left intact.
+const MIDWORD_SUGGESTIONS_ENABLED = false;
+
 function handleMidWord(partialWord) {
   clearNextWordDebounce();
 
-  if (partialWord.length < MIN_PARTIAL_WORD_LEN) {
+  if (!MIDWORD_SUGGESTIONS_ENABLED || partialWord.length < MIN_PARTIAL_WORD_LEN) {
     hideGhostText();
     return;
   }
@@ -686,7 +725,7 @@ function handleWordBoundary(lastCompletedWord, tokens, rawTextBeforeCursor, trai
 
     // Instant path first: if the user's own writing already predicts what comes
     // next, show it now rather than making them wait on a model round-trip.
-    if (tokens.length >= MIN_WORDS_BEFORE_PREDICT) {
+    if (sentenceContext(rawTextBeforeCursor).sentenceWords >= MIN_WORDS_BEFORE_PREDICT) {
       const contextTail = tokens.slice(-CONTEXT_WORD_COUNT).join(' ');
       localPredictViaDaemon(contextTail, (local) => {
         if (local && local.words && local.words.length && suggestionMode === null) {
@@ -727,17 +766,19 @@ function handleWordBoundary(lastCompletedWord, tokens, rawTextBeforeCursor, trai
 
 function requestNextWordSuggestion(tokens, rawTextBeforeCursor) {
   if (pendingRequest || acceptingInProgress) return;
-  if (tokens.length < MIN_WORDS_BEFORE_PREDICT) return;
-
-  const contextTail = tokens.slice(-CONTEXT_WORD_COUNT).join(' ');
-  if (!contextTail) return;
+  const ctx = sentenceContext(rawTextBeforeCursor);
+  if (ctx.sentenceWords < MIN_WORDS_BEFORE_PREDICT) return;
+  const contextTail = ctx.sentence;
 
   pendingRequest = true;
   if (DEBUG_PREDICTIVE) console.log('[predict] analyzing sentence:', contextTail);
-  callDaemonForCompletion(contextTail, (completion) => {
+  callDaemonForCompletion(ctx, (completion) => {
     pendingRequest = false;
     if (DEBUG_PREDICTIVE) console.log('[predict] daemon response:', completion);
     if (!completion) return;
+    // Typed on while the model was thinking: this answer continues a
+    // sentence that no longer ends where it did, so it can only be wrong.
+    if (lastTextBeforeCursor !== rawTextBeforeCursor) return;
 
     // clean up: take only the first line/fragment, strip leading ellipsis/punctuation
     let cleaned = completion.split('\n')[0].trim();

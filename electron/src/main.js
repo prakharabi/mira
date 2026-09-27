@@ -11,6 +11,7 @@ const { startMeetingRecording, stopMeetingRecording } = require('./meeting_recor
 const reminders = require('./reminders');
 
 const OCR_HELPER_PATH = path.join(__dirname, '..', 'ocr_helper');
+const INPUT_HELPER_PATH = path.join(__dirname, '..', 'input_helper');
 
 app.dock.hide();
 
@@ -236,7 +237,33 @@ ipcMain.on('notch-close', () => {
   goNotchIdle();
 });
 
+// The ✕ on the speaking pill: the daemon owns playback (afplay), so it's the
+// one that can stop it. The notch goes idle straight away rather than waiting
+// for the voice-status poll to notice.
+ipcMain.on('notch-stop-speaking', () => {
+  postToDaemon('/voice/stop-speaking', {});
+  goNotchIdle();
+});
+
+// What "Open in Browser" should load for a piece of copied text: the link
+// itself, a bare domain promoted to https, or otherwise a web search for it.
+// Only http(s) is ever opened directly -- copied text is untrusted, and
+// handing a file:// path or an app's custom URL scheme to openExternal would
+// launch whatever that points at rather than a web page.
+function browserUrlFor(text) {
+  const t = (text || '').trim();
+  if (/^https?:\/\/\S+$/i.test(t)) return t;
+  if (/^(www\.)?[a-z0-9-]+(\.[a-z0-9-]+)*\.[a-z]{2,}(\/\S*)?$/i.test(t)) return `https://${t}`;
+  return `https://www.google.com/search?q=${encodeURIComponent(t)}`;
+}
+
 ipcMain.on('notch-action', (event, { action, text }) => {
+  if (action === 'open') {
+    if ((text || '').trim()) require('electron').shell.openExternal(browserUrlFor(text));
+    goNotchIdle();
+    return;
+  }
+
   if (action === 'remind') {
     const prompt = `Extract only the core task as a short reminder title, no explanation, just the title: ${text}`;
     callDaemon(prompt, (response) => {
@@ -272,13 +299,18 @@ ipcMain.on('notch-action', (event, { action, text }) => {
 // moment between the circle gesture finishing and OCR text coming back --
 // otherwise there's a silent gap with nothing on screen to say anything is
 // happening at all.
-function showNotchWorking(label) {
+// `waitForAnswer` is for "Thinking…": an agent turn with tool calls routinely
+// runs past the 15s stuck-spinner guard OCR's "Reading…" relies on, and that
+// guard was blanking the notch mid-answer. Those callers always end the state
+// themselves (the daemon's voice state returns to idle, or notch-ask gets its
+// response/error), so they get a long backstop instead of the short one.
+function showNotchWorking(label, { waitForAnswer = false } = {}) {
   const w = ensureNotchWindow();
   w.setIgnoreMouseEvents(false);
   w.setHasShadow(true);
   w.setBounds(notchGeometry(NOTCH_COLLAPSED_HEIGHT, NOTCH_ACTIVE_WIDTH), true);
   w.showInactive();
-  const send = () => w.webContents.send('notch-collapsed', label);
+  const send = () => w.webContents.send('notch-collapsed', label, { waitForAnswer });
   if (w.webContents.isLoadingMainFrame()) w.webContents.once('did-finish-load', send);
   else send();
 }
@@ -337,7 +369,7 @@ const NOTCH_ASK_SESSION_ID = 'notch_ask';
 
 ipcMain.on('notch-ask-submit', (event, text) => {
   if (!text || !text.trim()) return;
-  showNotchWorking('Thinking…');
+  showNotchWorking('Thinking…', { waitForAnswer: true });
 
   const req = http.request(
     { hostname: 'localhost', port: 11200, path: '/chat', method: 'POST',
@@ -825,40 +857,72 @@ function startAutoMeetingWatcher() {
 
 // ---------- Voice status: drives the notch's listening/speaking states ----------
 // The daemon is a headless process and can't push into this renderer, so
-// this poll is the only way Electron finds out "Mira is now listening" or
+// this is the only way Electron finds out "Mira is now listening" or
 // "...now speaking" -- see voice_state.py for the daemon side, set from
-// wakeword_listener.py's handle_wake_detected/speak_reply. 400ms keeps the
-// notch's reaction feeling immediate without being a meaningfully heavier
-// localhost request than the 30s meeting-watcher poll above.
+// wakeword_listener.py's handle_wake_detected/speak_reply.
+//
+// Long poll, like the action queue: the daemon holds the request until the
+// state's version moves past the one we last saw, so the notch reacts the
+// instant it changes -- and an idle Mira makes one request every 25s instead
+// of the 2.5 a second a 400ms poll cost. VOICE_POLL_MS is now only the
+// cadence against an older daemon that answers straight away.
 const VOICE_POLL_MS = 400;
+const VOICE_LONG_POLL_S = 25;
 let lastVoiceUIState = 'idle';
+let voiceVersion = -1;
 
 function pollVoiceStatus() {
-  fetchDaemonJson('http://localhost:11200/voice/status', (data, err) => {
-    if (err || !data) return;
-    const state = data.state || 'idle';
-    if (state === lastVoiceUIState) return;
-    lastVoiceUIState = state;
-
-    if (state === 'listening') {
-      showNotchListening();
-      startListeningCaption();
-    } else {
-      // Any state other than listening means the daemon has moved past the
-      // recording window this caption exists to cover -- stop polling for
-      // it immediately rather than waiting on its own backstop timeout,
-      // so a quick "heard nothing" round trip doesn't leave a stale caption
-      // poll running into the next, unrelated state.
-      stopListeningCaption();
-      if (state === 'thinking') showNotchWorking('Thinking…');
-      else if (state === 'speaking') showNotchSpeaking(data.text, data.duration);
-      else goNotchIdle();  // idle -- only reached after one of the states above, so this is always a real return-to-rest
-    }
+  const url = voiceVersion >= 0
+    ? `http://localhost:11200/voice/status?since=${voiceVersion}&wait=${VOICE_LONG_POLL_S}`
+    : 'http://localhost:11200/voice/status';
+  let settled = false;
+  const again = (delay) => {
+    if (settled) return;
+    settled = true;
+    setTimeout(pollVoiceStatus, delay);
+  };
+  const req = http.get(url, { timeout: (VOICE_LONG_POLL_S + 5) * 1000 }, (res) => {
+    let body = '';
+    res.on('data', (c) => { body += c; });
+    res.on('end', () => {
+      let data = null;
+      try { data = JSON.parse(body); } catch (e) { /* daemon restarting */ }
+      if (data) {
+        if (Number.isInteger(data.version)) voiceVersion = data.version;
+        applyVoiceStatus(data);
+      }
+      again(data && data.long_poll ? 0 : VOICE_POLL_MS);
+    });
   });
+  // Daemon down or restarting: its versions restart from 0, which the next
+  // request's ?since mismatch picks up immediately once it's back.
+  req.on('error', () => again(2000));
+  req.on('timeout', () => req.destroy());
+}
+
+function applyVoiceStatus(data) {
+  const state = data.state || 'idle';
+  if (state === lastVoiceUIState) return;
+  lastVoiceUIState = state;
+
+  if (state === 'listening') {
+    showNotchListening();
+    startListeningCaption();
+  } else {
+    // Any state other than listening means the daemon has moved past the
+    // recording window this caption exists to cover -- stop polling for
+    // it immediately rather than waiting on its own backstop timeout,
+    // so a quick "heard nothing" round trip doesn't leave a stale caption
+    // poll running into the next, unrelated state.
+    stopListeningCaption();
+    if (state === 'thinking') showNotchWorking('Thinking…', { waitForAnswer: true });
+    else if (state === 'speaking') showNotchSpeaking(data.text, data.duration);
+    else goNotchIdle();  // idle -- only reached after one of the states above, so this is always a real return-to-rest
+  }
 }
 
 function startVoiceStatusWatcher() {
-  setInterval(pollVoiceStatus, VOICE_POLL_MS);
+  pollVoiceStatus();
 }
 
 // ---------- Reminders IPC (Dump Box action items) ----------
@@ -890,7 +954,311 @@ async function runQueuedAction(action) {
       listName: p.list_name || '',
     });
   }
+  if (action.type === 'capture_screen') return captureScreenForVision(action.params || {});
+  if (action.type === 'computer_act') return computerAct(action.params || {});
+  if (action.type === 'computer_status') { setAgentStatus(action.params || {}); return { success: true }; }
+  if (action.type === 'computer_confirm') return askAgentConfirm(action.params || {});
+  if (action.type === 'show_pointer') { showPointer(action.params || {}); return { success: true }; }
   return { success: false, error: `unknown action type: ${action.type}` };
+}
+
+// ---------- Screen vision: capture + pointer overlay ----------
+// The daemon (screen_vision.py) asks for these through the action queue:
+// it's a headless LaunchAgent with no Screen Recording grant, while Mira.app
+// already has one for Control+Q OCR. Only ever runs because the user asked
+// Mira something about their screen.
+function execFileP(cmd, args) {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, { maxBuffer: 16 * 1024 * 1024 }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
+  });
+}
+
+async function captureScreenForVision({ max_width = 1600, text_boxes = false, silent = false } = {}) {
+  if (ocrPermissionDenied()) {
+    return { success: false, error: 'Mira needs Screen Recording permission to see your screen. Grant it in ' +
+      'System Settings → Privacy & Security → Screen Recording, then fully quit and reopen Mira.' };
+  }
+  // The display the user is working on is the one under the cursor.
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const { x, y, width, height } = display.bounds;
+  const stamp = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+  const png = path.join(os.tmpdir(), `mira_vision_${stamp}.png`);
+  const jpg = path.join(os.tmpdir(), `mira_vision_${stamp}.jpg`);
+  try {
+    // -x: no shutter sound. -R: this display's rect in global points.
+    await execFileP('screencapture', ['-x', '-R', `${x},${y},${width},${height}`, png]);
+    let boxes = null;
+    if (text_boxes) {
+      // Exact text positions, so pointing lands on the real button rather
+      // than the vision model's approximate guess (see screen_vision.py).
+      try { boxes = JSON.parse(await execFileP(OCR_HELPER_PATH, ['--json', png])); } catch (e) { boxes = []; }
+    }
+    // A Retina screen is ~3000px wide; 1600 keeps text readable at a
+    // fraction of the upload and the model's token cost.
+    await execFileP('sips', ['-Z', String(max_width), '-s', 'format', 'jpeg',
+      '-s', 'formatOptions', '70', png, '--out', jpg]);
+    // The daemon deletes the JPEG as soon as it reads it; this is only the
+    // backstop so a capture is never left on disk if it didn't.
+    setTimeout(() => fs.unlink(jpg, () => {}), 60 * 1000);
+    if (!silent) flashScreenEdge(display);
+    return { success: true, path: jpg, display: { x, y, width, height }, text_boxes: boxes };
+  } catch (e) {
+    fs.unlink(jpg, () => {});
+    return { success: false, error: `Screen capture failed: ${e.message}` };
+  } finally {
+    fs.unlink(png, () => {});
+  }
+}
+
+// One transparent, click-through window over the active display, used both
+// for the highlight ring and the brief "Mira looked" edge glow. Content
+// protection keeps it out of screenshots, so a follow-up question never has
+// Mira's own ring in the picture she's looking at.
+let pointerWindow = null;
+let pointerHideTimer = null;
+
+function ensurePointerWindow(bounds) {
+  if (!pointerWindow || pointerWindow.isDestroyed()) {
+    pointerWindow = new BrowserWindow({
+      ...bounds,
+      frame: false,
+      transparent: true,
+      alwaysOnTop: true,
+      resizable: false,
+      hasShadow: false,
+      skipTaskbar: true,
+      focusable: false,
+      enableLargerThanScreen: true,
+      show: false,
+      webPreferences: { nodeIntegration: true, contextIsolation: false },
+    });
+    pointerWindow.setAlwaysOnTop(true, 'screen-saver');
+    pointerWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    pointerWindow.setIgnoreMouseEvents(true);
+    pointerWindow.setContentProtection(true);
+    pointerWindow.loadFile('src/pointer.html');
+    pointerWindow.on('closed', () => { pointerWindow = null; });
+  }
+  pointerWindow.setBounds(bounds);
+  return pointerWindow;
+}
+
+function sendToPointer(channel, payload, seconds) {
+  const w = pointerWindow;
+  const send = () => {
+    // macOS keeps windows below the menu bar, so the real origin can differ
+    // from the display's; the renderer positions against where it actually is.
+    const origin = w.getBounds();
+    w.webContents.send(channel, { ...payload, originX: origin.x, originY: origin.y });
+    w.showInactive();
+  };
+  if (w.webContents.isLoadingMainFrame()) w.webContents.once('did-finish-load', send);
+  else send();
+  clearTimeout(pointerHideTimer);
+  pointerHideTimer = setTimeout(() => {
+    if (!pointerWindow || pointerWindow.isDestroyed()) return;
+    // A hidden window still keeps a renderer process alive. Keep it only
+    // while an agent run is reusing it for every click; otherwise free it.
+    if (agent.active) pointerWindow.hide();
+    else pointerWindow.destroy();
+  }, (seconds + 0.6) * 1000);
+}
+
+function flashScreenEdge(display) {
+  // Skip if a ring is already up -- don't cut it short with a flash.
+  if (pointerWindow && !pointerWindow.isDestroyed() && pointerWindow.isVisible()) return;
+  ensurePointerWindow(display.bounds);
+  sendToPointer('pointer-flash', {}, 0.9);
+}
+
+// ---------- Computer control (agent mode) ----------
+// daemon/computer_agent.py decides; this is the hands. Every step arrives as a
+// computer_act action: do one thing through input_helper (CGEvents, under
+// Mira's Accessibility grant), wait for the UI to settle, and -- for
+// 'observe' -- hand back the next screenshot.
+//
+// The user is watching and can take over at any moment: the status bar has a
+// Stop button, Control+Esc stops, and moving the mouse more than a few points
+// away from where Mira left it is read as "I've got this" -- the same
+// convention remote-desktop tools use.
+const agent = {
+  active: false, acting: false, takeover: false,
+  lastCursor: null, watcher: null, confirmResolve: null, pill: null, pillHideTimer: null,
+};
+const TAKEOVER_DISTANCE = 40;
+
+function inputHelper(args) {
+  return new Promise((resolve) => {
+    execFile(INPUT_HELPER_PATH, args.map(String), { timeout: 10000 }, (err, stdout) => {
+      try { resolve(JSON.parse(String(stdout).trim().split('\n').pop())); }
+      catch (e) { resolve({ ok: false, error: err ? err.message : 'no output from input_helper' }); }
+    });
+  });
+}
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function postToDaemon(pathname, payload) {
+  const body = JSON.stringify(payload || {});
+  const req = http.request(`http://localhost:11200${pathname}`,
+    { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } },
+    (res) => { res.on('data', () => {}); });
+  req.on('error', () => {});
+  req.write(body);
+  req.end();
+}
+
+function agentBegin() {
+  if (agent.active) return;
+  agent.active = true;
+  agent.takeover = false;
+  agent.lastCursor = screen.getCursorScreenPoint();
+  // Registered only for the length of a run, so Control+Esc isn't taken
+  // from other apps the rest of the time.
+  globalShortcut.register('Control+Escape', () => agentStopByUser('you pressed Control+Esc'));
+  // Cheap: one cursor read every 250ms, and only while a task is running.
+  agent.watcher = setInterval(() => {
+    if (!agent.active || agent.acting || agent.confirmResolve || !agent.lastCursor) return;
+    const c = screen.getCursorScreenPoint();
+    if (Math.hypot(c.x - agent.lastCursor.x, c.y - agent.lastCursor.y) > TAKEOVER_DISTANCE) {
+      agentStopByUser('you moved the mouse, so I handed control back');
+    }
+  }, 250);
+}
+
+function agentFinish() {
+  agent.active = false;
+  clearInterval(agent.watcher);
+  agent.watcher = null;
+  if (globalShortcut.isRegistered('Control+Escape')) globalShortcut.unregister('Control+Escape');
+  if (agent.confirmResolve) { agent.confirmResolve(false); agent.confirmResolve = null; }
+}
+
+function agentStopByUser(reason) {
+  if (!agent.active || agent.takeover) return;
+  agent.takeover = true;
+  if (agent.confirmResolve) { agent.confirmResolve(false); agent.confirmResolve = null; }
+  postToDaemon('/computer/stop', { reason });
+  showAgentPill({ state: 'stopping', text: 'Stopping…' });
+}
+
+function ensureAgentPill() {
+  if (agent.pill && !agent.pill.isDestroyed()) return agent.pill;
+  agent.pill = new BrowserWindow({
+    width: 600, height: 64, frame: false, transparent: true, resizable: false,
+    alwaysOnTop: true, hasShadow: false, skipTaskbar: true, show: false,
+    // Never takes focus from the app Mira is working in, but still takes the
+    // click on Stop/Allow without a first "activate" click.
+    focusable: false, acceptFirstMouse: true,
+    webPreferences: { nodeIntegration: true, contextIsolation: false },
+  });
+  agent.pill.setAlwaysOnTop(true, 'screen-saver');
+  agent.pill.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  // Kept out of screenshots, so the model never sees (or clicks) Mira's own bar.
+  agent.pill.setContentProtection(true);
+  agent.pill.loadFile('src/agent_status.html');
+  agent.pill.on('closed', () => { agent.pill = null; });
+  return agent.pill;
+}
+
+function showAgentPill(payload) {
+  const w = ensureAgentPill();
+  const { workArea } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const [pw, ph] = w.getSize();
+  w.setPosition(Math.round(workArea.x + (workArea.width - pw) / 2), Math.round(workArea.y + workArea.height - ph - 18));
+  const send = () => { w.webContents.send('agent-status', payload); w.showInactive(); };
+  if (w.webContents.isLoadingMainFrame()) w.webContents.once('did-finish-load', send);
+  else send();
+  clearTimeout(agent.pillHideTimer);
+  if (['done', 'stopped', 'failed'].includes(payload.state)) {
+    // Closed, not hidden: nothing of it stays in memory between runs.
+    agent.pillHideTimer = setTimeout(() => { if (agent.pill && !agent.pill.isDestroyed()) agent.pill.destroy(); }, 6000);
+  }
+}
+
+function setAgentStatus({ state = 'running', text = '', step = 0 }) {
+  if (state === 'running' || state === 'confirm') agentBegin();
+  if (['done', 'stopped', 'failed'].includes(state)) agentFinish();
+  if (agent.takeover && state === 'running') return;  // keep showing "Stopping…"
+  showAgentPill({ state, text, step });
+}
+
+function askAgentConfirm({ question = '' }) {
+  agentBegin();
+  showAgentPill({ state: 'confirm', text: question });
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => finish(false), 85 * 1000);
+    function finish(allowed) {
+      clearTimeout(timer);
+      agent.confirmResolve = null;
+      // The user moved the mouse to answer -- that's not a takeover.
+      agent.lastCursor = screen.getCursorScreenPoint();
+      if (allowed) showAgentPill({ state: 'running', text: question });
+      resolve({ success: true, allowed });
+    }
+    agent.confirmResolve = finish;
+  });
+}
+
+ipcMain.on('agent-stop', () => agentStopByUser('you pressed Stop'));
+ipcMain.on('agent-allow', () => { if (agent.confirmResolve) agent.confirmResolve(true); });
+
+async function computerAct(p) {
+  if (p.op === 'observe') {
+    const shot = await captureScreenForVision({ max_width: 1600, text_boxes: true, silent: true });
+    if (shot.success) {
+      const front = await inputHelper(['frontmost']);
+      shot.frontmost = { app: front.app || '', bundle: front.bundle || '' };
+    }
+    if (agent.takeover) return { success: false, takeover: true };
+    return shot;
+  }
+  agentBegin();
+  if (agent.takeover) return { success: false, takeover: true };
+  agent.acting = true;
+  let pillHidden = false;
+  try {
+    if (p.status) showAgentPill({ state: 'running', text: p.status, step: p.step || 0 });
+    const hasPoint = Number.isFinite(p.x) && Number.isFinite(p.y);
+    if (hasPoint) {
+      // Show where she's about to click, briefly, before clicking -- so the
+      // person watching sees it coming rather than after the fact.
+      showPointer({ x: p.x - 18, y: p.y - 18, w: 36, h: 36, label: '', seconds: 1.2 });
+      const pb = agent.pill && !agent.pill.isDestroyed() && agent.pill.isVisible() ? agent.pill.getBounds() : null;
+      if (pb && p.x >= pb.x - 10 && p.x <= pb.x + pb.width + 10 && p.y >= pb.y - 10 && p.y <= pb.y + pb.height + 10) {
+        agent.pill.hide();
+        pillHidden = true;
+      }
+      await sleep(300);
+    }
+    let res;
+    switch (p.op) {
+      case 'click': res = await inputHelper(['click', p.x, p.y, 'left', 1]); break;
+      case 'double_click': res = await inputHelper(['click', p.x, p.y, 'left', 2]); break;
+      case 'right_click': res = await inputHelper(['click', p.x, p.y, 'right', 1]); break;
+      case 'type': res = await inputHelper(['type', p.text || '']); break;
+      case 'key': res = await inputHelper(['key', p.keys || '']); break;
+      case 'scroll':
+        if (hasPoint) await inputHelper(['move', p.x, p.y]);
+        res = await inputHelper(['scroll', Math.round(p.dy || -5)]);
+        break;
+      default: res = { ok: false, error: `unknown op ${p.op}` };
+    }
+    await sleep(Math.max(100, Math.min(3000, p.settle_ms || 500)));
+    return { success: !!res.ok, error: res.error };
+  } finally {
+    if (pillHidden && agent.pill && !agent.pill.isDestroyed()) agent.pill.showInactive();
+    // Where Mira left the pointer; moving it away from here means the user took over.
+    agent.lastCursor = screen.getCursorScreenPoint();
+    agent.acting = false;
+  }
+}
+
+function showPointer({ x, y, w, h, label = '', seconds = 7 }) {
+  const rect = { x: Math.round(x), y: Math.round(y), width: Math.max(1, Math.round(w)), height: Math.max(1, Math.round(h)) };
+  const display = screen.getDisplayMatching(rect);
+  ensurePointerWindow(display.bounds);
+  sendToPointer('pointer-show', { x, y, w, h, label, seconds }, seconds);
 }
 
 function postActionResult(actionId, result) {
@@ -905,21 +1273,37 @@ function postActionResult(actionId, result) {
   req.end();
 }
 
+// Long poll: the daemon holds this request open until an action arrives (or
+// 25s pass), so a queued capture or click starts immediately instead of on
+// the next 2s tick -- which added up to seconds per step once Mira operates
+// apps herself -- and an idle Mira makes one request every 25s, not every 2s.
 function pollActions() {
-  http.get('http://localhost:11200/actions/pending', { timeout: 4000 }, (res) => {
+  let settled = false;
+  const again = (delay) => {
+    if (settled) return;
+    settled = true;
+    actionPollTimer = setTimeout(pollActions, delay);
+  };
+  const req = http.get('http://localhost:11200/actions/pending?wait=25', { timeout: 30000 }, (res) => {
     let data = '';
     res.on('data', (c) => { data += c; });
-    res.on('end', async () => {
-      try {
-        const parsed = JSON.parse(data);
-        for (const action of parsed.actions || []) {
-          const result = await runQueuedAction(action);
-          postActionResult(action.id, result);
-        }
-      } catch (e) { /* daemon restarting or mid-write -- next tick retries */ }
+    res.on('end', () => {
+      let parsed = null;
+      try { parsed = JSON.parse(data); } catch (e) { /* daemon restarting */ }
+      for (const action of (parsed && parsed.actions) || []) {
+        // Not awaited: the next long poll starts right away, and a slow
+        // capture never holds up a pointer or Stop queued behind it.
+        Promise.resolve()
+          .then(() => runQueuedAction(action))
+          .catch((e) => ({ success: false, error: e.message }))
+          .then((result) => postActionResult(action.id, result));
+      }
+      // An older daemon ignores ?wait and answers instantly -- don't spin.
+      again(parsed && parsed.long_poll ? 0 : ACTION_POLL_MS);
     });
-  }).on('error', () => {})
-    .on('timeout', function () { this.destroy(); });
+  });
+  req.on('error', () => again(ACTION_POLL_MS));  // daemon down or restarting
+  req.on('timeout', () => req.destroy());         // -> 'error' -> retry
 }
 
 // Appearance override. macOS apps are expected to follow the system setting by
@@ -1019,6 +1403,100 @@ ipcMain.handle('reset-accessibility-permission', () => {
   });
 });
 
+// ---------- Settings > Permissions ----------
+// Every rebuild of an ad-hoc signed Mira.app gets a new code hash, and macOS
+// keys each privacy grant to that hash -- so after a rebuild every one of
+// these can look ON in System Settings while no longer applying to the app
+// that's actually running. Each row gets the same three steps that fix the
+// Accessibility one: Reset (clear the stale grant), Grant (have macOS ask
+// again / open the pane), Restart (Screen Recording and others only apply to
+// a freshly launched process).
+const PERMISSIONS = {
+  accessibility: { service: 'Accessibility', pane: 'Privacy_Accessibility' },
+  screen: { service: 'ScreenCapture', pane: 'Privacy_ScreenCapture' },
+  microphone: { service: 'Microphone', pane: 'Privacy_Microphone' },
+  speech: { service: 'SpeechRecognition', pane: 'Privacy_SpeechRecognition' },
+  automation: { service: 'AppleEvents', pane: 'Privacy_Automation' },
+};
+
+function openPrivacyPane(pane) {
+  return require('electron').shell.openExternal(`x-apple.systempreferences:com.apple.preference.security?${pane}`);
+}
+
+ipcMain.handle('permissions-status', () => ({
+  accessibility: systemPreferences.isTrustedAccessibilityClient(false) ? 'granted' : 'denied',
+  screen: systemPreferences.getMediaAccessStatus('screen'),
+  microphone: systemPreferences.getMediaAccessStatus('microphone'),
+  // macOS gives apps no way to read these two without triggering them; they
+  // prompt on first use (dictation, Reminders).
+  speech: 'unknown',
+  automation: 'unknown',
+}));
+
+ipcMain.handle('permission-reset', (event, key) => {
+  const p = PERMISSIONS[key];
+  if (!p) return { success: false, error: 'unknown permission' };
+  return new Promise((resolve) => {
+    execFile('/usr/bin/tccutil', ['reset', p.service, 'com.mira.desktop'], (err) => {
+      // Non-zero just means there was nothing to reset (see the Accessibility
+      // reset above); only a missing tccutil is a real failure.
+      if (err && err.code === 'ENOENT') resolve({ success: false, error: 'tccutil not found' });
+      else resolve({ success: true });
+    });
+  });
+});
+
+ipcMain.handle('permission-grant', async (event, key) => {
+  const p = PERMISSIONS[key];
+  if (!p) return { success: false, error: 'unknown permission' };
+  if (key === 'accessibility') {
+    // macOS's own prompt registers Mira under the identity TCC checks.
+    if (systemPreferences.isTrustedAccessibilityClient(true)) return { success: true, granted: true };
+  } else if (key === 'microphone') {
+    if (await systemPreferences.askForMediaAccess('microphone')) return { success: true, granted: true };
+  } else if (key === 'screen') {
+    // Asking for the screen list is what makes macOS add Mira to the Screen
+    // Recording list (and prompt, when it hasn't decided yet).
+    try { await require('electron').desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } }); } catch (e) { /* ignore */ }
+    if (systemPreferences.getMediaAccessStatus('screen') === 'granted') return { success: true, granted: true };
+  }
+  await openPrivacyPane(p.pane);
+  return { success: true, granted: false, openedSettings: true };
+});
+
+// Restarts the FastAPI daemon through its LaunchAgent (com.mira.daemon,
+// installed by scripts/install_daemon.sh) -- the same `launchctl kickstart -k`
+// you'd type by hand -- then waits for the new process to answer /health, so
+// the Settings row can say when it's really back rather than just "sent".
+const DAEMON_LABEL = 'com.mira.daemon';
+ipcMain.handle('restart-daemon', () => new Promise((resolve) => {
+  const started = Date.now();
+  execFile('/bin/launchctl', ['kickstart', '-k', `gui/${process.getuid()}/${DAEMON_LABEL}`], (err, _out, stderr) => {
+    if (err) {
+      resolve({ success: false, error: /Could not find service|No such process/i.test(String(stderr))
+        ? "the daemon isn't installed as a LaunchAgent (run scripts/install_daemon.sh)"
+        : String(stderr || err.message).trim() });
+      return;
+    }
+    // Give the old process a moment to exit so /health isn't answered by it.
+    const check = () => {
+      http.get('http://localhost:11200/health', { timeout: 1500 }, (res) => {
+        res.resume();
+        resolve({ success: true, seconds: Math.round((Date.now() - started) / 100) / 10 });
+      }).on('error', () => {
+        if (Date.now() - started > 45000) resolve({ success: false, error: "it didn't come back within 45 seconds -- see daemon/mira_error.log" });
+        else setTimeout(check, 500);
+      }).on('timeout', function () { this.destroy(); });
+    };
+    setTimeout(check, 1500);
+  });
+}));
+
+ipcMain.handle('restart-mira', () => {
+  app.relaunch();
+  app.exit(0);
+});
+
 // Screen Recording (OCR) status for the Settings panel -- same rationale as
 // the Accessibility row above: getMediaAccessStatus can't be prompted like
 // Accessibility can (there's no equivalent "ask" call for it), so the button
@@ -1091,9 +1569,14 @@ ipcMain.handle('speech-check', (event, locale) =>
 // audio into a process only launchable through LaunchServices). Its
 // transcript is never used to decide what Mira actually does; the daemon's
 // Whisper/Groq pipeline remains the one that's acted on.
-const CAPTION_STREAM_SECONDS = 4;  // must match wakeword_listener.py's COMMAND_RECORD_SECONDS
+// A ceiling only, matching wakeword_listener.py's MAX_RECORD_SECONDS: the
+// daemon's recording ends when the speaker stops talking, and
+// stopListeningCaption() tells the helper to stop at that same moment via a
+// .stop file next to its progress file.
+const CAPTION_STREAM_SECONDS = 60;
 const CAPTION_POLL_MS = 150;
 let captionPollTimer = null;
+let captionOutPath = null;
 
 function startListeningCaption() {
   if (captionPollTimer || !fs.existsSync(SPEECH_HELPER_APP)) return;
@@ -1101,6 +1584,7 @@ function startListeningCaption() {
   fetchDaemonJson('http://localhost:11200/settings', (settings) => {
     const locale = (settings && settings.dictation_locale) || 'en-IN';
     const outPath = path.join(os.tmpdir(), `mira-caption-${Date.now()}.json`);
+    captionOutPath = outPath;
 
     execFile('/usr/bin/open',
       ['-a', SPEECH_HELPER_APP, '--args', 'stream', outPath, locale, String(CAPTION_STREAM_SECONDS)],
@@ -1125,13 +1609,22 @@ function startListeningCaption() {
     // Backstop in case speech_helper never reports done:true (e.g. it never
     // got a final result before its own maxSeconds deadline) -- this poll
     // must not outlive the state it's captioning for.
-    setTimeout(() => stopListeningCaption(outPath), (CAPTION_STREAM_SECONDS + 4) * 1000);
+    setTimeout(() => {
+      if (captionOutPath === outPath) stopListeningCaption(outPath);
+    }, (CAPTION_STREAM_SECONDS + 4) * 1000);
   });
 }
 
 function stopListeningCaption(outPath) {
   if (captionPollTimer) { clearInterval(captionPollTimer); captionPollTimer = null; }
-  if (outPath) { try { fs.unlinkSync(outPath); } catch (e) {} }
+  const target = outPath || captionOutPath;
+  captionOutPath = null;
+  if (!target) return;
+  // Ends the helper's capture now instead of at its 60s ceiling -- otherwise
+  // the mic stays live (and the menu bar indicator on) long after Mira has
+  // stopped listening. The helper deletes the .stop file itself on exit.
+  try { fs.writeFileSync(target + '.stop', ''); } catch (e) {}
+  try { fs.unlinkSync(target); } catch (e) {}
 }
 
 ipcMain.handle('speech-transcribe', async (event, { buffer, locale }) => {
@@ -1439,19 +1932,23 @@ function createWindow() {
   win = new BrowserWindow({
     width: 160,
     height: 300,
+    x: screenWidth - 180,
+    y: screenHeight - 200,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
     resizable: false,
     hasShadow: false,
     show: false,
+    // The pet starts hidden and most people never open it, but by default a
+    // window created hidden still renders -- here that meant decoding and
+    // painting pet.gif forever (~3% GPU + ~1% renderer, measured). This keeps
+    // it asleep until togglePet() first shows it. It also means ready-to-show
+    // never fires, which is why the position is set above instead.
+    paintWhenInitiallyHidden: false,
   });
 
   win.loadFile('src/index.html');
-
-  win.once('ready-to-show', () => {
-    win.setPosition(screenWidth - 180, screenHeight - 200);
-  });
 }
 
 function togglePet() {
@@ -1647,8 +2144,25 @@ function runOCR() {
   });
 }
 
+// After a rebuild (new ad-hoc code hash) or a permission reset, Mira drops out
+// of the Accessibility and Screen Recording lists entirely, so there's no row
+// to switch on. Asking is what makes macOS list her again (and show its own
+// prompt); both calls are silent no-ops once the permission is granted.
+function requestMissingPermissions() {
+  if (process.platform !== 'darwin' || !app.isPackaged) return;
+  if (!systemPreferences.isTrustedAccessibilityClient(false)) {
+    systemPreferences.isTrustedAccessibilityClient(true);
+  }
+  if (systemPreferences.getMediaAccessStatus('screen') !== 'granted') {
+    require('electron').desktopCapturer
+      .getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } })
+      .catch(() => {});
+  }
+}
+
 app.whenReady().then(() => {
   createWindow();
+  setTimeout(requestMissingPermissions, 1500);
   startPredictiveTyping();
   startAutoMeetingWatcher();
   startVoiceStatusWatcher();
@@ -1701,7 +2215,7 @@ app.whenReady().then(() => {
 
   buildTray();
 
-  actionPollTimer = setInterval(pollActions, ACTION_POLL_MS);
+  pollActions();
 
   setInterval(() => {
     const current = clipboard.readText();
@@ -1722,7 +2236,7 @@ app.on('before-quit', () => {
 });
 
 app.on('will-quit', () => {
-  if (actionPollTimer) clearInterval(actionPollTimer);
+  if (actionPollTimer) clearTimeout(actionPollTimer);
   globalShortcut.unregisterAll();
   stopPredictiveTyping();
 });

@@ -13,6 +13,8 @@ answers in prose or hits the round cap.
 
 import datetime
 import json
+import re
+import time
 
 import requests
 
@@ -26,6 +28,22 @@ MAX_TOOL_ROUNDS = 4          # generous enough to search -> read -> answer
 # which pushed every web answer onto the slower local model. Five search
 # snippets still fit comfortably here.
 TOOL_RESULT_CHAR_LIMIT = 2500
+# The same 8000 tokens/minute budget also covers the system prompt, tool
+# schemas and history. A notch session had grown to 61 messages, which alone
+# pushed a request over the limit, so only the most recent history that fits
+# in this many characters is sent (the latest user message always is).
+HISTORY_CHAR_BUDGET = 6000
+# How many recent user messages decide which tool groups are offered -- enough
+# that "yes, do it" still carries the payroll tools from the message before.
+TOOL_CONTEXT_USER_MESSAGES = 3
+# The free tier fits roughly one tool-using request a minute, so back-to-back
+# requests routinely get "try again in ~30s". On the first round -- where the
+# model decides what to DO -- waiting that out beats handing the turn to the
+# local model, which can't reliably call tools and has claimed actions it
+# never took. Later rounds only put tool results into words, which the local
+# model manages fine, so they don't wait long.
+CLOUD_RETRY_MAX_WAIT_DECIDING = 60
+CLOUD_RETRY_MAX_WAIT_SUMMARIZING = 8
 
 IDENTITY = """You are Mira, {owner}'s personal AI assistant. You run locally on their Mac and are deeply integrated with it.
 
@@ -83,7 +101,71 @@ def _truncate(obj) -> str:
     return text
 
 
-def _call_cloud(messages, settings, groq_key, with_tools=True):
+def _fit_history(history: list, budget: int = HISTORY_CHAR_BUDGET) -> list:
+    """Most recent messages whose content fits in `budget` characters, never
+    starting on an orphaned assistant/tool message."""
+    kept, used = [], 0
+    for m in reversed(history):
+        size = len(str(m.get("content") or ""))
+        if kept and used + size > budget:
+            break
+        kept.append(m)
+        used += size
+    kept.reverse()
+    while len(kept) > 1 and kept[0].get("role") != "user":
+        kept.pop(0)
+    return kept
+
+
+def _current_turn_only(messages: list) -> list:
+    """System prompt plus everything from the latest user message on."""
+    last_user = max((i for i, m in enumerate(messages) if m.get("role") == "user"), default=0)
+    return [m for m in messages[:1] if m.get("role") == "system"] + messages[last_user:]
+
+
+def _cloud_limit(err) -> tuple:
+    """("too_large", 0) / ("wait", seconds) / (None, 0) from a Groq error body."""
+    e = (err or {}).get("error") if isinstance(err, dict) else None
+    if not isinstance(e, dict) or e.get("code") != "rate_limit_exceeded":
+        return None, 0
+    msg = e.get("message", "")
+    if "Request too large" in msg:
+        return "too_large", 0
+    m = re.search(r"try again in ([\d.]+)(ms|s)", msg)
+    if m:
+        secs = float(m.group(1)) / (1000 if m.group(2) == "ms" else 1)
+        return "wait", secs
+    return None, 0
+
+
+def _call_cloud(messages, settings, groq_key, with_tools=True, schemas=None,
+                max_wait=CLOUD_RETRY_MAX_WAIT_SUMMARIZING):
+    """One cloud call, retried once when the rate limit says how: a request
+    that's too large is resent with just the current turn, and a short
+    "try again in Xs" is waited out. Anything else goes back to the caller,
+    which falls back to the local model."""
+    waited = 0.0
+    for _attempt in range(4):
+        msg, err = _call_cloud_once(messages, settings, groq_key, with_tools, schemas)
+        if msg is not None:
+            return msg, None
+        kind, secs = _cloud_limit(err)
+        if kind == "too_large":
+            trimmed = _current_turn_only(messages)
+            if len(trimmed) >= len(messages):
+                break
+            messages = trimmed
+        elif kind == "wait" and waited + secs <= max_wait:
+            # A short wait can come back as another short wait -- the window
+            # is rolling -- so keep going while the total stays in budget.
+            time.sleep(secs + 0.5)
+            waited += secs + 0.5
+        else:
+            break
+    return msg, err
+
+
+def _call_cloud_once(messages, settings, groq_key, with_tools=True, schemas=None):
     api_key = settings.get("cloud_api_key") or groq_key
     base_url = settings.get("cloud_base_url") or "https://api.groq.com/openai/v1"
     model = settings.get("cloud_model") or "openai/gpt-oss-120b"
@@ -92,7 +174,7 @@ def _call_cloud(messages, settings, groq_key, with_tools=True):
 
     payload = {"model": model, "messages": _shape_messages(messages, as_string=True)}
     if with_tools:
-        payload["tools"] = tools.openai_tool_schemas()
+        payload["tools"] = schemas if schemas is not None else tools.openai_tool_schemas()
         payload["tool_choice"] = "auto"
 
     try:
@@ -110,7 +192,7 @@ def _call_cloud(messages, settings, groq_key, with_tools=True):
     return data["choices"][0]["message"], None
 
 
-def _call_local(messages, settings, with_tools=True):
+def _call_local(messages, settings, with_tools=True, schemas=None):
     model = settings.get("local_chat_model") or "batiai/gemma4-e2b:q4"
     payload = {
         "model": model,
@@ -120,7 +202,7 @@ def _call_local(messages, settings, with_tools=True):
         "keep_alive": settings.get("local_model_keep_alive") or "60s",
     }
     if with_tools:
-        payload["tools"] = tools.openai_tool_schemas()
+        payload["tools"] = schemas if schemas is not None else tools.openai_tool_schemas()
 
     try:
         resp = requests.post("http://localhost:11434/api/chat", json=payload, timeout=180)
@@ -236,6 +318,16 @@ def _final_text(msg, messages, settings, groq_key, use_cloud, tools_used) -> str
                 recent_errors.append(str(payload["error"]))
         if recent_errors:
             return "That didn't actually go through -- " + recent_errors[0]
+        # A background job (an on-screen task) that has only just begun must
+        # not be reported as "Done." -- its result arrives separately.
+        for m in reversed(messages):
+            if m.get("role") != "tool":
+                break
+            try:
+                if json.loads(m.get("content") or "{}").get("started"):
+                    return "On it. I've started, and I'll tell you when it's done."
+            except (json.JSONDecodeError, TypeError, AttributeError):
+                continue
         # Confirming plainly beats both a blank bubble and a recital of
         # internal tool names, but only once we know nothing here failed.
         return "Done."
@@ -265,7 +357,12 @@ def run_agent(history: list, user_message: str, model_pref: str = "auto",
     # turned one bad reply into a session that could never be used again.
     clean_history = [m for m in history
                      if m.get("role") != "assistant" or (m.get("content") or "").strip()]
+    clean_history = _fit_history(clean_history)
     messages = [{"role": "system", "content": system_prompt}] + clean_history
+
+    recent_user = [str(m.get("content") or "") for m in clean_history if m.get("role") == "user"]
+    selected = tools.select_tools(" ".join(recent_user[-TOOL_CONTEXT_USER_MESSAGES:]))
+    schemas = tools.openai_tool_schemas(selected)
 
     # Local models below ~4B are unreliable at tool calling and will often emit
     # malformed calls or loop. Tools are offered to the cloud model, and to the
@@ -277,22 +374,29 @@ def run_agent(history: list, user_message: str, model_pref: str = "auto",
 
     for _round in range(MAX_TOOL_ROUNDS):
         if use_cloud:
-            msg, err = _call_cloud(messages, settings, groq_key)
+            wait = CLOUD_RETRY_MAX_WAIT_DECIDING if _round == 0 else CLOUD_RETRY_MAX_WAIT_SUMMARIZING
+            msg, err = _call_cloud(messages, settings, groq_key, schemas=schemas, max_wait=wait)
             if msg is None:
-                # fall back to local for the rest of this turn
+                # Logged because this fallback is invisible otherwise: the small
+                # local model then "answers" requests it can't actually carry
+                # out, which looked like payroll silently not saving.
+                print(f"[agent] cloud call failed ({surface}), falling back to local: "
+                      f"{json.dumps(err, default=str)[:300]}", flush=True)
                 use_cloud = False
                 used_model = "local"
-                msg, err = _call_local(messages, settings)
+                msg, err = _call_local(messages, settings, schemas=schemas)
                 if msg is None:
                     return None, {"error": err, "tools_used": tools_used}
         else:
-            msg, err = _call_local(messages, settings)
+            msg, err = _call_local(messages, settings, schemas=schemas)
             if msg is None:
                 return None, {"error": err, "tools_used": tools_used}
 
         calls = _normalize_tool_calls(msg)
         if not calls:
             text = _final_text(msg, messages, settings, groq_key, use_cloud, tools_used)
+            print(f"[agent] {surface}: model={used_model} tools_offered={len(selected)} "
+                  f"tools_used={tools_used}", flush=True)
             return text, {"model_used": used_model, "tools_used": tools_used}
 
         # record the assistant's tool-call turn verbatim so the model sees its

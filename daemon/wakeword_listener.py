@@ -38,7 +38,24 @@ TEMP_RECORDING_PATH = WAKEWORD_DIR / "command_recording.wav"
 
 SAMPLE_RATE = 16000
 CHUNK_SIZE = 1280  # openWakeWord's expected frame size at 16kHz
-COMMAND_RECORD_SECONDS = 4
+# The command recording used to be a fixed 4 seconds, which cut off anything
+# longer than a short phrase mid-sentence. It now runs until the speaker stops:
+#   - NO_SPEECH_TIMEOUT: give up if nothing that sounds like speech starts
+#     within this long of the chime/wake word.
+#   - END_SILENCE_SECONDS: once speech has started, this much continuous quiet
+#     ends the recording. Long enough to survive a natural mid-sentence pause
+#     or a "hmm", short enough that the reply doesn't feel sluggish.
+#   - MAX_RECORD_SECONDS: hard ceiling. Electron's live-caption capture uses
+#     the same number (CAPTION_STREAM_SECONDS in main.js).
+NO_SPEECH_TIMEOUT = 6.0
+END_SILENCE_SECONDS = 1.6
+MAX_RECORD_SECONDS = 60
+# A chunk counts as speech when it's clearly above the room's own noise
+# floor (tracked while nobody's talking) and above this absolute minimum --
+# the relative check alone would call a single keyboard click "speech" in a
+# perfectly silent room.
+SPEECH_RMS_MIN = 300
+SPEECH_OVER_NOISE = 2.5
 DETECTION_THRESHOLD = 0.5
 DETECTION_COOLDOWN_SECONDS = 3  # avoid re-triggering immediately on the same utterance
 # Below this RMS a recording is treated as having no speech in it. Whisper
@@ -53,8 +70,14 @@ WAKEWORD_SESSION_ID = "wakeword_voice"
 _controller = None
 
 
-def record_command_audio(pa: pyaudio.PyAudio, seconds: int) -> tuple:
-    """Records `seconds` of audio from the mic and saves it as a WAV file for transcription.
+def _chunk_rms(data: bytes) -> float:
+    samples = np.frombuffer(data, dtype=np.int16)
+    return float(np.sqrt(np.mean(samples.astype(np.float64) ** 2))) if len(samples) else 0.0
+
+
+def record_command_audio(pa: pyaudio.PyAudio) -> tuple:
+    """Records from the mic until the speaker finishes (see the constants above
+    for the stop rules) and saves it as a WAV file for transcription.
     Returns (path, has_meaningful_audio, rms, device_name) -- the guard is a volume check
     against feeding near-silent/noise-only recordings to Whisper, which can hallucinate
     fluent-sounding but meaningless text on such input."""
@@ -70,11 +93,41 @@ def record_command_audio(pa: pyaudio.PyAudio, seconds: int) -> tuple:
     except Exception:
         device_name = "the microphone"
 
+    chunk_seconds = CHUNK_SIZE / SAMPLE_RATE
+    max_chunks = int(MAX_RECORD_SECONDS / chunk_seconds)
+    no_speech_chunks = int(NO_SPEECH_TIMEOUT / chunk_seconds)
+    end_silence_chunks = int(END_SILENCE_SECONDS / chunk_seconds)
+
     frames = []
-    num_chunks = int(SAMPLE_RATE / CHUNK_SIZE * seconds)
-    for _ in range(num_chunks):
+    noise_floor = None
+    speech_started = False
+    silent_run = 0
+    for i in range(max_chunks):
         data = stream.read(CHUNK_SIZE, exception_on_overflow=False)
         frames.append(data)
+        rms = _chunk_rms(data)
+
+        threshold = max(SPEECH_RMS_MIN, (noise_floor or 0) * SPEECH_OVER_NOISE)
+        is_speech = rms > threshold
+
+        # Only learn the noise floor from non-speech chunks: letting speech
+        # pull it upward made a long sentence gradually raise the bar until
+        # the speaker's own voice counted as "silence" and got cut off.
+        if not is_speech:
+            if noise_floor is None or rms < noise_floor:
+                noise_floor = rms
+            else:
+                noise_floor += (rms - noise_floor) * 0.02
+
+        if is_speech:
+            speech_started = True
+            silent_run = 0
+        elif speech_started:
+            silent_run += 1
+            if silent_run >= end_silence_chunks:
+                break
+        elif i >= no_speech_chunks:
+            break
 
     stream.stop_stream()
     stream.close()
@@ -89,7 +142,10 @@ def record_command_audio(pa: pyaudio.PyAudio, seconds: int) -> tuple:
     # there's likely no real speech in it at all
     all_audio = np.frombuffer(b"".join(frames), dtype=np.int16)
     rms = np.sqrt(np.mean(all_audio.astype(np.float64) ** 2)) if len(all_audio) else 0
-    has_meaningful_audio = rms > SILENCE_RMS_FLOOR
+    # The trailing END_SILENCE_SECONDS of quiet drags the whole-recording
+    # average down, so a short command could otherwise read as "nothing
+    # heard" -- chunk-level speech detection above is the better signal.
+    has_meaningful_audio = speech_started or rms > SILENCE_RMS_FLOOR
 
     return TEMP_RECORDING_PATH, has_meaningful_audio, float(rms), device_name
 
@@ -136,8 +192,7 @@ def handle_wake_detected(pa: pyaudio.PyAudio, chime: bool = False):
     # whatever it last showed if a run ends in silence or an empty transcript.
     try:
         voice_state.set_state("listening")
-        audio_path, has_meaningful_audio, rms, device_name = record_command_audio(
-            pa, COMMAND_RECORD_SECONDS)
+        audio_path, has_meaningful_audio, rms, device_name = record_command_audio(pa)
 
         if not has_meaningful_audio:
             # Saying nothing here was the whole problem: Mira took the trigger,
@@ -237,7 +292,7 @@ _playback_lock = threading.Lock()
 _playback_proc = None  # the afplay Popen currently playing a reply, if any
 
 
-def _stop_speaking() -> bool:
+def _stop_speaking(reason: str = "New trigger while speaking") -> bool:
     """Kills whatever reply is currently playing, if any. Returns True if it
     actually stopped something. Used so a fresh trigger while Mira is
     mid-sentence interrupts her instead of queuing behind her."""
@@ -245,7 +300,7 @@ def _stop_speaking() -> bool:
     with _playback_lock:
         proc = _playback_proc
         if proc is not None and proc.poll() is None:
-            log("[wakeword] New trigger while speaking -- interrupting.")
+            log(f"[wakeword] {reason} -- interrupting.")
             proc.terminate()
             return True
         return False

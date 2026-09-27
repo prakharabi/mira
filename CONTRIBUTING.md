@@ -56,6 +56,17 @@ codesign --force --sign - AXHelper.app
 Rebuilding a helper changes its code signature, which macOS treats as a new
 identity — you will have to re-grant its permission in System Settings.
 
+The two loose helpers run as children of Mira.app, so they use Mira's own
+permissions rather than their own: `ocr_helper` (text recognition, with
+`--json` for text positions) and `input_helper` (clicks and typing for
+computer control). Match the deployment target of the committed binaries:
+
+```bash
+cd electron
+swiftc -O -target arm64-apple-macos26.0 ocr_helper.swift -o ocr_helper && codesign --force --sign - ocr_helper
+swiftc -O -target arm64-apple-macos26.0 input_helper.swift -o input_helper && codesign --force --sign - input_helper
+```
+
 `speech_helper` is the one exception, and needs its Info.plist embedded
 directly into the binary at link time rather than living only in the
 surrounding .app bundle:

@@ -4,29 +4,39 @@
 <meta charset="utf-8">
 <link rel="stylesheet" href="holo-mark.css">
 <style>
+  /* Same tokens as workspace.html's liquid theme, so the Dump Box reads as
+     part of the same app rather than a bare system panel. The window's native
+     HUD vibrancy is the blurred base; everything below is drawn on top of it. */
   :root {
     color-scheme: light dark;
     --text-primary: rgba(0,0,0,0.87);
+    --text-secondary: rgba(0,0,0,0.55);
     --text-tertiary: rgba(0,0,0,0.38);
-    --hairline: rgba(0,0,0,0.10);
-    --accent: #0A84FF;
+    --hairline: rgba(0,0,0,0.08);
     --ok: #248a57;
     --err: #d93a3f;
-    --glass-fill: rgba(0,0,0,0.035);
-    --glass-fill-hover: rgba(0,0,0,0.06);
-    --glass-border: rgba(0,0,0,0.09);
+    --field-bg: rgba(255,255,255,0.6);
+    --glass-fill: rgba(0,0,0,0.045);
+    --glass-fill-hover: rgba(0,0,0,0.08);
+    --border: rgba(0,0,0,0.11);
+    --glass-highlight: rgba(255,255,255,0.7);
+    --accent-gradient: linear-gradient(135deg, #8b5cf6 0%, #6366f1 45%, #06b6d4 100%);
+    --focus-ring: rgba(139,92,246,0.18);
   }
   @media (prefers-color-scheme: dark) {
     :root {
       --text-primary: rgba(255,255,255,0.92);
-      --text-tertiary: rgba(255,255,255,0.38);
-      --hairline: rgba(255,255,255,0.10);
-      --accent: #0A84FF;
+      --text-secondary: rgba(255,255,255,0.6);
+      --text-tertiary: rgba(255,255,255,0.4);
+      --hairline: rgba(255,255,255,0.08);
       --ok: #30D158;
       --err: #FF453A;
-      --glass-fill: rgba(255,255,255,0.07);
-      --glass-fill-hover: rgba(255,255,255,0.13);
-      --glass-border: rgba(255,255,255,0.12);
+      --field-bg: rgba(255,255,255,0.06);
+      --glass-fill: rgba(255,255,255,0.08);
+      --glass-fill-hover: rgba(255,255,255,0.14);
+      --border: rgba(255,255,255,0.11);
+      --glass-highlight: rgba(255,255,255,0.16);
+      --focus-ring: rgba(139,92,246,0.28);
     }
   }
 
@@ -49,82 +59,103 @@
 
   #head {
     display: flex; align-items: center; gap: 8px;
-    padding: 13px 16px 9px;
+    padding: 13px 16px 10px;
     flex-shrink: 0;
   }
-  #head .holo-mark { width: 15px; height: 15px; opacity: 0.9; }
-  #head .title { font-size: 12.5px; font-weight: 600; letter-spacing: -0.01em; }
+  #head .holo-mark { width: 16px; height: 16px; }
+  #head .title { font-size: 13px; font-weight: 650; letter-spacing: -0.01em; }
   #head .spacer { flex: 1; }
   #head .hint {
-    font-size: 10.5px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.05em;
     text-transform: uppercase;
-    color: var(--text-tertiary);
+    color: var(--text-secondary);
     background: var(--glass-fill);
-    border: 1px solid var(--glass-border);
-    border-radius: 5px;
-    padding: 2px 7px;
+    border: 1px solid var(--border);
+    box-shadow: inset 0 1px 0 var(--glass-highlight);
+    border-radius: 999px;
+    padding: 3px 9px;
     -webkit-app-region: no-drag;
   }
 
+  /* The input is its own glass card inset into the panel -- the same
+     field treatment as the workspace's text fields: a light fill, hairline
+     edge, a lit top edge, and the purple focus ring. */
   #input {
     -webkit-app-region: no-drag;
     flex: 1;
     margin: 0 12px;
-    padding: 8px 8px 10px;
-    background: transparent;
-    border: none;
+    padding: 11px 14px;
+    background: var(--field-bg);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    box-shadow: inset 0 1px 0 var(--glass-highlight);
     outline: none;
     resize: none;
     font-family: inherit;
     font-size: 15px;
     line-height: 1.5;
     color: var(--text-primary);
+    transition: border-color 150ms ease, box-shadow 150ms ease;
+  }
+  #input:focus {
+    border-color: rgba(139,92,246,0.5);
+    box-shadow: inset 0 1px 0 var(--glass-highlight), 0 0 0 3px var(--focus-ring);
   }
   #input::placeholder { color: var(--text-tertiary); }
 
   #foot {
     flex-shrink: 0;
-    border-top: 1px solid var(--hairline);
-    padding: 9px 16px 11px;
-    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px 12px 16px;
+    display: flex; align-items: center; gap: 8px;
     font-size: 11px;
     color: var(--text-tertiary);
   }
   #foot .spacer { flex: 1; }
   kbd {
     font-family: inherit;
-    font-size: 10.5px;
+    font-size: 10px;
     font-weight: 600;
-    padding: 1.5px 5.5px;
-    border-radius: 4.5px;
+    padding: 1.5px 6px;
+    border-radius: 999px;
     background: var(--glass-fill);
-    border: 1px solid var(--glass-border);
-    color: var(--text-tertiary);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
   }
   #status.ok { color: var(--ok); }
   #status.err { color: var(--err); }
 
-  #mic {
+  #mic, #save {
     -webkit-app-region: no-drag;
-    display: inline-flex; align-items: center; gap: 5px;
-    background: var(--glass-fill);
-    border: 1px solid var(--glass-border);
-    border-radius: 7px;
-    padding: 4px 10px;
+    display: inline-flex; align-items: center; gap: 6px;
+    border-radius: 999px;
+    padding: 6px 13px;
     font: inherit;
-    font-size: 11px;
+    font-size: 11.5px;
     font-weight: 600;
-    color: var(--text-tertiary);
     cursor: default;
     flex-shrink: 0;
-    transition: color 140ms ease, border-color 140ms ease, background 140ms ease, transform 140ms ease;
+    transition: color 140ms ease, background 140ms ease, filter 140ms ease, transform 100ms ease;
+  }
+  #mic {
+    background: var(--glass-fill);
+    border: 1px solid var(--border);
+    box-shadow: inset 0 1px 0 var(--glass-highlight);
+    color: var(--text-secondary);
   }
   #mic svg { width: 12px; height: 12px; }
   #mic:hover { color: var(--text-primary); background: var(--glass-fill-hover); }
-  #mic:active { transform: scale(0.96); }
+  #mic:active, #save:active { transform: scale(0.96); }
   #mic:disabled { opacity: 0.5; }
+  #save {
+    background: var(--accent-gradient);
+    border: none;
+    color: #fff;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), 0 3px 10px rgba(139,92,246,0.3);
+  }
+  #save:hover { filter: brightness(1.1); }
+  #save:disabled { opacity: 0.5; filter: none; }
   #mic.recording {
     color: var(--err);
     border-color: color-mix(in srgb, var(--err) 45%, transparent);
@@ -180,6 +211,7 @@
         </svg>
         <span id="mic-label">Dictate</span>
       </button>
+      <button id="save" title="Save &amp; process (↩)">Save</button>
     </div>
   </div>
 
@@ -268,6 +300,12 @@
   });
 
   micBtn.onclick = () => dictation.toggle();
+
+  // Same as pressing Enter, including stopping a live dictation first.
+  document.getElementById('save').onclick = () => {
+    if (dictation.isRecording()) { dictation.stop(); return; }
+    capture();
+  };
 
   input.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {

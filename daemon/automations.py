@@ -200,7 +200,12 @@ def match_automation(text: str):
             continue
         # name matches count double -- "run my standup" should pick the
         # automation actually called "standup" over one that merely mentions it
-        score = 2 * len(request_words & name_words) + len(request_words & desc_words)
+        name_hits = len(request_words & name_words)
+        if name_words and not name_hits:
+            # description words alone ("content", "local", "from") are far too
+            # common to fire a webhook on -- the request has to name it
+            continue
+        score = 2 * name_hits + len(request_words & desc_words)
         if name_words and name_words <= request_words:
             score += 3  # whole name present in the request
         if score > 0:

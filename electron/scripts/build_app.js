@@ -42,6 +42,7 @@ const INCLUDE = [
   // the helpers run from their .app bundles above, which is what carries their
   // TCC identity.
   'ocr_helper',
+  'input_helper',  // computer control: clicks/typing, under Mira's Accessibility grant
   'system_audio_helper',
   'package.json',
 ];
@@ -155,8 +156,24 @@ function main() {
   return APP_DEST;
 }
 
+// `npm run install-app`: build, then put the result at /Applications/Mira.app.
+// macOS privacy panes (Accessibility, Screen Recording) only let you add apps
+// by picking them in a file dialog, and a build buried in electron/dist is
+// hard to find there -- /Applications is where both the "+" dialog and
+// Login Items expect it. The copy is what should be launched from then on.
+const INSTALL_DEST = path.join('/Applications', `${APP_NAME}.app`);
+
+function install() {
+  if (fs.existsSync(INSTALL_DEST)) fs.rmSync(INSTALL_DEST, { recursive: true, force: true });
+  // ditto, not cp: keeps the bundle's symlinks, xattrs and signature intact.
+  execFileSync('/usr/bin/ditto', [APP_DEST, INSTALL_DEST]);
+  execFileSync('/usr/bin/codesign', ['--verify', '--deep', INSTALL_DEST]);
+  log(`installed: ${INSTALL_DEST}`);
+}
+
 if (require.main === module) {
   main();
+  if (process.argv.includes('--install')) install();
 }
 
 module.exports = { main, APP_DEST, APP_NAME, BUNDLE_ID };

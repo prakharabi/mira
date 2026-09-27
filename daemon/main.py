@@ -62,6 +62,13 @@ async def lifespan(app: FastAPI):
         print(f"[main] Could not start telegram bot: {e}", flush=True)
 
     try:
+        from outreach import start_background as start_outreach_background
+        start_outreach_background()
+        print("[main] outreach scheduler started", flush=True)
+    except Exception as e:
+        print(f"[main] Could not start outreach scheduler: {e}", flush=True)
+
+    try:
         _reconcile_orphaned_recording()
     except Exception as e:
         print(f"[main] recording reconciliation failed: {e}", flush=True)
@@ -157,6 +164,31 @@ DEFAULT_SETTINGS = {
     # directly to the account owner.
     "cal_com_api_key": "",
     "proactive_calcom_bookings": True,
+    # Optional second source for the lead finder (leads.py): the user's own
+    # Places API (New) key from their Google Cloud project. Blank = the local
+    # scraper only. Mira ships no key, same as every other integration.
+    "google_places_api_key": "",
+    # RazorpayX Payroll (Opfin): org id + key from its Settings > API. Auth
+    # goes in the request body, not a header -- see payroll_integration.py.
+    "payroll_org_id": "",
+    "payroll_api_key": "",
+    # Which payroll employee "me" is, for "check me in" -- blank falls back
+    # to matching owner_name against the synced directory.
+    "payroll_self_email": "",
+    # Screen vision (screen_vision.py): Mira looks at the screen only when
+    # asked ("what's this error?", "where's the export button?"); the
+    # screenshot goes to this model on the configured cloud provider and is
+    # never kept. Needs Screen Recording for Mira.app, same as Control+Q OCR.
+    "screen_vision_enabled": True,
+    "vision_model": "qwen/qwen3.8-27b",
+    # "auto" | "cloud" | "local" -- see screen_vision.py. Auto uses the local
+    # Ollama model for any step the cloud would make wait on its rate limit.
+    "vision_provider": "auto",
+    "local_vision_model": "qwen3.5:9b",
+    # Computer control (computer_agent.py): Mira clicking and typing in apps
+    # herself. Off until the user turns it on -- it acts in their real apps.
+    "computer_control_enabled": False,
+    "computer_confirm_risky": True,
     "dumpbox_auto_process": True,
     "dumpbox_auto_reminders": True,
     "dictation_engine": "apple",
@@ -189,11 +221,15 @@ def get_settings():
     masked["google_client_secret_set"] = bool(settings.get("google_client_secret"))
     masked["telegram_bot_token_set"] = bool(settings.get("telegram_bot_token"))
     masked["cal_com_api_key_set"] = bool(settings.get("cal_com_api_key"))
+    masked["google_places_api_key_set"] = bool(settings.get("google_places_api_key"))
+    masked["payroll_api_key_set"] = bool(settings.get("payroll_api_key"))
     masked.pop("cloud_api_key", None)
     masked.pop("tavily_api_key", None)
     masked.pop("google_client_secret", None)
     masked.pop("telegram_bot_token", None)
     masked.pop("cal_com_api_key", None)
+    masked.pop("google_places_api_key", None)
+    masked.pop("payroll_api_key", None)
     return masked
 
 @app.post("/settings")
@@ -229,6 +265,16 @@ def update_settings(
     auto_record_scheduled_meetings: bool = Body(None),
     cal_com_api_key: str = Body(None),
     proactive_calcom_bookings: bool = Body(None),
+    google_places_api_key: str = Body(None),
+    payroll_org_id: str = Body(None),
+    payroll_api_key: str = Body(None),
+    payroll_self_email: str = Body(None),
+    screen_vision_enabled: bool = Body(None),
+    vision_model: str = Body(None),
+    vision_provider: str = Body(None),
+    local_vision_model: str = Body(None),
+    computer_control_enabled: bool = Body(None),
+    computer_confirm_risky: bool = Body(None),
     dumpbox_auto_process: bool = Body(None),
     dumpbox_auto_reminders: bool = Body(None),
     dictation_engine: str = Body(None),
@@ -301,6 +347,29 @@ def update_settings(
         settings["cal_com_api_key"] = cal_com_api_key
     if proactive_calcom_bookings is not None:
         settings["proactive_calcom_bookings"] = proactive_calcom_bookings
+    if google_places_api_key is not None:
+        settings["google_places_api_key"] = google_places_api_key.strip()
+    if payroll_org_id is not None:
+        settings["payroll_org_id"] = payroll_org_id.strip()
+    if payroll_api_key is not None:
+        settings["payroll_api_key"] = payroll_api_key.strip()
+    if payroll_self_email is not None:
+        settings["payroll_self_email"] = payroll_self_email.strip()
+    if screen_vision_enabled is not None:
+        settings["screen_vision_enabled"] = screen_vision_enabled
+    if vision_model is not None:
+        settings["vision_model"] = vision_model.strip()
+    if vision_provider in ("auto", "cloud", "local"):
+        settings["vision_provider"] = vision_provider
+    if local_vision_model is not None:
+        settings["local_vision_model"] = local_vision_model.strip()
+    if computer_control_enabled is not None:
+        settings["computer_control_enabled"] = computer_control_enabled
+        if not computer_control_enabled:
+            import computer_agent
+            computer_agent.stop("computer control was turned off")
+    if computer_confirm_risky is not None:
+        settings["computer_confirm_risky"] = computer_confirm_risky
     if dumpbox_auto_process is not None:
         settings["dumpbox_auto_process"] = dumpbox_auto_process
     if dumpbox_auto_reminders is not None:
@@ -334,10 +403,16 @@ def update_settings(
     result["tavily_api_key_set"] = bool(settings.get("tavily_api_key"))
     result["google_client_secret_set"] = bool(settings.get("google_client_secret"))
     result["telegram_bot_token_set"] = bool(settings.get("telegram_bot_token"))
+    result["google_places_api_key_set"] = bool(settings.get("google_places_api_key"))
+    result["cal_com_api_key_set"] = bool(settings.get("cal_com_api_key"))
+    result["payroll_api_key_set"] = bool(settings.get("payroll_api_key"))
     result.pop("cloud_api_key", None)
     result.pop("tavily_api_key", None)
     result.pop("google_client_secret", None)
     result.pop("telegram_bot_token", None)
+    result.pop("google_places_api_key", None)
+    result.pop("cal_com_api_key", None)
+    result.pop("payroll_api_key", None)
     return result
 
 
@@ -478,14 +553,26 @@ def wakeword_trigger():
         return {"error": str(e)}
 
 
+@app.post("/voice/stop-speaking")
+def voice_stop_speaking():
+    """The notch's ✕ while Mira is talking: cut the current reply off."""
+    from wakeword_listener import _stop_speaking
+    return {"stopped": _stop_speaking("Stop pressed in the notch")}
+
+
 @app.get("/voice/status")
-def voice_status():
+def voice_status(since: int = -1, wait: float = 0):
     """What Mira's voice is doing right now -- idle/listening/thinking/speaking,
-    plus the heard or spoken text. Electron polls this to drive the notch's
-    listening/speaking animation; see voice_state.py for why this lives in its
-    own module instead of wakeword_listener.py directly."""
+    plus the heard or spoken text. Electron long-polls this (since=<last
+    version seen>, wait=25) to drive the notch's listening/speaking
+    animation; see voice_state.py for why this lives in its own module
+    instead of wakeword_listener.py directly."""
     import voice_state
-    return voice_state.get_state()
+    if wait > 0 and since >= 0:
+        state = voice_state.wait_for_change(since, max(0.0, min(wait, 25.0)))
+    else:
+        state = voice_state.get_state()
+    return {**state, "long_poll": True}
 
 
 @app.get("/ask")
@@ -743,15 +830,22 @@ def call_cloud_model(history: list):
 
 
 # Firing a webhook has real side effects, so an automation only runs when the
-# user said so explicitly. Both gates must pass: the message has to open with a
-# run verb, AND automations.match_automation has to find one unambiguous match.
-# Anything less falls through to a normal reply rather than guessing.
+# user said so explicitly. All gates must pass: the message is a short command
+# (not a pasted draft), it opens with a run verb, AND
+# automations.match_automation finds one unambiguous match by name. Anything
+# less goes to the agent, which can still call run_automation if it's meant.
+# (A LinkedIn draft containing "our devices now run in fields ... local" once
+# fired the blog publisher here, when the verb could appear anywhere.)
 RUN_VERBS = ("run", "trigger", "start", "execute", "fire", "launch", "kick off")
+RUN_COMMAND_MAX_WORDS = 10
 
 
 def maybe_run_automation(message: str):
     text = (message or "").strip().lower()
-    if not any(text.startswith(v) or f" {v} " in f" {text} " for v in RUN_VERBS):
+    text = re.sub(r"^(hey\s+)?mira[,\s]+", "", text)
+    if len(text.split()) > RUN_COMMAND_MAX_WORDS:
+        return None
+    if not any(re.match(rf"(please\s+)?(can you\s+)?{v}\b", text) for v in RUN_VERBS):
         return None
 
     import automations as _a
@@ -1847,6 +1941,35 @@ def google_drive_list(query: str = "", max_results: int = 20):
         return {"error": str(e)}
 
 
+# ---------- RazorpayX Payroll ----------
+import payroll_integration as _payroll
+
+
+@app.get("/payroll/status")
+def payroll_status():
+    return _payroll.directory_status()
+
+
+@app.get("/payroll/people")
+def payroll_people():
+    """Names for the Settings page's "You in payroll" picker. Local only --
+    reads the synced directory, never the API."""
+    return {"people": [{"name": p["name"], "email": p["email"]}
+                       for p in _payroll._load_directory().get("employees", [])
+                       if p.get("is_active", True) and p.get("email")]}
+
+
+@app.post("/payroll/sync")
+def payroll_sync():
+    """Rebuilds the local employee directory -- the payroll API has no list
+    endpoint, so this doubles as the Settings page's connection test."""
+    try:
+        _payroll.sync_directory()
+        return _payroll.directory_status()
+    except (RuntimeError, requests.RequestException) as e:
+        return {"error": str(e)}
+
+
 # ---------- Automations (n8n and other webhooks) ----------
 import automations as _automations
 
@@ -1977,6 +2100,264 @@ def automations_run(automation_id: str, payload: dict = Body(None, embed=True)):
         return {"error": "not found"}
 
 
+# ---------- Lead finder (see leads.py) ----------
+import leads as _leads
+
+
+@app.get("/leads/status")
+def leads_status():
+    return _leads.status()
+
+
+@app.get("/leads/lists")
+def leads_lists():
+    return {"lists": _leads.list_lists()}
+
+
+@app.post("/leads/search")
+def leads_search(business_type: str = Body(...), area: str = Body(...),
+                 source: str = Body("auto"), depth: int = Body(_leads.DEFAULT_DEPTH)):
+    from tools import _notify_leads_ready
+    try:
+        return {"started": True,
+                "list": _leads.start_search(business_type, area, source, depth,
+                                            on_done=_notify_leads_ready)}
+    except (ValueError, RuntimeError) as e:
+        return {"started": False, "error": str(e)}
+
+
+@app.post("/leads/cancel")
+def leads_cancel():
+    return {"cancelled": _leads.cancel_search()}
+
+
+@app.get("/leads/lists/{list_id}")
+def leads_get(list_id: str):
+    record = _leads.get_list(list_id)
+    return record if record else {"error": "not found"}
+
+
+@app.get("/leads/lists/{list_id}/csv")
+def leads_csv(list_id: str):
+    from fastapi.responses import Response
+    record = _leads.get_list(list_id)
+    if not record:
+        return {"error": "not found"}
+    return Response(_leads.to_csv(record), media_type="text/csv",
+                    headers={"Content-Disposition": f'attachment; filename="leads-{list_id}.csv"'})
+
+
+@app.post("/leads/lists/{list_id}/export")
+def leads_export(list_id: str):
+    record = _leads.get_list(list_id)
+    if not record:
+        return {"error": "not found"}
+    return {"path": _leads.export_csv(record)}
+
+
+@app.delete("/leads/lists/{list_id}")
+def leads_delete(list_id: str):
+    return {"deleted": _leads.delete_list(list_id)}
+
+
+# ---------- Outreach (see outreach.py) ----------
+import outreach as _outreach
+import outreach_mail as _mailbox
+from fastapi import Header
+
+
+def _err(e: Exception) -> dict:
+    if isinstance(e, KeyError):
+        return {"error": "not found"}
+    return {"error": str(e)}
+
+
+@app.get("/outreach/overview")
+def outreach_overview():
+    return _outreach.overview()
+
+
+@app.get("/outreach/config")
+def outreach_config_get():
+    cfg = _outreach.public_config()
+    cfg["placeholders"] = _outreach.PLACEHOLDERS
+    cfg["default_steps"] = _outreach.DEFAULT_STEPS
+    return cfg
+
+
+@app.post("/outreach/config")
+def outreach_config_set(changes: dict = Body(...)):
+    try:
+        return _outreach.update_config(changes)
+    except (ValueError, TypeError) as e:
+        return _err(e)
+
+
+@app.post("/outreach/config/check-mailbox")
+def outreach_check_mailbox():
+    return _mailbox.check(_outreach.load_config())
+
+
+@app.get("/outreach/campaigns")
+def outreach_campaigns():
+    return {"campaigns": _outreach.list_campaigns()}
+
+
+@app.post("/outreach/campaigns")
+def outreach_campaign_create(data: dict = Body(...)):
+    try:
+        return _outreach.create_campaign(data)
+    except (ValueError, TypeError) as e:
+        return _err(e)
+
+
+@app.get("/outreach/campaigns/{campaign_id}")
+def outreach_campaign_get(campaign_id: str):
+    c = _outreach.get_campaign(campaign_id)
+    if not c:
+        return {"error": "not found"}
+    c["leads"] = _outreach.campaign_leads(campaign_id)
+    return c
+
+
+@app.post("/outreach/campaigns/{campaign_id}")
+def outreach_campaign_update(campaign_id: str, data: dict = Body(...)):
+    try:
+        return _outreach.update_campaign(campaign_id, data)
+    except (ValueError, TypeError, KeyError) as e:
+        return _err(e)
+
+
+@app.delete("/outreach/campaigns/{campaign_id}")
+def outreach_campaign_delete(campaign_id: str):
+    return {"deleted": _outreach.delete_campaign(campaign_id)}
+
+
+@app.post("/outreach/campaigns/{campaign_id}/preview")
+def outreach_campaign_preview(campaign_id: str, lead_id: str = Body("", embed=True),
+                              personalize: bool = Body(None, embed=True)):
+    try:
+        return _outreach.preview(campaign_id, lead_id, personalize)
+    except (ValueError, KeyError) as e:
+        return _err(e)
+
+
+@app.post("/outreach/campaigns/{campaign_id}/test")
+def outreach_campaign_test(campaign_id: str):
+    try:
+        return _outreach.send_test(campaign_id)
+    except (ValueError, KeyError, _mailbox.MailboxError) as e:
+        return _err(e)
+
+
+@app.post("/outreach/campaigns/{campaign_id}/activate")
+def outreach_campaign_activate(campaign_id: str, mode: str = Body(None, embed=True),
+                               skip_test: bool = Body(False, embed=True)):
+    try:
+        return _outreach.activate(campaign_id, mode, skip_test)
+    except (ValueError, KeyError) as e:
+        return _err(e)
+
+
+@app.post("/outreach/campaigns/{campaign_id}/pause")
+def outreach_campaign_pause(campaign_id: str):
+    try:
+        return _outreach.pause(campaign_id)
+    except KeyError as e:
+        return _err(e)
+
+
+@app.get("/outreach/pending")
+def outreach_pending(campaign_id: str = ""):
+    return {"messages": _outreach.pending(campaign_id)}
+
+
+@app.post("/outreach/pending/approve-all")
+def outreach_approve_all(campaign_id: str = Body("", embed=True)):
+    return {"approved": _outreach.approve_all(campaign_id)}
+
+
+@app.post("/outreach/messages/{msg_id}/approve")
+def outreach_approve(msg_id: str, text: str = Body(None), subject: str = Body(None)):
+    try:
+        return _outreach.approve(msg_id, text, subject)
+    except KeyError as e:
+        return _err(e)
+
+
+@app.post("/outreach/messages/{msg_id}/skip")
+def outreach_skip(msg_id: str):
+    try:
+        _outreach.skip(msg_id)
+        return {"skipped": True}
+    except KeyError as e:
+        return _err(e)
+
+
+@app.get("/outreach/replies")
+def outreach_replies(limit: int = 50, label: str = ""):
+    return {"replies": _outreach.replies(limit, label)}
+
+
+@app.get("/outreach/leads/{list_id}/{lead_id}")
+def outreach_timeline(list_id: str, lead_id: str):
+    try:
+        return _outreach.timeline(list_id, lead_id)
+    except KeyError as e:
+        return _err(e)
+
+
+@app.post("/outreach/leads/{list_id}/{lead_id}/stage")
+def outreach_set_stage(list_id: str, lead_id: str, stage: str = Body(..., embed=True)):
+    try:
+        return _outreach.set_stage(list_id, lead_id, stage)
+    except (ValueError, KeyError) as e:
+        return _err(e)
+
+
+# The WhatsApp extension's side of the contract (docs/whatsapp-extension.md).
+# Every call carries X-Mira-Token: the daemon has no auth of its own, and
+# without it any page open in the browser could post fake replies.
+
+@app.get("/outreach/whatsapp/token")
+def outreach_whatsapp_token():
+    return {"token": _outreach.whatsapp_token()}
+
+
+@app.post("/outreach/whatsapp/token/rotate")
+def outreach_whatsapp_token_rotate():
+    return {"token": _outreach.whatsapp_token(rotate=True)}
+
+
+def _bridge_auth(token: str):
+    if not _outreach.check_token(token):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=401, detail="bad or missing X-Mira-Token")
+
+
+@app.get("/outreach/whatsapp/next")
+def outreach_whatsapp_next(x_mira_token: str = Header("")):
+    _bridge_auth(x_mira_token)
+    return _outreach.bridge_next()
+
+
+@app.post("/outreach/whatsapp/sent")
+def outreach_whatsapp_sent(id: str = Body(...), ok: bool = Body(...), error: str = Body(""),
+                           not_on_whatsapp: bool = Body(False), x_mira_token: str = Header("")):
+    _bridge_auth(x_mira_token)
+    try:
+        return _outreach.bridge_result(id, ok, error, not_on_whatsapp)
+    except KeyError as e:
+        return _err(e)
+
+
+@app.post("/outreach/whatsapp/incoming")
+def outreach_whatsapp_incoming(phone: str = Body(...), text: str = Body(...), id: str = Body(""),
+                               name: str = Body(""), x_mira_token: str = Header("")):
+    _bridge_auth(x_mira_token)
+    return _outreach.bridge_incoming(phone, text, id, name)
+
+
 # ---------- Telegram ----------
 import telegram_bot as _telegram
 
@@ -1996,15 +2377,28 @@ def notify_blog_published(payload: dict = Body(...)):
     title = (payload.get("title") or "").strip()
     summary = (payload.get("summary") or "").strip()
     url = (payload.get("url") or "").strip()
+    # The workflow only sends url_hi once the Hindi translation passed all its
+    # checks, including a fetch of the live /hi/ page -- otherwise hindi_error
+    # says why there is none.
+    url_hi = (payload.get("url_hi") or "").strip()
+    hindi_error = (payload.get("hindi_error") or "").strip()
 
     lines = ["New KrishiVerse blog published: " + (title or topic or "(untitled)")]
     if summary:
         lines.append(summary)
-    if url:
-        lines.append(url)
-    else:
-        lines.append("(no Shopify URL was captured for this post)")
+    links = ["English: " + (url or "(no Shopify URL was captured for this post)")]
+    if url_hi:
+        links.append("Hindi: " + url_hi)
+    elif hindi_error:
+        links.append("Hindi version not published: " + hindi_error)
+    lines.append("\n".join(links))
     text = "\n\n".join(lines)
+
+    import blog_log
+    try:
+        blog_log.record(title or topic, summary, url, url_hi, hindi_error)
+    except OSError as e:
+        print(f"[notify] could not record blog for the morning digest: {e}")
 
     status = _telegram.status()
     if not status.get("linked"):
@@ -2141,9 +2535,34 @@ def tasks_delete(task_id: str):
 
 
 # ---------- Action queue (work only Electron can do) ----------
+@app.get("/vision/status")
+def vision_status():
+    """For Settings: which model looks at the screen, and whether the local
+    one is installed in Ollama."""
+    import screen_vision
+    s = load_settings()
+    local = s.get("local_vision_model") or screen_vision.DEFAULT_LOCAL_VISION_MODEL
+    screen_vision._local_check["at"] = 0  # fresh check when Settings asks
+    return {"provider": s.get("vision_provider", "auto"), "local_model": local,
+            "local_ready": screen_vision.local_model_ready(local)}
+
+
+# ---------- Computer control (agent mode) ----------
+@app.post("/computer/stop")
+def computer_stop(reason: str = Body("you stopped me", embed=True)):
+    import computer_agent
+    return {"stopped": computer_agent.stop(reason[:120])}
+
+
+@app.get("/computer/status")
+def computer_status():
+    import computer_agent
+    return computer_agent.status()
+
+
 @app.get("/actions/pending")
-def actions_pending():
-    return {"actions": _actions.pending()}
+def actions_pending(wait: float = 0):
+    return {"actions": _actions.pending(wait=max(0.0, min(wait, 25.0))), "long_poll": True}
 
 
 @app.post("/actions/{action_id}/result")

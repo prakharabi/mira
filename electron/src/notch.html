@@ -33,7 +33,7 @@
        rectangle sitting below the notch even with nothing in it. */
     background: transparent;
     border: 1px solid transparent;
-    border-radius: 20px;
+    border-radius: 14px;
     overflow: hidden;
     color: rgba(255,255,255,0.92);
     box-sizing: border-box;
@@ -42,30 +42,23 @@
                 box-shadow 280ms cubic-bezier(0.22, 1, 0.36, 1),
                 backdrop-filter 280ms cubic-bezier(0.22, 1, 0.36, 1);
   }
-  /* Apple "liquid glass": a blurred, saturated view of whatever is behind
-     the pill (desktop, other windows) rather than a flat dark fill -- this
-     window is transparent (see main.js) specifically so backdrop-filter has
-     real content to refract. Two layers do the work: the backdrop-filter
-     blurs+saturates the world behind it, and the background gradient adds
-     the faint top-lit sheen glass actually has. A hairline border plus an
-     inset top highlight reads as a lit edge catching light, which is what
-     sells "glass" over "dark plastic". */
+  /* Styled like the macOS menu-bar menus rather than full liquid glass: the
+     notch sits over whatever's on screen, and the more see-through glass
+     version let busy content behind it wash out its own text. A mostly
+     opaque dark surface with only a light blur keeps text crisp on any
+     background while still reading as a system surface, not a flat box. */
   body.active #shell {
-    background:
-      linear-gradient(180deg, rgba(255,255,255,0.16) 0%, rgba(255,255,255,0.05) 14%, rgba(255,255,255,0.02) 45%, rgba(20,20,24,0.10) 100%),
-      rgba(28,28,32,0.42);
-    backdrop-filter: blur(38px) saturate(190%);
-    -webkit-backdrop-filter: blur(38px) saturate(190%);
-    border-color: rgba(255,255,255,0.16);
+    background: rgba(30,30,32,0.9);
+    backdrop-filter: blur(24px) saturate(140%);
+    -webkit-backdrop-filter: blur(24px) saturate(140%);
+    border-color: rgba(255,255,255,0.13);
     /* Rounded on every side, floating just clear of the menu bar rather than
        flush-mounted to it -- reads as a pill extending down from the notch,
        matching the reference, instead of a drawer welded to the bar. */
     box-shadow:
-      inset 0 1px 0 rgba(255,255,255,0.28),
-      inset 0 0 0 1px rgba(255,255,255,0.05),
-      0 1px 1px rgba(0,0,0,0.15),
-      0 14px 34px rgba(0,0,0,0.38),
-      0 2px 8px rgba(0,0,0,0.22);
+      inset 0 0.5px 0 rgba(255,255,255,0.1),
+      0 10px 28px rgba(0,0,0,0.4),
+      0 0 0 0.5px rgba(0,0,0,0.5);
   }
 
   /* Every state swap below cross-fades + rises slightly rather than
@@ -88,6 +81,18 @@
     position: absolute;
     inset: 0;
   }
+  /* Hidden states stay rendered (opacity 0) so the fade above can run --
+     which also left their infinite animations (holo mark, spinner, voice
+     bars) ticking in a window that is always on screen. At rest that alone
+     held this renderer at ~10% CPU, redrawing things nobody could see.
+     Paused, they cost nothing and resume the moment a state is shown. */
+  #idle[hidden] *, #collapsed[hidden] *, #expanded[hidden] *, #listening[hidden] *, #speaking[hidden] *, #ask[hidden] *,
+  #idle[hidden] *::before, #collapsed[hidden] *::before, #expanded[hidden] *::before,
+  #listening[hidden] *::before, #speaking[hidden] *::before, #ask[hidden] *::before,
+  #idle[hidden] *::after, #collapsed[hidden] *::after, #expanded[hidden] *::after,
+  #listening[hidden] *::after, #speaking[hidden] *::after, #ask[hidden] *::after {
+    animation-play-state: paused !important;
+  }
 
   /* At true rest this shows NOTHING -- no dash, no outline, nothing to see
      below the notch at all, matching a hardware notch's own edge exactly.
@@ -106,16 +111,14 @@
     display: none;
     font-size: 11px;
     font-weight: 600;
-    color: rgba(255,255,255,0.7);
+    color: rgba(255,255,255,0.85);
     letter-spacing: 0.1px;
   }
   body.active #idle-hint { display: block; }
   #idle-hint kbd {
     font: inherit;
-    background: rgba(255,255,255,0.14);
-    border: 1px solid rgba(255,255,255,0.12);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.2);
-    border-radius: 5px;
+    background: rgba(255,255,255,0.12);
+    border-radius: 4px;
     padding: 1px 5px;
     margin: 0 1px;
   }
@@ -134,7 +137,7 @@
     height: 34px;
     font-size: 11.5px;
     font-weight: 600;
-    color: rgba(255,255,255,0.75);
+    color: rgba(255,255,255,0.9);
   }
   /* (fade handled by the shared #collapsed[hidden] rule above; this file
      only needed the layout override once, not a second conflicting one) */
@@ -196,7 +199,7 @@
   .voice-label-text {
     font-size: 11.5px;
     font-weight: 600;
-    color: rgba(255,255,255,0.75);
+    color: rgba(255,255,255,0.92);
     white-space: nowrap;
     max-width: 220px;
     overflow: hidden;
@@ -231,13 +234,14 @@
     color: rgba(255,255,255,0.95);
     caret-color: #0A84FF;
   }
-  #ask-input::placeholder { color: rgba(255,255,255,0.4); }
+  #ask-input::placeholder { color: rgba(255,255,255,0.5); }
 
   /* Opened via Control+S, which is easy to trigger by mistake -- unlike
      #expanded (context/response), this state had no visible way out besides
      knowing to hit Escape. Same look as #close so both read as the same
      affordance. */
-  #ask-close {
+  /* #speak-close: the speaking pill's way to cut Mira off mid-sentence. */
+  #ask-close, #speak-close {
     flex-shrink: 0;
     width: 20px; height: 20px;
     display: flex; align-items: center; justify-content: center;
@@ -247,14 +251,14 @@
     cursor: default;
     transition: background 140ms ease, color 140ms ease, transform 140ms ease;
   }
-  #ask-close:hover { background: rgba(255,69,58,0.26); color: #ff8078; }
-  #ask-close:active { transform: scale(0.92); }
-  #ask-close svg { width: 11px; height: 11px; }
+  #ask-close:hover, #speak-close:hover { background: rgba(255,69,58,0.26); color: #ff8078; }
+  #ask-close:active, #speak-close:active { transform: scale(0.92); }
+  #ask-close svg, #speak-close svg { width: 11px; height: 11px; }
 
   #context-text {
     font-size: 12px;
     line-height: 1.45;
-    color: rgba(255,255,255,0.6);
+    color: rgba(255,255,255,0.82);
     max-height: 4.4em;
     overflow: hidden;
     -webkit-mask-image: linear-gradient(to bottom, black 70%, transparent 100%);
@@ -264,12 +268,15 @@
   }
 
   #actions { display: flex; gap: 6px; flex-wrap: wrap; }
+  /* display:flex above beats the UA [hidden] rule, so without this the row
+     never actually hid -- it sat under the Control+S answer and every
+     working/response screen instead of only appearing for copied text. */
+  #actions[hidden] { display: none; }
   #actions button {
     display: flex; align-items: center; gap: 5px;
-    background: rgba(255,255,255,0.09);
-    border: 1px solid rgba(255,255,255,0.10);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.14);
-    border-radius: 9px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid transparent;
+    border-radius: 7px;
     padding: 6px 10px;
     font: inherit;
     font-size: 11.5px;
@@ -284,11 +291,13 @@
      attribute -- same bug already fixed once in pill.html, reintroduced here
      by not carrying it forward into this new file. */
   #actions button[hidden] { display: none; }
-  #actions button:hover { background: rgba(255,255,255,0.17); border-color: rgba(255,255,255,0.18); }
-  #actions button:active { transform: scale(0.96); background: rgba(255,255,255,0.13); }
+  /* Hover is the menu-item highlight: system blue, white text. */
+  #actions button:hover { background: #0A64D6; color: #fff; }
+  #actions button:hover svg { opacity: 1; }
+  #actions button:active { transform: scale(0.97); background: #0957BD; }
   #actions svg { width: 12px; height: 12px; opacity: 0.85; }
-  #call-btn { background: rgba(48,209,88,0.20); border-color: rgba(48,209,88,0.28); color: #b6f5c8; }
-  #call-btn:hover { background: rgba(48,209,88,0.30); }
+  #call-btn { background: rgba(48,209,88,0.18); color: #b6f5c8; }
+  #call-btn:hover { background: #248A3D; color: #fff; }
 
   #response-text {
     font-size: 12.5px;
@@ -309,7 +318,7 @@
   }
   .text-btn {
     background: none; border: none; cursor: default;
-    color: rgba(255,255,255,0.55);
+    color: rgba(255,255,255,0.7);
     font: inherit; font-size: 11px; font-weight: 600;
     padding: 3px 6px;
     margin: -3px -6px;
@@ -319,7 +328,7 @@
   .text-btn:hover { color: rgba(255,255,255,0.95); background: rgba(255,255,255,0.08); }
   .text-btn.done { color: #30D158; }
   #foot .spacer { flex: 1; }
-  #foot .hint { font-size: 10.5px; color: rgba(255,255,255,0.35); }
+  #foot .hint { font-size: 10.5px; color: rgba(255,255,255,0.45); }
 
   #close {
     position: absolute;
@@ -358,6 +367,9 @@
       <span class="holo-mark"><span class="holo-halo"></span><span class="holo-lattice"></span><svg class="mark" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="ng-speaking" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#06b6d4"/></linearGradient></defs><rect width="128" height="128" rx="30" fill="url(#ng-speaking)"/><circle cx="64" cy="30" r="6.5" fill="#fff"/><path d="M36 90 V46 L64 76 L92 46 V90" fill="none" stroke="#fff" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="holo-scan"></span></span>
       <div class="voice-bars"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
       <span id="voice-label" class="voice-label-text"></span>
+      <button id="speak-close" title="Stop talking">
+        <svg viewBox="0 0 16 16" fill="none"><path d="M4 4l8 8M12 4l-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+      </button>
     </div>
     <div id="ask" hidden>
       <span class="holo-mark"><span class="holo-halo"></span><span class="holo-lattice"></span><svg class="mark" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg"><defs><linearGradient id="ng-ask" x1="0" y1="0" x2="128" y2="128" gradientUnits="userSpaceOnUse"><stop offset="0%" stop-color="#8b5cf6"/><stop offset="100%" stop-color="#06b6d4"/></linearGradient></defs><rect width="128" height="128" rx="30" fill="url(#ng-ask)"/><circle cx="64" cy="30" r="6.5" fill="#fff"/><path d="M36 90 V46 L64 76 L92 46 V90" fill="none" stroke="#fff" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="holo-scan"></span></span>
@@ -372,6 +384,7 @@
       </button>
       <div id="context-text"></div>
       <div id="actions">
+        <button data-action="open" title="Open in your default browser (links open directly, other text is searched)"><svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M3 10h14M10 3c2 2.2 2.9 4.6 2.9 7s-.9 4.8-2.9 7c-2-2.2-2.9-4.6-2.9-7S8 5.2 10 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>Open in Browser</button>
         <button data-action="search"><svg viewBox="0 0 20 20" fill="none"><circle cx="9" cy="9" r="5.5" stroke="currentColor" stroke-width="1.6"/><path d="M13.5 13.5L17 17" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Search</button>
         <button data-action="summarize"><svg viewBox="0 0 20 20" fill="none"><path d="M4 5.5h12M4 10h12M4 14.5h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Summarize</button>
         <button data-action="remind"><svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="6.5" stroke="currentColor" stroke-width="1.6"/><path d="M10 6.5V10l2.5 1.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>Remind</button>
@@ -624,7 +637,7 @@
 
     ipcRenderer.on('notch-idle', goIdle);
 
-    ipcRenderer.on('notch-collapsed', (event, label) => {
+    ipcRenderer.on('notch-collapsed', (event, label, opts) => {
       clearSpeakCaption();
       idleEl.hidden = true;
       collapsedEl.hidden = false;
@@ -635,10 +648,12 @@
       collapsedLabel.textContent = label || 'Reading…';
       contentShown = true;
       syncActive();
-      // A stuck OCR/tool call would otherwise leave this spinning forever;
-      // this state normally transitions on its own (to context or an error)
-      // well before this fires.
-      armAutoIdle(15000);
+      // A stuck OCR call would otherwise leave this spinning forever; this
+      // state normally transitions on its own (to context or an error) well
+      // before this fires. "Thinking…" gets a far longer backstop -- a real
+      // agent turn can legitimately take well over 15s, and its caller always
+      // ends the state itself (see showNotchWorking in main.js).
+      armAutoIdle(opts && opts.waitForAnswer ? 180000 : 15000);
       requestAnimationFrame(reportSize);
     });
 
@@ -679,6 +694,11 @@
       const btn = e.target.closest('button[data-action]');
       if (!btn) return;
       const action = btn.dataset.action;
+      // Opening a page is instant and closes the notch -- no spinner to show.
+      if (action === 'open') {
+        ipcRenderer.send('notch-action', { action, text: sourceText });
+        return;
+      }
       showWorking(action === 'remind' ? 'Creating reminder…' : 'Working…');
       ipcRenderer.send('notch-action', { action, text: sourceText });
     });
@@ -710,6 +730,7 @@
 
     document.getElementById('close').addEventListener('click', () => ipcRenderer.send('notch-close'));
     document.getElementById('ask-close').addEventListener('click', () => ipcRenderer.send('notch-close'));
+    document.getElementById('speak-close').addEventListener('click', () => ipcRenderer.send('notch-stop-speaking'));
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') ipcRenderer.send('notch-close');
     });

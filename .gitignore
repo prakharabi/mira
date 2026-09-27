@@ -14,6 +14,7 @@ electron/dist/
 
 # Third-party (re-fetch via setup steps, not tracked)
 whisper.cpp/
+daemon/bin/
 
 # Runtime / personal data
 daemon/meetings/
@@ -26,8 +27,13 @@ daemon/settings.json
 daemon/personal_ngrams.json
 daemon/google_tokens.json
 daemon/automations.json
+daemon/payroll_directory.json
 daemon/dumpbox/
 daemon/memory_store/
+# lead lists hold scraped phone numbers and emails -- personal data
+daemon/leads/
+# outreach config (mailbox app password), campaigns, message log, do-not-contact list
+daemon/outreach/
 daemon/telegram_voice/
 daemon/wakeword/command_recording.wav
 daemon/wakeword/command_recording.converted.wav
@@ -45,3 +51,6 @@ electron/electron.log
 /electron/mic_helper
 /electron/mic_test_helper
 /electron/ax_helper
+
+# local marketing renders
+brag-output/

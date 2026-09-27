@@ -17,6 +17,11 @@ import time
 import uuid
 
 _lock = threading.Lock()
+# Signalled on every enqueue, so a long-polling /actions/pending returns the
+# moment there is work instead of on its next 2-second tick. That tick used to
+# add up to 2s to every screen capture and every click -- several seconds per
+# step once Mira operates apps herself -- and cost a request every 2s at idle.
+_has_work = threading.Condition(_lock)
 _actions = {}          # id -> action dict
 _results = {}          # id -> result dict
 _events = {}           # id -> threading.Event
@@ -47,14 +52,18 @@ def enqueue(action_type: str, params: dict) -> str:
             "claimed": False,
         }
         _events[action_id] = threading.Event()
+        _has_work.notify_all()
     return action_id
 
 
-def pending() -> list:
+def pending(wait: float = 0) -> list:
     """Actions Electron hasn't picked up yet. Claiming them here means two
-    polls in flight can't execute the same reminder twice."""
+    polls in flight can't execute the same reminder twice. With `wait`, blocks
+    up to that many seconds for one to arrive (long poll)."""
     with _lock:
         _prune_locked()
+        if wait > 0 and not any(not a["claimed"] for a in _actions.values()):
+            _has_work.wait_for(lambda: any(not a["claimed"] for a in _actions.values()), timeout=wait)
         out = []
         for a in _actions.values():
             if not a["claimed"]:

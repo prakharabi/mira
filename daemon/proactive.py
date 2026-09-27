@@ -146,7 +146,9 @@ _CONNECTORS = ["Also,", "And,", "On top of that,", "One more thing —", "Plus,"
 # plus the general pictograph/symbol/flag blocks, so a `say` voice never
 # tries to sound out a glyph it has no pronunciation for.
 _EMOJI_RE = re.compile(
-    "[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF]+",
+    # ️ is the variation selector that follows ✉️/🗓️ -- left behind on
+    # its own once the base glyph is stripped.
+    "[\U0001F300-\U0001FAFF\U00002600-\U000027BF\U0001F1E6-\U0001F1FF️]+",
     flags=re.UNICODE,
 )
 
@@ -161,7 +163,10 @@ def _speakify(alerts: list) -> str:
         # A multi-line alert (calendar's optional location line, the email
         # digest's own paragraphs) reads as one breath, not a hard stop --
         # full sentence breaks stay wherever the text already has them.
-        text = re.sub(r"\n+", ". ", text)
+        # A line that already ends a sentence just gets a space, or joining
+        # summary paragraphs reads out as "details. . The".
+        text = re.sub(r"([.!?])\s*\n+\s*", r"\1 ", text)
+        text = re.sub(r"\s*\n+\s*", ". ", text)
         text = re.sub(r"\s{2,}", " ", text).strip(" .")
         if text:
             cleaned.append(text)
@@ -296,16 +301,66 @@ def _check_email(seen: set) -> list:
         log(f"email check failed: {e}")
         return _google_reconnect_alert(seen, e)
 
-    alerts = []
+    fresh = []
     for m in messages:
         key = f"mail:{m.get('id')}"
         if key in seen:
             continue
         seen.add(key)
+        fresh.append(m)
+
+    if not fresh:
+        return []
+
+    # Summarized, like the morning digest, instead of reading out/sending a
+    # bare "Sender: Subject" line per mail -- a subject alone rarely says
+    # what the mail actually wants.
+    summary = _summarize_new_mail(fresh, g)
+    if summary:
+        return [f"✉️ {summary}"]
+
+    # Summarization failed: fall back to the plain lines rather than drop
+    # the alert, since these mails are already marked seen.
+    alerts = []
+    for m in fresh:
         sender = (m.get("from") or "").split("<")[0].strip().strip('"')
         alerts.append(f"✉️ {sender}: {m.get('subject', '(no subject)')}")
-
     return alerts
+
+
+def _summarize_new_mail(messages: list, g) -> str:
+    """Reads each new mail's real body (via _digest_entry) and returns a short
+    summary of them together, or "" if that fails."""
+    from main import load_settings
+    listing = "\n".join(_digest_entry(m, i, g) for i, m in enumerate(messages))
+    count = "1 new email" if len(messages) == 1 else f"{len(messages)} new emails"
+    prompt = (
+        f"{count} just arrived, already fetched -- do not call any tools, just "
+        "work with what's below.\n\n"
+        f"{listing}\n\n"
+        "Read them, then summarize them for me in plain spoken-style prose: who "
+        "each is from and what they actually want or say, and whether any need "
+        "a reply or action from me. Keep it to a sentence or two per email. "
+        "Summarize in your own words -- don't read out, quote, or rephrase the "
+        "message text line by line. No bullet points, lists or markdown -- it "
+        "may be spoken aloud. No greeting or sign-off; this is dropped into a "
+        "larger update."
+    )
+    try:
+        import agent
+        from main import GROQ_API_KEY
+        text, meta = agent.run_agent(
+            history=[{"role": "user", "content": prompt}], user_message=prompt,
+            model_pref="auto", settings=load_settings(), groq_key=GROQ_API_KEY,
+            surface="proactive",
+        )
+    except Exception as e:
+        log(f"new-mail summarization failed: {e}")
+        return ""
+    if not text:
+        log(f"new-mail summarization returned nothing: {meta}")
+        return ""
+    return text.strip()
 
 
 
@@ -351,6 +406,36 @@ def _digest_entry(m: dict, index: int, g) -> str:
     )
 
 
+def _blog_digest_section(state: dict) -> list:
+    """KrishiVerse blog posts published since the last digest, as one extra
+    digest block. Tracked by its own timestamp in the digest state rather than
+    tied to the mail half, so every post shows up exactly once even on days
+    the mail digest bails out early (empty inbox, Google disconnected)."""
+    import blog_log
+    entries = blog_log.since(state.get("blog_last_ts"))
+    if not entries:
+        return []
+    state["blog_last_ts"] = entries[-1]["published_at"]
+    _save_digest_state(state)
+
+    lines = [f"🌾 KrishiVerse blog ({len(entries)} new)"]
+    for e in entries:
+        summary = (e.get("summary") or "").strip()
+        first = summary.split(". ")[0].rstrip(".")
+        if len(first) > 160:
+            first = first[:160].rsplit(" ", 1)[0] + "…"
+        lines.append("")
+        lines.append(f"• {e.get('title') or '(untitled)'}")
+        if first:
+            lines.append(f"  {first}.")
+        lines.append(f"  English: {e.get('url') or '(no link captured)'}")
+        if e.get("url_hi"):
+            lines.append(f"  Hindi: {e['url_hi']}")
+        elif e.get("hindi_error"):
+            lines.append(f"  Hindi: not published ({e['hindi_error']})")
+    return ["\n".join(lines)]
+
+
 def _check_email_digest(settings: dict, seen: set) -> list:
     """Once a day at a fixed hour, one summarized readout of the last 24h of
     mail instead of a ping per message -- see proactive_email above for that
@@ -373,14 +458,16 @@ def _check_email_digest(settings: dict, seen: set) -> list:
     if datetime.datetime.now().hour < target_hour:
         return []
 
+    blog = _blog_digest_section(state)
+
     try:
         import google_integration as g
         if not g.is_connected():
-            return []
+            return blog
         messages = g.gmail_list("newer_than:1d to:me", max_results=30)
     except Exception as e:
         log(f"email digest fetch failed: {e}")
-        return _google_reconnect_alert(seen, e)
+        return blog + _google_reconnect_alert(seen, e)
 
     # Mark today as done regardless of what follows -- an empty inbox or a
     # summarization failure shouldn't make this retry every 5 minutes for the
@@ -389,7 +476,7 @@ def _check_email_digest(settings: dict, seen: set) -> list:
     _save_digest_state(state)
 
     if not messages:
-        return []
+        return blog
 
     # gmail_list only ever fetched metadata + Gmail's own auto-generated
     # snippet (~100-200 chars) -- summarizing off just that gave back
@@ -424,13 +511,13 @@ def _check_email_digest(settings: dict, seen: set) -> list:
         )
     except Exception as e:
         log(f"email digest summarization failed: {e}")
-        return []
+        return blog
 
     if not text:
         log(f"email digest summarization returned nothing: {meta}")
-        return []
+        return blog
 
-    return [f"📬 Morning mail digest ({len(messages)} messages)\n\n{text}"]
+    return [f"📬 Morning mail digest ({len(messages)} messages)\n\n{text}"] + blog
 
 
 def _check_calcom_bookings(seen: set) -> list:

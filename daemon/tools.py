@@ -201,6 +201,110 @@ def _tool_reschedule_calcom_booking(booking_uid: str = "", new_start: str = "",
         return {"error": str(e)}
 
 
+# Without this the model asked "what's Priya's email or employee ID?" instead of
+# just calling the tool -- it didn't believe a bare name would work.
+_EMPLOYEE_ARG = "Name as the user said it, or 'me' for the user. Never ask for an email/id first."
+
+
+# Model-computed dates came out wrong ("Monday to Wednesday next week" was
+# sent as Wed-Fri), so relative dates go to the tool verbatim.
+_DATE_ARG = ("The user's own words for relative dates ('tomorrow', 'next monday') -- don't convert "
+             "them yourself. YYYY-MM-DD only for an actual date.")
+
+
+def _payroll(fn_name: str, *args):
+    """Every payroll tool has the same shape: bail if not connected, never raise."""
+    import payroll_integration as p
+    if not p.is_connected():
+        return {"error": "RazorpayX Payroll isn't connected. Add the org ID and API key in Settings."}
+    try:
+        return getattr(p, fn_name)(*args)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _tool_list_payroll_employees(include_inactive: bool = False, **_):
+    result = _payroll("list_people", include_inactive)
+    return result if isinstance(result, dict) else {"people": result}
+
+
+def _tool_get_employee_details(employee: str = "", **_):
+    return _payroll("employee_details", employee)
+
+
+def _tool_get_employee_salary(employee: str = "", month: str = "", **_):
+    return _payroll("view_payroll", employee, month)
+
+
+def _tool_get_payroll_summary(month: str = "", **_):
+    return _payroll("payroll_summary", month)
+
+
+def _tool_mark_employee_attendance(employee: str = "", status: str = "", start_date: str = "",
+                                   end_date: str = "", leave_type=None, checkin: str = "",
+                                   checkout: str = "", remarks: str = "", skip_weekends: bool = False, **_):
+    return _payroll("mark_attendance", employee, status, start_date, end_date,
+                    leave_type, checkin, checkout, remarks, skip_weekends)
+
+
+def _tool_punch_attendance(action: str = "auto", employee: str = "me", time: str = "",
+                           remarks: str = "", **_):
+    return _payroll("punch", action, employee, time, remarks)
+
+
+def _tool_get_employee_attendance(employee: str = "", date: str = "", **_):
+    return _payroll("get_attendance", employee, date)
+
+
+def _tool_set_salary_hold(employee: str = "", hold: bool = True, month: str = "", **_):
+    return _payroll("set_salary_hold", employee, hold, month)
+
+
+def _tool_add_salary_addition(employee: str = "", amount: float = 0, label: str = "Bonus",
+                              month: str = "", remarks: str = "", **_):
+    return _payroll("add_addition", employee, amount, label, month, remarks)
+
+
+def _tool_add_salary_deduction(employee: str = "", days: float = None, amount: float = None,
+                               month: str = "", remarks: str = "", **_):
+    return _payroll("add_deduction", employee, days, amount, month, remarks)
+
+
+def _tool_reset_salary_changes(employee: str = "", month: str = "", **_):
+    return _payroll("reset_modifications", employee, month)
+
+
+def _tool_look_at_screen(question: str = "", **_):
+    import screen_vision
+    try:
+        return screen_vision.look(question)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _tool_point_on_screen(target: str = "", question: str = "", **_):
+    import screen_vision
+    try:
+        return screen_vision.point(target, question)
+    except Exception as e:
+        return {"error": str(e)}
+
+
+def _notify_computer_done(message: str):
+    import proactive
+    proactive.deliver([message])
+
+
+def _tool_operate_computer(task: str = "", **_):
+    import computer_agent
+    return computer_agent.start(task, on_done=_notify_computer_done)
+
+
+def _tool_stop_computer_task(**_):
+    import computer_agent
+    return {"stopped": computer_agent.stop("you asked me to stop")}
+
+
 def _tool_open_app(name: str = "", **_):
     return app_control.open_app(name)
 
@@ -264,6 +368,162 @@ def _tool_run_automation(name: str = "", **_):
     result = automations.run_automation(match["id"])
     return {"success": bool(result.get("success")), "automation": match["name"],
             "error": result.get("error", "")}
+
+
+def _notify_leads_ready(summary: dict):
+    import leads
+    import proactive
+    proactive.deliver([leads.completion_message(summary)])
+
+
+def _tool_find_businesses(business_type: str = "", area: str = "", source: str = "auto",
+                          depth: int = 0, **_):
+    import leads
+    try:
+        summary = leads.start_search(business_type, area, source=source,
+                                     depth=depth or leads.DEFAULT_DEPTH,
+                                     on_done=_notify_leads_ready)
+    except (ValueError, RuntimeError) as e:
+        return {"started": False, "error": str(e)}
+    return {"started": True, "list": summary["name"], "list_id": summary["id"],
+            "source": summary["source"],
+            "note": "Runs in the background and usually takes 2-10 minutes. The user is "
+                    "notified when it finishes -- do not call this again or poll for it."}
+
+
+def _tool_list_lead_lists(**_):
+    import leads
+    lists = leads.list_lists()[:15]
+    return {"lists": [{k: s[k] for k in ("id", "name", "status", "count", "with_phone",
+                                         "with_email", "created_at", "error")}
+                      for s in lists],
+            "running": leads.status()["running"]}
+
+
+def _tool_show_leads(list: str = "", filter: str = "all", min_rating: float = 0,
+                     limit: int = 15, **_):
+    import leads
+    record = leads.find_list(list)
+    if not record:
+        return {"error": "No lead list matches that. List them first, or run a search."}
+    if record.get("status") in ("running", "enriching"):
+        return {"list": record["name"], "status": record["status"],
+                "note": "Still running -- the user will be notified when it's done."}
+    rows = leads.filter_leads(record.get("leads", []), filter, min_rating or None)
+    limit = max(1, min(int(limit or 15), 50))
+    return {
+        "list": record["name"], "list_id": record["id"],
+        "total_in_list": len(record.get("leads", [])), "matching": len(rows),
+        "leads": [{"name": l["name"], "phone": l["phone"], "emails": l["emails"],
+                   "website": l["website"], "rating": l["rating"], "reviews": l["reviews"],
+                   "instagram": l["instagram"]} for l in rows[:limit]],
+    }
+
+
+def _tool_export_leads(list: str = "", **_):
+    import leads
+    record = leads.find_list(list)
+    if not record:
+        return {"error": "No lead list matches that."}
+    if not record.get("leads"):
+        return {"error": f"'{record['name']}' has no leads to export ({record.get('status')})."}
+    return {"exported": True, "path": leads.export_csv(record), "count": len(record["leads"])}
+
+
+def _campaign_or_error(ref: str):
+    import outreach
+    c = outreach.find_campaign(ref)
+    if not c:
+        return None, {"error": "No campaign matches that. Campaigns are created in Mira > Outreach."}
+    return c, None
+
+
+def _tool_outreach_status(campaign: str = "", **_):
+    import outreach
+    out = outreach.overview()
+    if campaign:
+        c, err = _campaign_or_error(campaign)
+        if err:
+            return err
+        out["campaign"] = {k: v for k, v in outreach.get_campaign(c["id"]).items()
+                           if k in ("name", "status", "mode", "list_name", "stats", "tested_at")}
+    return out
+
+
+def _tool_send_campaign_test(campaign: str = "", **_):
+    import outreach
+    c, err = _campaign_or_error(campaign)
+    if err:
+        return err
+    try:
+        res = outreach.send_test(c["id"])
+    except Exception as e:
+        return {"error": str(e)}
+    return {"campaign": c["name"], "emails_sent_to_you": res["emails_sent"],
+            "whatsapp_queued_to_you": res["whatsapp_queued"], "notes": res["notes"]}
+
+
+def _tool_start_campaign(campaign: str = "", mode: str = "", skip_test: bool = False, **_):
+    import outreach
+    c, err = _campaign_or_error(campaign)
+    if err:
+        return err
+    try:
+        res = outreach.activate(c["id"], mode or None, bool(skip_test))
+    except Exception as e:
+        return {"started": False, "error": str(e)}
+    return {"started": True, "campaign": c["name"], "mode": res["campaign"]["mode"],
+            "leads_enrolled": res["enrolled"], "warnings": res["warnings"]}
+
+
+def _tool_pause_campaign(campaign: str = "", **_):
+    import outreach
+    if (campaign or "").strip().lower() in ("all", "everything", "all outreach"):
+        outreach.set_enabled(False)
+        return {"paused": "all outreach sending"}
+    c, err = _campaign_or_error(campaign)
+    if err:
+        return err
+    outreach.pause(c["id"])
+    return {"paused": c["name"]}
+
+
+def _tool_set_outreach_sending(enabled: bool = True, **_):
+    import outreach
+    outreach.set_enabled(bool(enabled))
+    return {"outreach_sending": "on" if enabled else "off"}
+
+
+def _tool_approve_outreach(campaign: str = "", **_):
+    import outreach
+    cid = ""
+    if campaign:
+        c, err = _campaign_or_error(campaign)
+        if err:
+            return err
+        cid = c["id"]
+    return {"approved": outreach.approve_all(cid)}
+
+
+def _tool_show_replies(label: str = "", limit: int = 10, **_):
+    import outreach
+    items = outreach.replies(max(1, min(int(limit or 10), 30)), label or "")
+    return {"replies": [{"business": r["business"], "channel": r["channel"], "label": r["label"],
+                         "text": r["text"][:400], "received_at": r.get("received_at"),
+                         "phone": r.get("phone")} for r in items]}
+
+
+def _tool_mark_lead(business: str = "", stage: str = "", **_):
+    import leads
+    import outreach
+    record, lead = leads.find_lead(business)
+    if not lead:
+        return {"error": f"No lead called '{business}' in any lead list."}
+    try:
+        outreach.set_stage(record["id"], lead["id"], stage)
+    except ValueError as e:
+        return {"error": str(e)}
+    return {"business": lead["name"], "stage": stage}
 
 
 # ---------- registry ----------
@@ -508,6 +768,243 @@ TOOLS = [
         "fn": _tool_reschedule_calcom_booking,
     },
     {
+        "name": "list_payroll_employees",
+        "summary": "list the employees and contractors in RazorpayX Payroll",
+        "description": "List everyone in the user's RazorpayX Payroll org (name, email, employee id, "
+                       "type, title, department). Other payroll tools already accept a plain name, so "
+                       "only call this when the user asks who's on payroll or a name was ambiguous.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "include_inactive": {"type": "boolean", "description": "Include dismissed people"},
+            },
+        },
+        "fn": _tool_list_payroll_employees,
+    },
+    {
+        "name": "get_employee_details",
+        "summary": "look up an employee's title, department, manager and joining date in payroll",
+        "description": "Look up one employee's profile in RazorpayX Payroll: title, department, "
+                       "manager, hiring date and whether they're active.",
+        "parameters": {
+            "type": "object",
+            "properties": {"employee": {"type": "string", "description": _EMPLOYEE_ARG}},
+            "required": ["employee"],
+        },
+        "fn": _tool_get_employee_details,
+    },
+    {
+        "name": "get_employee_salary",
+        "summary": "tell how much salary an employee is due this month (salary, bonuses, deductions, hold)",
+        "description": "Show one employee's payroll for a month from RazorpayX Payroll: base salary, "
+                       "additions, deductions, whether salary is on hold, and the resulting payable "
+                       "amount. Use for \"how much do I have to pay X\". The payable figure is before "
+                       "TDS/PF/professional tax -- say so when quoting it.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "employee": {"type": "string", "description": _EMPLOYEE_ARG},
+                "month": {"type": "string", "description": "YYYY-MM; defaults to the current month"},
+            },
+            "required": ["employee"],
+        },
+        "fn": _tool_get_employee_salary,
+    },
+    {
+        "name": "get_payroll_summary",
+        "summary": "total up this month's payroll across all employees",
+        "description": "Every active employee's payable amount for a month plus the total, from "
+                       "RazorpayX Payroll. Use for \"what's the total payroll this month\".",
+        "parameters": {
+            "type": "object",
+            "properties": {"month": {"type": "string", "description": "YYYY-MM; defaults to the current month"}},
+        },
+        "fn": _tool_get_payroll_summary,
+    },
+    {
+        "name": "mark_employee_attendance",
+        "summary": "mark an employee's leave, half-day or attendance in payroll",
+        "description": "Mark attendance in RazorpayX Payroll for one employee on a date or date range: "
+                       "leave, unpaid leave, half-day, or present. This replaces whatever was recorded "
+                       "for those days. For multi-day leave give start_date and end_date; set "
+                       "skip_weekends when the user means working days only.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "employee": {"type": "string", "description": _EMPLOYEE_ARG},
+                "status": {"type": "string", "enum": ["leave", "unpaid-leave", "half-day",
+                                                      "unpaid-half-day", "present"]},
+                "start_date": {"type": "string", "description": _DATE_ARG},
+                "end_date": {"type": "string", "description": _DATE_ARG + " Inclusive; omit for one day."},
+                "leave_type": {"type": "string",
+                               "description": "Optional leave type name as the user said it (e.g. "
+                                              "'sick', 'casual'); it's matched to the org's leave types"},
+                "checkin": {"type": "string", "description": "HH:MM, only for present/half-day"},
+                "checkout": {"type": "string", "description": "HH:MM, only for present/half-day"},
+                "remarks": {"type": "string"},
+                "skip_weekends": {"type": "boolean"},
+            },
+            "required": ["employee", "status", "start_date"],
+        },
+        "fn": _tool_mark_employee_attendance,
+    },
+    {
+        "name": "punch_attendance",
+        "summary": "check the user (or an employee) in or out for today in payroll attendance",
+        "description": "Today's check-in or check-out in RazorpayX Payroll, for \"check me in\", "
+                       "\"mark my checkout\", \"I'm leaving\". Defaults to the user at the current time. "
+                       "Check-in is set once a day (never overwritten); check-out can be updated any number "
+                       "of times. auto = check in if there's no check-in yet, else check out.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {"type": "string", "enum": ["checkin", "checkout", "auto"]},
+                "employee": {"type": "string", "description": "Omit (or \"me\") for the user. " + _EMPLOYEE_ARG},
+                "time": {"type": "string", "description": "Only if the user gave one, e.g. '6pm'; default now"},
+                "remarks": {"type": "string", "description": "Only if the user asked for a remark/note"},
+            },
+            "required": ["action"],
+        },
+        "fn": _tool_punch_attendance,
+    },
+    {
+        "name": "get_employee_attendance",
+        "summary": "check an employee's attendance or leave for a day",
+        "description": "Read one employee's attendance record for a date from RazorpayX Payroll "
+                       "(status, check-in/out, pending change requests).",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "employee": {"type": "string", "description": _EMPLOYEE_ARG},
+                "date": {"type": "string", "description": _DATE_ARG + " Defaults to today."},
+            },
+            "required": ["employee"],
+        },
+        "fn": _tool_get_employee_attendance,
+    },
+    {
+        "name": "set_salary_hold",
+        "summary": "stop (hold) or resume an employee's salary for a month",
+        "description": "Stop or resume one employee's salary for a payroll month in RazorpayX Payroll "
+                       "(\"do not pay\"). hold=true stops it, hold=false releases it. Only affects that "
+                       "one month and is reversible.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "employee": {"type": "string", "description": _EMPLOYEE_ARG},
+                "hold": {"type": "boolean", "description": "true = stop salary, false = resume"},
+                "month": {"type": "string", "description": "YYYY-MM; defaults to the current month"},
+            },
+            "required": ["employee", "hold"],
+        },
+        "fn": _tool_set_salary_hold,
+    },
+    {
+        "name": "add_salary_addition",
+        "summary": "add a bonus, incentive or reimbursement to an employee's salary",
+        "description": "Add a one-off amount (bonus, incentive, reimbursement) to one employee's pay "
+                       "for a month in RazorpayX Payroll.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "employee": {"type": "string", "description": _EMPLOYEE_ARG},
+                "amount": {"type": "number", "description": "Rupees"},
+                "label": {"type": "string", "description": "e.g. Bonus, Incentive, Travel reimbursement"},
+                "month": {"type": "string", "description": "YYYY-MM; defaults to the current month"},
+                "remarks": {"type": "string"},
+            },
+            "required": ["employee", "amount"],
+        },
+        "fn": _tool_add_salary_addition,
+    },
+    {
+        "name": "add_salary_deduction",
+        "summary": "deduct loss-of-pay days or an amount from an employee's salary",
+        "description": "Deduct from one employee's pay for a month in RazorpayX Payroll. Give EITHER "
+                       "days (loss of pay -- payroll computes the rupee amount itself) OR amount, never both.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "employee": {"type": "string", "description": _EMPLOYEE_ARG},
+                "days": {"type": "number", "description": "Loss-of-pay days"},
+                "amount": {"type": "number", "description": "Rupees"},
+                "month": {"type": "string", "description": "YYYY-MM; defaults to the current month"},
+                "remarks": {"type": "string"},
+            },
+            "required": ["employee"],
+        },
+        "fn": _tool_add_salary_deduction,
+    },
+    {
+        "name": "reset_salary_changes",
+        "summary": "undo all bonuses and deductions on an employee's salary for a month",
+        "description": "Remove every addition and deduction on one employee's pay for a month in "
+                       "RazorpayX Payroll, back to their plain salary. Does not change a salary hold.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "employee": {"type": "string", "description": _EMPLOYEE_ARG},
+                "month": {"type": "string", "description": "YYYY-MM; defaults to the current month"},
+            },
+            "required": ["employee"],
+        },
+        "fn": _tool_reset_salary_changes,
+    },
+    {
+        "name": "look_at_screen",
+        "summary": "look at the user's screen and answer questions about what's on it",
+        "description": "Take a screenshot of the user's screen and answer a question about it. Use when "
+                       "they refer to what they're looking at: \"what's this error\", \"summarize this "
+                       "page\", \"what does this say\", \"help me with this\". Only when the request is "
+                       "about their screen -- the image is sent to the cloud vision model. For \"where is X\" / "
+                       "\"show me where to click\", use point_on_screen instead.",
+        "parameters": {
+            "type": "object",
+            "properties": {"question": {"type": "string", "description": "The user's question, in full"}},
+            "required": ["question"],
+        },
+        "fn": _tool_look_at_screen,
+    },
+    {
+        "name": "point_on_screen",
+        "summary": "point at a button or field on the user's screen by drawing a highlight around it",
+        "description": "Find something on the user's screen and draw a highlight around it, for \"where's "
+                       "the export button\", \"how do I change X here\", \"show me where to click\". "
+                       "Returns what was pointed at and a short instruction to pass on.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "target": {"type": "string", "description": "What to find, e.g. 'Export CSV button'"},
+                "question": {"type": "string", "description": "The user's question, in full"},
+            },
+            "required": ["target"],
+        },
+        "fn": _tool_point_on_screen,
+    },
+    {
+        "name": "operate_computer",
+        "summary": "operate apps on the Mac herself -- clicking and typing to carry out a task",
+        "description": "Carry out a task by clicking and typing in the user's apps, while they watch: "
+                       "\"export this as CSV\", \"fill in this form\", \"open Notes and make a note "
+                       "called X\". Use only when no dedicated tool can do it (payroll, calendar, email, "
+                       "reminders have their own). It sees the screen, so \"this\"/\"here\" mean what's on "
+                       "screen -- don't ask which app, just start. Runs in the background: tell the user "
+                       "you've started (not that it's done) and that they can watch or stop it.",
+        "parameters": {
+            "type": "object",
+            "properties": {"task": {"type": "string", "description": "The full task, with every detail the user gave"}},
+            "required": ["task"],
+        },
+        "fn": _tool_operate_computer,
+    },
+    {
+        "name": "stop_computer_task",
+        "summary": "stop the task Mira is doing on the screen",
+        "description": "Stop the on-screen task started with operate_computer.",
+        "parameters": {"type": "object", "properties": {}},
+        "fn": _tool_stop_computer_task,
+    },
+    {
         "name": "open_app",
         "summary": "open apps on the Mac",
         "description": "Open or focus a macOS application by name.",
@@ -607,7 +1104,10 @@ TOOLS = [
     {
         "name": "run_automation",
         "summary": "trigger an n8n automation",
-        "description": "Run one of the user's configured automations by name.",
+        "description": "Run one of the user's configured automations by name. Only when the user "
+                       "explicitly asks to run that automation -- these have real side effects (the "
+                       "blog one publishes live and notifies every app user). Never use it for "
+                       "posting, writing or opening something yourself.",
         "parameters": {
             "type": "object",
             "properties": {"name": {"type": "string"}},
@@ -615,12 +1115,239 @@ TOOLS = [
         },
         "fn": _tool_run_automation,
     },
+    {
+        "name": "find_businesses",
+        "summary": "find businesses of a type in an area (from Google Maps) and save them as a lead list with phones, emails and websites",
+        "description": "Search Google Maps for businesses of one type in one area -- e.g. 'dentists' in "
+                       "'Indiranagar, Bangalore' -- and save them as a lead list with phone, email, "
+                       "website and social links. Runs in the background for a few minutes; the user "
+                       "is notified when it's done, so call it once and tell them that. Only one "
+                       "search runs at a time.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "business_type": {"type": "string", "description": "What kind of business, e.g. 'dentists', 'gyms', 'cafes'"},
+                "area": {"type": "string", "description": "Neighbourhood and city, e.g. 'Indiranagar, Bangalore'"},
+                "source": {"type": "string", "enum": ["auto", "scraper", "places"],
+                           "description": "Leave as auto unless the user asks for one"},
+                "depth": {"type": "integer",
+                          "description": "How far down the results to go, 1-15 (default 5). Higher finds more but is slower."},
+            },
+            "required": ["business_type", "area"],
+        },
+        "fn": _tool_find_businesses,
+    },
+    {
+        "name": "list_lead_lists",
+        "summary": "list saved lead lists and whether a search is still running",
+        "description": "List the lead lists found so far (newest first) with how many have a phone or email, "
+                       "and any search still running.",
+        "parameters": {"type": "object", "properties": {}},
+        "fn": _tool_list_lead_lists,
+    },
+    {
+        "name": "show_leads",
+        "summary": "show the businesses in a lead list, optionally only those with an email, phone or no website",
+        "description": "Show businesses from a saved lead list.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "list": {"type": "string", "description": "Words from the list's name, or its id. Blank = the newest list."},
+                "filter": {"type": "string", "enum": ["all", "with_email", "with_phone", "with_website", "no_website"]},
+                "min_rating": {"type": "number", "description": "Only businesses rated at least this (e.g. 4)"},
+                "limit": {"type": "integer", "description": "How many to show (default 15, max 50)"},
+            },
+        },
+        "fn": _tool_show_leads,
+    },
+    {
+        "name": "export_leads",
+        "summary": "export a lead list as a CSV file (opens in Excel or Google Sheets)",
+        "description": "Save a lead list as a CSV in the user's Downloads folder and return its path.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "list": {"type": "string", "description": "Words from the list's name, or its id. Blank = the newest list."},
+            },
+        },
+        "fn": _tool_export_leads,
+    },
+    {
+        "name": "outreach_status",
+        "summary": "report on outreach campaigns: what was sent today, replies, pending approvals",
+        "description": "Overview of outreach: whether sending is on, today's emails/WhatsApp sent vs limits, "
+                       "messages waiting for approval, recent replies, and each campaign's status. Pass a "
+                       "campaign name for its detailed numbers.",
+        "parameters": {
+            "type": "object",
+            "properties": {"campaign": {"type": "string", "description": "Optional campaign name"}},
+        },
+        "fn": _tool_outreach_status,
+    },
+    {
+        "name": "send_campaign_test",
+        "summary": "send a test of an outreach campaign to the user's own email and WhatsApp",
+        "description": "Render every step of a campaign for a couple of real leads and send them to the "
+                       "user's own test email / WhatsApp number (from Outreach > Setup), so they can see "
+                       "exactly what businesses will receive. Nothing goes to any business.",
+        "parameters": {
+            "type": "object",
+            "properties": {"campaign": {"type": "string", "description": "Campaign name; blank = the latest"}},
+        },
+        "fn": _tool_send_campaign_test,
+    },
+    {
+        "name": "start_campaign",
+        "summary": "start (or resume) an outreach campaign",
+        "description": "Start or resume an outreach campaign so its messages go out to businesses. "
+                       "Campaigns must be tested first unless the user explicitly says to skip the test. "
+                       "mode 'auto' sends by itself; 'review' holds each message for approval.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "campaign": {"type": "string"},
+                "mode": {"type": "string", "enum": ["auto", "review"]},
+                "skip_test": {"type": "boolean", "description": "Only if the user explicitly asked to skip testing"},
+            },
+            "required": ["campaign"],
+        },
+        "fn": _tool_start_campaign,
+    },
+    {
+        "name": "pause_campaign",
+        "summary": "pause an outreach campaign, or all outreach",
+        "description": "Pause one campaign by name, or pass 'all' to switch off all outreach sending.",
+        "parameters": {
+            "type": "object",
+            "properties": {"campaign": {"type": "string", "description": "Campaign name, or 'all'"}},
+            "required": ["campaign"],
+        },
+        "fn": _tool_pause_campaign,
+    },
+    {
+        "name": "set_outreach_sending",
+        "summary": "switch all outreach sending on or off",
+        "description": "Master switch for automatic outreach sending across every campaign.",
+        "parameters": {
+            "type": "object",
+            "properties": {"enabled": {"type": "boolean"}},
+            "required": ["enabled"],
+        },
+        "fn": _tool_set_outreach_sending,
+    },
+    {
+        "name": "approve_outreach",
+        "summary": "approve outreach messages waiting for review",
+        "description": "Approve every outreach message waiting for review (optionally only one campaign's), "
+                       "so they go out on schedule.",
+        "parameters": {
+            "type": "object",
+            "properties": {"campaign": {"type": "string"}},
+        },
+        "fn": _tool_approve_outreach,
+    },
+    {
+        "name": "show_replies",
+        "summary": "show replies from businesses to outreach (email and WhatsApp)",
+        "description": "Show the latest replies to outreach, newest first, with how each was classified.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "label": {"type": "string", "enum": ["", "interested", "question", "not_interested",
+                                                     "unsubscribe", "auto_reply", "other"]},
+                "limit": {"type": "integer"},
+            },
+        },
+        "fn": _tool_show_replies,
+    },
+    {
+        "name": "mark_lead",
+        "summary": "update where a business is in the sales pipeline (e.g. won, lost, do not contact)",
+        "description": "Set a lead's stage by business name. Anything past 'contacted' stops its campaign "
+                       "sequence; do_not_contact also blocks it from all future outreach.",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "business": {"type": "string"},
+                "stage": {"type": "string", "enum": ["new", "contacted", "replied", "interested",
+                                                     "proposal_sent", "won", "lost", "do_not_contact"]},
+            },
+            "required": ["business", "stage"],
+        },
+        "fn": _tool_mark_lead,
+    },
 ]
 
 _BY_NAME = {t["name"]: t for t in TOOLS}
 
 
-def openai_tool_schemas() -> list:
+# ---------- per-turn tool selection ----------
+# Groq's free tier allows 8000 tokens per minute, and a single request counts
+# its tool schemas: at 49 tools those alone were ~6k tokens, so a notch
+# conversation with some history came to 8689 and was rejected outright --
+# the turn then fell back to the small local model, which can't really call
+# tools and just *said* it had marked a checkout. So domain tools are only
+# sent when the conversation is about that domain. Anything not listed in a
+# group here is always sent, so a newly added tool is never silently hidden.
+_TOOL_GROUPS = {
+    "google": (
+        {"list_calendar_events", "create_calendar_event", "search_email", "draft_email"},
+        r"e-?mails?|mail|inbox|gmail|calendar|meetings?|meet|events?|schedule|draft|invite|agenda|digest",
+    ),
+    "calcom": (
+        {"list_calcom_bookings", "list_calcom_event_types", "create_calcom_booking",
+         "cancel_calcom_booking", "reschedule_calcom_booking"},
+        r"cal\.?\s?com|bookings?|book|reschedule|cancel|slots?|event types?|appointments?",
+    ),
+    "payroll": (
+        {"list_payroll_employees", "get_employee_details", "get_employee_salary", "get_payroll_summary",
+         "mark_employee_attendance", "punch_attendance", "get_employee_attendance", "set_salary_hold",
+         "add_salary_addition", "add_salary_deduction", "reset_salary_changes"},
+        r"payroll|salary|salaries|pay|paid|payable|attendance|attend|leaves?|half[- ]?day|"
+        r"check[- ]?(in|out)|check (me|him|her|them) (in|out)|checked (in|out)|clock(ed)? (me )?(in|out)|"
+        r"punch|bonus|incentive|deduct\w*|loss of pay|lop|"
+        r"employees?|staff|team|present|absent|office|came in|leaving|left|remarks?|ctc|reimburse\w*",
+    ),
+    "automations": (
+        {"list_automations", "run_automation"},
+        r"automations?|workflows?|n8n|webhooks?|trigger",
+    ),
+    "leads": (
+        {"find_businesses", "list_lead_lists", "show_leads", "export_leads", "outreach_status",
+         "send_campaign_test", "start_campaign", "pause_campaign", "set_outreach_sending",
+         "approve_outreach", "show_replies", "mark_lead"},
+        r"leads?|outreach|campaigns?|business(es)?|prospects?|whatsapp|repl(y|ies)|cold|export|csv|"
+        r"sequence|unsubscribe|sending|approve|find \w+ in",
+    ),
+}
+_GROUPED = set().union(*(names for names, _ in _TOOL_GROUPS.values()))
+
+
+# Tools for features switched off in Settings aren't offered at all -- no
+# tokens spent on them, and no chance of the model trying one.
+_SETTING_GATED = {
+    "look_at_screen": ("screen_vision_enabled", True),
+    "point_on_screen": ("screen_vision_enabled", True),
+    "operate_computer": ("computer_control_enabled", False),
+    "stop_computer_task": ("computer_control_enabled", False),
+}
+
+
+def select_tools(recent_text: str) -> list:
+    """The tools worth sending for a conversation whose recent user messages
+    are `recent_text`: every ungrouped tool, plus any group it mentions."""
+    import re
+    from main import load_settings
+    settings = load_settings()
+    text = (recent_text or "").lower()
+    wanted = {name for names, pattern in _TOOL_GROUPS.values()
+              if re.search(rf"\b({pattern})\b", text) for name in names}
+    off = {name for name, (key, default) in _SETTING_GATED.items() if not settings.get(key, default)}
+    return [t for t in TOOLS
+            if (t["name"] not in _GROUPED or t["name"] in wanted) and t["name"] not in off]
+
+
+def openai_tool_schemas(selected: list = None) -> list:
     """Tool definitions in the OpenAI/Ollama function-calling format."""
     return [{
         "type": "function",
@@ -629,7 +1356,7 @@ def openai_tool_schemas() -> list:
             "description": t["description"],
             "parameters": t["parameters"],
         },
-    } for t in TOOLS]
+    } for t in (TOOLS if selected is None else selected)]
 
 
 def capability_summary() -> str:

@@ -272,10 +272,16 @@ func cmdStream(_ progressPath: String, _ localeID: String, _ maxSeconds: Double)
         fail("could not start audio engine: \(error.localizedDescription)")
     }
 
+    // The daemon's recording now ends when the speaker stops talking rather
+    // than after a fixed window, so maxSeconds is only a ceiling -- Electron
+    // drops this file the moment the daemon leaves "listening", which is what
+    // actually ends the capture (and releases the mic) in the normal case.
+    let stopPath = progressPath + ".stop"
     let deadline = Date().addingTimeInterval(maxSeconds)
-    while !finished && Date() < deadline {
+    while !finished && Date() < deadline && !FileManager.default.fileExists(atPath: stopPath) {
         RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.05))
     }
+    try? FileManager.default.removeItem(atPath: stopPath)
 
     // Stop capturing regardless of how the loop above ended, then give the
     // recognizer a short, bounded window to deliver a final result for
