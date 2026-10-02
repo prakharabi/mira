@@ -13,7 +13,15 @@ git and published as GitHub Releases.
   conversations, open loops and memories, loops-closed and pinned-memory
   progress bars, an Open Loops table, and a Mira Readiness score ring (daemon,
   wake word, voice, Google, Telegram, memory, local vision). All of it reads
-  live from the daemon. The main window no longer uses macOS vibrancy.
+  live from the daemon.
+- **Liquid Glass throughout** — dashboard panels are translucent glass (heavy
+  blur and saturation, a specular top edge, a soft sheen) over a slow-moving
+  aurora backdrop. The notch, the computer-control status bar and the pointer
+  label got the same glass treatment, and Quick Capture and the controls use
+  the new periwinkle accent.
+- **Menu-bar menu** — now opens with a live status line (running / daemon
+  offline), has template icons on every item, and lists the workspace views in
+  the same order as the sidebar rail, including Chat and Outreach.
 
 ## v1.2.0 — 2026-09-27
 

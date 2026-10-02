@@ -15,17 +15,17 @@
        cool periwinkle accent. Opaque on purpose -- flat dark cards with soft
        light edges read as precise and technical where translucency reads soft. */
     --canvas: #0b0c0f;
-    --content-bg: #0f1013;
-    --bg-elevated: #17181c;
-    --bg-elevated-2: #202228;
-    --bg-elevated-3: #2a2c33;
-    --border: rgba(255,255,255,0.10);
-    --border-soft: rgba(255,255,255,0.06);
+    --content-bg: rgba(10,11,15,0.30);
+    --bg-elevated: rgba(255,255,255,0.055);
+    --bg-elevated-2: rgba(255,255,255,0.085);
+    --bg-elevated-3: rgba(255,255,255,0.14);
+    --border: rgba(255,255,255,0.14);
+    --border-soft: rgba(255,255,255,0.09);
     --text-primary: rgba(255,255,255,0.93);
     --text-secondary: rgba(255,255,255,0.58);
     --text-tertiary: rgba(255,255,255,0.38);
     --sidebar-selected: rgba(169,191,255,0.12);
-    --field-bg: #1b1c21;
+    --field-bg: rgba(255,255,255,0.07);
     --output-bg: rgba(0,0,0,0.30);
     --accent-1: #a9bfff;
     --accent-2: #5b8cff;
@@ -39,9 +39,12 @@
     --radius-sm: 10px;
     --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
     --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
-    --glass-highlight: rgba(255,255,255,0.07);
-    --glass-shade: rgba(0,0,0,0.18);
-    --glass-shadow: 0 1px 1px rgba(0,0,0,0.3), 0 14px 32px rgba(0,0,0,0.35);
+    /* Liquid Glass: a bright specular edge along the top, a faint counter-edge
+       along the bottom, and a soft drop shadow so panels float over the aurora. */
+    --glass-highlight: rgba(255,255,255,0.24);
+    --glass-shade: rgba(255,255,255,0.05);
+    --glass-shadow: 0 1px 1px rgba(0,0,0,0.25), 0 18px 40px rgba(0,0,0,0.32);
+    --glass-blur: blur(30px) saturate(190%);
   }
 
   * { box-sizing: border-box; }
@@ -89,19 +92,26 @@
     pointer-events: none;
     overflow: hidden;
   }
-  /* Kept, but at a fraction of the previous strength. Animated colour washes
-     read as a web app; at this level it's just a faint tint over the material. */
+  /* The aurora behind everything. Glass only reads as glass when there is
+     colour behind it to bend, so these are deliberately vivid and slow. */
   #ambient .blob {
     position: absolute;
-    width: 60vw;
-    height: 60vw;
+    width: 52vw;
+    height: 52vw;
     border-radius: 50%;
-    filter: blur(110px);
-    opacity: 0.05;
+    filter: blur(90px);
+    opacity: 0.42;
     will-change: transform;
   }
-  #ambient .blob.a { background: #5b8cff; top: -20%; left: -10%; }
-  #ambient .blob.b { background: #7d96ff; bottom: -25%; right: -15%; opacity: 0.05; }
+  #ambient .blob.a { background: #3b6bff; top: -22%; left: 4%; }
+  #ambient .blob.b { background: #8a5cff; bottom: -28%; right: -8%; opacity: 0.34; }
+  #ambient::before, #ambient::after {
+    content: ""; position: absolute; border-radius: 50%; filter: blur(80px); will-change: transform;
+  }
+  #ambient::before { width: 34vw; height: 34vw; background: #19c3d8; opacity: 0.20; top: 38%; left: 30%; animation: aurora-a 22s ease-in-out infinite alternate; }
+  #ambient::after  { width: 28vw; height: 28vw; background: #ff6fb5; opacity: 0.14; top: -10%; right: 8%; animation: aurora-b 26s ease-in-out infinite alternate; }
+  @keyframes aurora-a { to { transform: translate(12vw, -10vh) scale(1.2); } }
+  @keyframes aurora-b { to { transform: translate(-14vw, 16vh) scale(1.15); } }
 
   /* Drag region only. The window's buttons are the system's real traffic
      lights, positioned by main.js -- this just makes the empty strip beside
@@ -128,7 +138,9 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    background: var(--canvas);
+    background: rgba(8,9,12,0.35);
+    backdrop-filter: blur(30px) saturate(160%);
+    -webkit-backdrop-filter: blur(30px) saturate(160%);
     -webkit-app-region: drag;
   }
 
@@ -282,9 +294,14 @@
     background: var(--bg-elevated);
     border: 1px solid var(--border);
     border-radius: var(--radius-lg);
-    backdrop-filter: blur(24px) saturate(180%);
-    -webkit-backdrop-filter: blur(24px) saturate(180%);
-    box-shadow: inset 0 1px 0 var(--glass-highlight), var(--glass-shadow);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    box-shadow: inset 0 1px 0 var(--glass-highlight), inset 0 -1px 0 var(--glass-shade), var(--glass-shadow);
+  }
+  /* Sheen: light pooling at the top-left of the glass, fading out. */
+  .card::before, .dcard::before {
+    content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
+    background: linear-gradient(135deg, rgba(255,255,255,0.10) 0%, rgba(255,255,255,0.02) 32%, transparent 55%);
   }
 
   /* ---------- Home view: AI dashboard ---------- */
@@ -305,7 +322,9 @@
     border-radius: var(--radius-lg);
     padding: 18px 20px;
     min-width: 0;
-    box-shadow: inset 0 1px 0 var(--glass-highlight);
+    backdrop-filter: var(--glass-blur);
+    -webkit-backdrop-filter: var(--glass-blur);
+    box-shadow: inset 0 1px 0 var(--glass-highlight), inset 0 -1px 0 var(--glass-shade), var(--glass-shadow);
     animation: card-in 520ms var(--ease-out) both;
   }
   .dash > :nth-child(2) { animation-delay: 60ms; }
@@ -325,7 +344,7 @@
     padding: 22px 20px 20px;
     overflow: hidden;
     background:
-      linear-gradient(180deg, #0f1218 0%, #10141d 45%, #28406a 100%);
+      linear-gradient(180deg, rgba(14,18,28,0.55) 0%, rgba(20,28,48,0.45) 45%, rgba(70,110,190,0.55) 100%);
   }
   .hero-glow {
     position: absolute; left: -20%; right: -20%; bottom: -35%; height: 70%;
@@ -382,11 +401,12 @@
   .spark-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; flex: 1; }
   .spark-card {
     --tint: 169,191,255;
-    background: var(--bg-elevated-2); border-radius: 16px; padding: 14px 14px 12px;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 14px 14px 12px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.14);
     display: flex; flex-direction: column; min-width: 0;
     transition: transform 200ms var(--ease-standard), background 200ms var(--ease-standard);
   }
-  .spark-card:hover { transform: translateY(-2px); background: #24262d; }
+  .spark-card:hover { transform: translateY(-2px); background: rgba(255,255,255,0.10); }
   .spark-card[data-tint="gold"] { --tint: 241,217,138; }
   .spark-card[data-tint="mint"] { --tint: 140,225,195; }
   .spark-title { font-size: 12.5px; font-weight: 550; margin-bottom: 4px; }
@@ -427,7 +447,7 @@
   .dtr { display: grid; grid-template-columns: minmax(0, 2.4fr) 0.9fr 0.8fr 0.9fr 1fr; gap: 10px; align-items: center;
          padding: 13px 12px; font-size: 13px; border-bottom: 1px solid var(--border-soft); }
   .dtr:last-child { border-bottom: none; }
-  .dth { background: var(--bg-elevated-2); border: none; border-radius: 10px; font-size: 11.5px; color: var(--text-secondary); padding: 8px 12px; }
+  .dth { background: rgba(255,255,255,0.07); border: none; border-radius: 10px; font-size: 11.5px; color: var(--text-secondary); padding: 8px 12px; }
   .dtr > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .dtr .t-name { font-weight: 500; }
   .dtr .src { color: var(--text-secondary); text-transform: capitalize; }
@@ -454,7 +474,8 @@
   .actions { grid-column: 1 / span 3; grid-row: 4; display: flex; gap: 12px; padding: 12px; }
   .action-btn {
     flex: 1; padding: 12px 14px; border-radius: var(--radius-md); display: flex; align-items: center; gap: 12px;
-    cursor: pointer; background: var(--bg-elevated-2);
+    cursor: pointer; background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.16);
     transition: transform 100ms var(--ease-standard), background 200ms var(--ease-standard);
   }
   .action-btn:hover { background: var(--bg-elevated-3); }
@@ -2767,7 +2788,7 @@
       <path d="${d} L${w},${h} L0,${h} Z" fill="url(#${gid})"/>
       <line class="avg" x1="0" x2="${w}" y1="${ay}" y2="${ay}"/>
       <path class="line" d="${d}"/>
-      ${hi.map(i => `<circle cx="${pts[i][0]}" cy="${pts[i][1]}" r="3.5" fill="#17181c" stroke="rgba(255,255,255,0.8)" stroke-width="1.4"/>`).join('')}`;
+      ${hi.map(i => `<circle cx="${pts[i][0]}" cy="${pts[i][1]}" r="3.5" fill="rgba(20,22,30,0.9)" stroke="rgba(255,255,255,0.85)" stroke-width="1.4"/>`).join('')}`;
     // stop colours can't read CSS vars with a comma list, so resolve the tint here
     const tint = getComputedStyle(svg.closest('.spark-card')).getPropertyValue('--tint').trim();
     svg.querySelectorAll('stop').forEach(st => st.setAttribute('stop-color', `rgb(${tint})`));

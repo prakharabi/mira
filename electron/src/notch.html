@@ -42,22 +42,25 @@
                 box-shadow 280ms cubic-bezier(0.22, 1, 0.36, 1),
                 backdrop-filter 280ms cubic-bezier(0.22, 1, 0.36, 1);
   }
-  /* Styled like the macOS menu-bar menus rather than full liquid glass: the
+  /* Liquid Glass: a tinted translucent body, heavy blur + saturation, and a
+     bright specular edge. (Earlier note, kept for the legibility trade-off: the
      notch sits over whatever's on screen, and the more see-through glass
-     version let busy content behind it wash out its own text. A mostly
-     opaque dark surface with only a light blur keeps text crisp on any
-     background while still reading as a system surface, not a flat box. */
-  body.active #shell {
-    background: rgba(30,30,32,0.9);
-    backdrop-filter: blur(24px) saturate(140%);
-    -webkit-backdrop-filter: blur(24px) saturate(140%);
-    border-color: rgba(255,255,255,0.13);
+     version let busy content behind it wash out its own text, so the tint
+     stays fairly dark and text carries a soft shadow to hold on any
+     background.) */
+  body.active #shell { text-shadow: 0 1px 6px rgba(0,0,0,0.35);
+background: linear-gradient(180deg, rgba(58,64,92,0.80), rgba(20,22,32,0.90));
+    backdrop-filter: blur(40px) saturate(200%);
+    -webkit-backdrop-filter: blur(40px) saturate(200%);
+    border-color: rgba(255,255,255,0.20);
     /* Rounded on every side, floating just clear of the menu bar rather than
        flush-mounted to it -- reads as a pill extending down from the notch,
        matching the reference, instead of a drawer welded to the bar. */
     box-shadow:
-      inset 0 0.5px 0 rgba(255,255,255,0.1),
-      0 10px 28px rgba(0,0,0,0.4),
+      inset 0 1px 0 rgba(255,255,255,0.32),
+      inset 0 -1px 0 rgba(255,255,255,0.06),
+      inset 0 0 18px rgba(169,191,255,0.07),
+      0 12px 34px rgba(0,0,0,0.45),
       0 0 0 0.5px rgba(0,0,0,0.5);
   }
 
@@ -179,7 +182,7 @@
     border-radius: 2px;
     animation: voicebar 900ms ease-in-out infinite;
   }
-  #listening .voice-bars span { background: #0A84FF; }
+  #listening .voice-bars span { background: linear-gradient(180deg,#a9bfff,#5b8cff); box-shadow: 0 0 8px rgba(125,150,255,0.6); }
   #speaking .voice-bars span { background: #30D158; }
   /* Seven bars, each a different phase/duration of the same keyframe so
      none of them are ever in lockstep -- a uniform pulse reads as a loading

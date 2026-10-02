@@ -586,56 +586,88 @@ function buildTray() {
   }
 }
 
+// Menu icons are template PNGs (assets/menu/*.png + @2x), drawn from the same
+// glyphs as the workspace's sidebar rail, so macOS tints them for light/dark
+// menu bars and the highlighted row itself.
+function menuIcon(name) {
+  const img = nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'menu', `${name}.png`));
+  if (img.isEmpty()) return undefined;
+  img.setTemplateImage(true);
+  return img;
+}
+
+// Whether the daemon answers, for the status row at the top of the menu. Polled
+// slowly, and the menu is only rebuilt when the answer actually changes.
+let daemonOnline = null;
+function pollDaemonForTray() {
+  const req = http.get({ hostname: 'localhost', port: 11200, path: '/health', timeout: 1500 }, (res) => {
+    res.resume();
+    setDaemonOnline(res.statusCode === 200);
+  });
+  req.on('timeout', () => req.destroy());
+  req.on('error', () => setDaemonOnline(false));
+}
+function setDaemonOnline(v) {
+  if (daemonOnline === v) return;
+  daemonOnline = v;
+  refreshTrayMenu();
+}
+setInterval(pollDaemonForTray, 15000);
+setTimeout(pollDaemonForTray, 1500);
+
 function refreshTrayMenu() {
   if (!tray || tray.isDestroyed()) return;
 
   const assistantVisible = !!(win && !win.isDestroyed() && win.isVisible());
+  const status = daemonOnline === null ? 'Connecting…' : daemonOnline ? 'Mira is running' : 'Daemon offline';
+  const go = (label, view, icon) => ({ label, icon: menuIcon(icon || view), click: () => openWorkspaceAt(view) });
 
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: `Mira ${app.getVersion()}`, enabled: false },
+    // Status header: a dim, non-clickable line, like a section title.
+    { label: `${daemonOnline === false ? '○' : '●'}  ${status}  ·  v${app.getVersion()}`, enabled: false },
     { type: 'separator' },
 
     // Actions. Every accelerator below is a real globalShortcut registration
     // (see app.whenReady), so showing it here is accurate rather than
     // decorative -- a tray menu's accelerator does not itself bind anything.
-    { label: 'Ask Mira', accelerator: 'Control+A', click: triggerWakewordManually },
-    { label: 'Quick Capture…', accelerator: 'Control+D', click: showQuickCapture },
-    { label: 'Capture Text (OCR)', accelerator: 'Control+Q', click: runOCR },
+    { label: 'Ask Mira', icon: menuIcon('mic'), accelerator: 'Control+A', click: triggerWakewordManually },
+    { label: 'Quick Capture…', icon: menuIcon('capture'), accelerator: 'Control+D', click: showQuickCapture },
+    { label: 'Capture Text (OCR)', icon: menuIcon('ocr'), accelerator: 'Control+Q', click: runOCR },
     { type: 'separator' },
 
-    { label: 'Open Mira', accelerator: 'Control+Space', click: () => {
+    // The same ten places as the workspace's icon rail, in the same order.
+    { label: 'Open Mira', icon: menuIcon('home'), accelerator: 'Control+Space', click: () => {
         if (chatWindow && !chatWindow.isDestroyed()) { chatWindow.show(); chatWindow.focus(); }
         else toggleChatWindow();
       } },
+    go('Chat', 'chat'),
+    go('Tasks', 'tasks'),
+    go('Meetings', 'meetings'),
+    go('Dump Box', 'dumpbox'),
+    go('Memory', 'memory'),
+    {
+      label: 'More',
+      submenu: [
+        go('Google', 'google'),
+        go('Automations', 'automations'),
+        go('Outreach', 'outreach'),
+      ],
+    },
+    { type: 'separator' },
+
     {
       label: 'Show Assistant',
+      icon: menuIcon('assistant'),
       type: 'checkbox',
       checked: assistantVisible,
       accelerator: 'Command+Shift+M',
       click: togglePet,
     },
-    { type: 'separator' },
-
-    // The workspace has nine views and the tray used to reach two of them.
-    // These are the ones worth a single click; the rest are one nav away.
-    { label: 'Tasks', click: () => openWorkspaceAt('tasks') },
-    { label: 'Dump Box', click: () => openWorkspaceAt('dumpbox') },
-    { label: 'Memory', click: () => openWorkspaceAt('memory') },
-    { label: 'Meetings', click: () => openWorkspaceAt('meetings') },
-    {
-      label: 'More',
-      submenu: [
-        { label: 'Google', click: () => openWorkspaceAt('google') },
-        { label: 'Automations', click: () => openWorkspaceAt('automations') },
-      ],
-    },
-    { type: 'separator' },
-
-    { label: 'Settings…', click: () => openWorkspaceAt('settings') },
+    go('Settings…', 'settings'),
     // No accelerator on Quit: Mira is an LSUIElement with no application menu,
     // so nothing binds Command+Q. Displaying it promised a shortcut that did
     // nothing at all.
-    { label: 'Quit Mira', click: () => { isQuitting = true; app.quit(); } },
+    { label: 'Quit Mira', icon: menuIcon('quit'), click: () => { isQuitting = true; app.quit(); } },
   ]));
 }
 
