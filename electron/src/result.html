@@ -5,17 +5,10 @@
 <link rel="stylesheet" href="holo-mark.css">
 <style>
   :root {
-    color-scheme: light dark;
-    --fg: rgba(255,255,255,0.92);
-    --fg-dim: rgba(255,255,255,0.5);
+    color-scheme: dark;
+    --fg: rgba(255,255,255,0.93);
+    --fg-dim: rgba(255,255,255,0.55);
     --hairline: rgba(255,255,255,0.12);
-  }
-  @media (prefers-color-scheme: light) {
-    :root {
-      --fg: rgba(0,0,0,0.87);
-      --fg-dim: rgba(0,0,0,0.5);
-      --hairline: rgba(0,0,0,0.12);
-    }
   }
 
   html, body {
@@ -30,7 +23,10 @@
   /* Grid, not a fixed-height flex column: the previous layout gave the body a
      hard 180px height with padding, so the close button was pushed outside the
      window and the result really could get stuck on screen with no way out. */
+  /* Liquid Glass finish over the HUD material: sheen + lit rim. */
   #shell {
+    background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.01) 45%, rgba(125,150,255,0.07));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), inset 0 -1px 0 rgba(255,255,255,0.05);
     display: grid;
     grid-template-rows: auto 1fr auto;
     height: 100%;
@@ -99,7 +95,7 @@
   }
   .text-btn:hover { background: rgba(127,127,127,0.16); color: var(--fg); }
   .text-btn:active { transform: scale(0.96); }
-  .text-btn.done { color: #30D158; border-color: rgba(48,209,88,0.4); background: rgba(48,209,88,0.10); }
+  .text-btn.done { color: #5fe0a0; border-color: rgba(95,224,160,0.4); background: rgba(95,224,160,0.10); }
 
   ::-webkit-scrollbar { width: 7px; }
   ::-webkit-scrollbar-thumb { background: rgba(127,127,127,0.35); border-radius: 6px; }

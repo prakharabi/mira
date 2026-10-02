@@ -18,7 +18,9 @@ git and published as GitHub Releases.
   blur and saturation, a specular top edge, a soft sheen) over a slow-moving
   aurora backdrop. The notch, the computer-control status bar and the pointer
   label got the same glass treatment, and Quick Capture and the controls use
-  the new periwinkle accent.
+  the new periwinkle accent. Quick Capture, the result card, the copy pill, the
+  autocomplete hint and the assistant's menu are dark glass with a lit rim
+  and a periwinkle accent, replacing the old purple and light-mode styling.
 - **Menu-bar menu** — now opens with a live status line (running / daemon
   offline), has template icons on every item, and lists the workspace views in
   the same order as the sidebar rail, including Chat and Outreach.
