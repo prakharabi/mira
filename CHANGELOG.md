@@ -3,6 +3,18 @@
 Entries are grouped by date; releases from v1.1.0 onward are also tagged in
 git and published as GitHub Releases.
 
+## Unreleased
+
+### Changed
+- **AI dashboard redesign** — the workspace moved from translucent Liquid Glass
+  to a dark charcoal, periwinkle-accent dashboard look. The sidebar is now an
+  icon rail with a lit active tab and hover labels. Home is a bento dashboard:
+  an animated liquid-metal orb (click to talk), 14-day sparkline cards for
+  conversations, open loops and memories, loops-closed and pinned-memory
+  progress bars, an Open Loops table, and a Mira Readiness score ring (daemon,
+  wake word, voice, Google, Telegram, memory, local vision). All of it reads
+  live from the daemon. The main window no longer uses macOS vibrancy.
+
 ## v1.2.0 — 2026-09-27
 
 ### Added

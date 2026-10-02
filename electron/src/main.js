@@ -437,13 +437,10 @@ function toggleChatWindow() {
     // way (Mail, Notes, Finder) do.
     titleBarStyle: 'hiddenInset',
     trafficLightPosition: { x: 19, y: 20 },
-    // The sidebar material -- a genuine macOS blur that samples the desktop
-    // behind it, rather than a CSS gradient imitating one. `transparent` must
-    // stay false: it and vibrancy are mutually exclusive, and setting it would
-    // silently give a flat window with no material at all.
-    vibrancy: 'sidebar',
-    visualEffectState: 'followWindow',
-    backgroundColor: '#00000000',
+    // Flat charcoal surface to match the dashboard theme. (Vibrancy was dropped
+    // here: the UI is now opaque dark panels, so a blurred desktop material
+    // behind them would only show as a mismatched edge.)
+    backgroundColor: '#0b0c0f',
     alwaysOnTop: false,
     resizable: true,
     skipTaskbar: false,

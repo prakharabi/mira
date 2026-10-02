@@ -10,63 +10,38 @@
      material (see main.js), so surfaces are deliberately semi-transparent --
      opaque panels would cover the material and undo the effect. */
   :root {
-    /* lets the engine render scrollbars, focus rings and any native control in
-       the appearance the user is actually using */
-    color-scheme: light dark;
-    --content-bg: rgba(246,246,247,0.60);
-    --bg-elevated: rgba(255,255,255,0.72);
-    --bg-elevated-2: rgba(0,0,0,0.055);
-    --bg-elevated-3: rgba(0,0,0,0.085);
-    --border: rgba(0,0,0,0.11);
-    --border-soft: rgba(0,0,0,0.07);
-    --text-primary: rgba(0,0,0,0.87);
-    --text-secondary: rgba(0,0,0,0.52);
-    --text-tertiary: rgba(0,0,0,0.36);
-    --sidebar-selected: rgba(0,0,0,0.085);
-    --field-bg: rgba(255,255,255,0.85);
-    --output-bg: rgba(0,0,0,0.04);
-    --accent-1: #8b5cf6;
-    --accent-2: #06b6d4;
-    --accent-gradient: linear-gradient(135deg, #8b5cf6 0%, #6366f1 45%, #06b6d4 100%);
-    --danger: #e5484d;
-    --success: #30a46c;
-    /* Liquid Glass reads rounder and more "continuous" than the flatter
-       macOS Big Sur-era radii this used to carry -- bumped up across the
-       board so cards, fields and buttons feel poured rather than cut. */
-    --radius-lg: 18px;
-    --radius-md: 12px;
-    --radius-sm: 9px;
+    color-scheme: dark;
+    /* "AI dashboard" look: near-black charcoal surfaces, hairline borders, one
+       cool periwinkle accent. Opaque on purpose -- flat dark cards with soft
+       light edges read as precise and technical where translucency reads soft. */
+    --canvas: #0b0c0f;
+    --content-bg: #0f1013;
+    --bg-elevated: #17181c;
+    --bg-elevated-2: #202228;
+    --bg-elevated-3: #2a2c33;
+    --border: rgba(255,255,255,0.10);
+    --border-soft: rgba(255,255,255,0.06);
+    --text-primary: rgba(255,255,255,0.93);
+    --text-secondary: rgba(255,255,255,0.58);
+    --text-tertiary: rgba(255,255,255,0.38);
+    --sidebar-selected: rgba(169,191,255,0.12);
+    --field-bg: #1b1c21;
+    --output-bg: rgba(0,0,0,0.30);
+    --accent-1: #a9bfff;
+    --accent-2: #5b8cff;
+    --accent-soft: #a9bfff;
+    --accent-gradient: linear-gradient(135deg, #7d96ff 0%, #5b7cfa 50%, #4a8dff 100%);
+    --danger: #ff6369;
+    --success: #5fe0a0;
+    --warn: #f1d98a;
+    --radius-lg: 20px;
+    --radius-md: 14px;
+    --radius-sm: 10px;
     --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
     --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
-    /* Glass surfaces catch light along their top edge and lose it toward the
-       bottom -- these two, layered as inset box-shadows on top of the normal
-       border, are what make a flat translucent rect read as curved glass
-       instead of tinted plastic. */
-    --glass-highlight: rgba(255,255,255,0.55);
-    --glass-shade: rgba(0,0,0,0.04);
-    --glass-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 10px 24px rgba(0,0,0,0.06);
-  }
-
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --content-bg: rgba(30,30,32,0.55);
-      --bg-elevated: rgba(255,255,255,0.055);
-      --bg-elevated-2: rgba(255,255,255,0.09);
-      --bg-elevated-3: rgba(255,255,255,0.13);
-      --border: rgba(255,255,255,0.10);
-      --border-soft: rgba(255,255,255,0.06);
-      --text-primary: rgba(255,255,255,0.92);
-      --text-secondary: rgba(255,255,255,0.55);
-      --text-tertiary: rgba(255,255,255,0.36);
-      --sidebar-selected: rgba(255,255,255,0.11);
-      --field-bg: rgba(255,255,255,0.06);
-      --output-bg: rgba(0,0,0,0.22);
-      --danger: #ff6369;
-      --success: #3dd68c;
-      --glass-highlight: rgba(255,255,255,0.16);
-      --glass-shade: rgba(0,0,0,0.18);
-      --glass-shadow: 0 1px 1px rgba(0,0,0,0.2), 0 12px 28px rgba(0,0,0,0.32);
-    }
+    --glass-highlight: rgba(255,255,255,0.07);
+    --glass-shade: rgba(0,0,0,0.18);
+    --glass-shadow: 0 1px 1px rgba(0,0,0,0.3), 0 14px 32px rgba(0,0,0,0.35);
   }
 
   * { box-sizing: border-box; }
@@ -74,7 +49,7 @@
   html, body {
     margin: 0;
     height: 100%;
-    background: transparent;
+    background: var(--canvas);
   }
 
   body {
@@ -84,7 +59,7 @@
     -webkit-font-smoothing: antialiased;
   }
 
-  ::selection { background: rgba(139, 92, 246, 0.35); }
+  ::selection { background: rgba(125, 150, 255, 0.40); }
 
   /* custom scrollbar */
   ::-webkit-scrollbar { width: 8px; height: 8px; }
@@ -125,8 +100,8 @@
     opacity: 0.05;
     will-change: transform;
   }
-  #ambient .blob.a { background: #8b5cf6; top: -20%; left: -10%; }
-  #ambient .blob.b { background: #06b6d4; bottom: -25%; right: -15%; opacity: 0.04; }
+  #ambient .blob.a { background: #5b8cff; top: -20%; left: -10%; }
+  #ambient .blob.b { background: #7d96ff; bottom: -25%; right: -15%; opacity: 0.05; }
 
   /* Drag region only. The window's buttons are the system's real traffic
      lights, positioned by main.js -- this just makes the empty strip beside
@@ -147,49 +122,40 @@
   #sidebar {
     position: relative;
     z-index: 10;
-    width: 200px;
+    width: 76px;
     flex-shrink: 0;
-    padding: 52px 10px 12px;
+    padding: 52px 0 14px;
     display: flex;
     flex-direction: column;
+    align-items: center;
+    background: var(--canvas);
     -webkit-app-region: drag;
   }
 
-  #brand {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 0 8px 14px;
-  }
-  #brand .holo-mark {
-    width: 20px;
-    height: 20px;
-  }
-  #brand .name {
-    font-size: 13px;
-    font-weight: 600;
-    letter-spacing: -0.01em;
-    color: var(--text-secondary);
-  }
+  #brand { display: flex; align-items: center; justify-content: center; padding: 0 0 22px; }
+  #brand .holo-mark { width: 38px; height: 38px; }
+  #brand .name { display: none; }
 
   #nav {
     position: relative;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 6px;
+    width: 100%;
+    align-items: center;
     -webkit-app-region: no-drag;
   }
 
-  /* A macOS source list selects with a plain filled rounded rect -- no border,
-     no elevation. Sized and spaced like a system sidebar row. */
+  /* Active item: a soft periwinkle wash that fades out to the right, plus a
+     bright bar on the rail's inner edge -- the "lit" tab from the reference. */
   #nav-indicator {
     position: absolute;
     left: 0;
     width: 100%;
-    height: 30px;
-    border-radius: var(--radius-sm);
-    background: var(--sidebar-selected);
-    box-shadow: inset 0 1px 0 var(--glass-highlight);
+    height: 42px;
+    background: linear-gradient(90deg, rgba(169,191,255,0.20), rgba(169,191,255,0.04) 70%, transparent);
+    border-left: 2px solid var(--accent-soft);
+    box-shadow: -6px 0 18px -6px rgba(125,150,255,0.55);
     z-index: 0;
     pointer-events: none;
   }
@@ -199,27 +165,50 @@
     z-index: 1;
     display: flex;
     align-items: center;
-    gap: 9px;
-    height: 30px;
-    padding: 0 9px;
-    border-radius: var(--radius-sm);
-    color: var(--text-secondary);
-    font-size: 13px;
-    font-weight: 500;
+    justify-content: center;
+    width: 100%;
+    height: 42px;
+    color: var(--text-tertiary);
     cursor: default;
     user-select: none;
-    transition: color 120ms var(--ease-standard);
+    transition: color 150ms var(--ease-standard);
   }
-  .nav-item svg { width: 16px; height: 16px; flex-shrink: 0; opacity: 0.75; }
+  .nav-item span { display: none; }
+  .nav-item svg { width: 20px; height: 20px; flex-shrink: 0; }
   .nav-item:hover { color: var(--text-primary); }
-  .nav-item.active { color: var(--text-primary); font-weight: 600; }
-  .nav-item.active svg { opacity: 1; color: var(--accent-1); }
+  .nav-item.active { color: var(--accent-soft); }
+  /* labels move to a tooltip since the rail has no room for text */
+  .nav-item::after {
+    content: attr(data-label);
+    position: absolute;
+    left: 66px;
+    padding: 5px 10px;
+    border-radius: 8px;
+    background: var(--bg-elevated-3);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    font-size: 12px;
+    font-weight: 550;
+    white-space: nowrap;
+    opacity: 0;
+    transform: translateX(-4px);
+    pointer-events: none;
+    transition: opacity 120ms var(--ease-standard), transform 120ms var(--ease-standard);
+    z-index: 50;
+  }
+  .nav-item:hover::after { opacity: 1; transform: translateX(0); }
 
   #sidebar-footer {
     margin-top: auto;
-    padding: 10px;
+    padding: 10px 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
     -webkit-app-region: no-drag;
   }
+  #sidebar-footer .status-row span { display: none; }
+  #sidebar-footer .status-row { padding: 2px 0; }
   .status-row {
     display: flex;
     align-items: center;
@@ -250,6 +239,8 @@
     min-width: 0;
     background: var(--content-bg);
     border-left: 1px solid var(--border-soft);
+    border-top-left-radius: 28px;
+    box-shadow: -1px 0 0 var(--border-soft), -20px 0 60px rgba(0,0,0,0.35);
   }
 
   .view {
@@ -296,57 +287,193 @@
     box-shadow: inset 0 1px 0 var(--glass-highlight), var(--glass-shadow);
   }
 
-  /* ---------- Home view ---------- */
-  #home-view { gap: 22px; }
-  .stat-grid {
+  /* ---------- Home view: AI dashboard ---------- */
+  #home-view { padding: 52px 28px 28px; }
+  .dash {
     display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 12px;
+    grid-template-columns: minmax(250px, 0.9fr) minmax(0, 1.5fr) minmax(0, 0.9fr);
+    grid-template-rows: auto auto auto auto;
+    gap: 14px;
+    width: 100%;
+    max-width: 1280px;
+    margin: 0 auto;
   }
-  .stat-card {
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    transition: border-color 200ms var(--ease-standard), transform 200ms var(--ease-standard);
+  .dcard {
+    position: relative;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-lg);
+    padding: 18px 20px;
+    min-width: 0;
+    box-shadow: inset 0 1px 0 var(--glass-highlight);
+    animation: card-in 520ms var(--ease-out) both;
   }
-  .stat-card:hover { border-color: var(--border); transform: translateY(-1px); }
-  .stat-card .stat-top { display: flex; align-items: center; justify-content: space-between; }
-  .stat-card .stat-label { font-size: 11.5px; color: var(--text-tertiary); font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; }
-  .stat-card .stat-value { font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+  .dash > :nth-child(2) { animation-delay: 60ms; }
+  .dash > :nth-child(3) { animation-delay: 120ms; }
+  .dash > :nth-child(4) { animation-delay: 180ms; }
+  .dash > :nth-child(5) { animation-delay: 240ms; }
+  .dash > :nth-child(6) { animation-delay: 300ms; }
+  @keyframes card-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+  .dcard h2 { margin: 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; }
+  .dcard-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+  .muted-pill { font-size: 12px; color: var(--text-secondary); }
 
-  .quick-ask {
-    padding: 18px 18px 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+  /* hero: tall card on the left with the liquid-metal orb */
+  .hero {
+    grid-column: 1; grid-row: 1 / span 2;
+    display: flex; flex-direction: column; align-items: center; text-align: center;
+    padding: 22px 20px 20px;
+    overflow: hidden;
+    background:
+      linear-gradient(180deg, #0f1218 0%, #10141d 45%, #28406a 100%);
   }
-  .quick-ask-label { font-size: 12.5px; color: var(--text-secondary); font-weight: 500; }
-  .quick-ask-row { display: flex; gap: 8px; }
+  .hero-glow {
+    position: absolute; left: -20%; right: -20%; bottom: -35%; height: 70%;
+    background: radial-gradient(closest-side, rgba(140,175,255,0.55), transparent 70%);
+    filter: blur(20px); pointer-events: none;
+  }
+  .hero > * { position: relative; }
+  .orb { width: 150px; height: 150px; margin: 8px 0 14px; cursor: pointer; flex-shrink: 0;
+         filter: drop-shadow(0 18px 40px rgba(60,110,255,0.55)); transition: transform 300ms var(--ease-out); }
+  .orb:hover { transform: scale(1.05); }
+  .orb:active { transform: scale(0.97); }
+  /* A morphing blob filled with a conic "chrome" gradient; the specular layers
+     sit on top and counter-rotate so the surface looks liquid, not spinning. */
+  .orb-shell {
+    position: absolute; inset: 0;
+    border-radius: 46% 54% 52% 48% / 52% 46% 54% 48%;
+    background:
+      radial-gradient(circle at 30% 24%, rgba(255,255,255,0.9) 0 4%, transparent 18%),
+      conic-gradient(from 210deg at 50% 52%, #0a1a5c, #2f6bff, #9ec3ff, #1536b8, #061040, #3d82ff, #0a1a5c);
+    animation: orb-morph 9s ease-in-out infinite;
+    box-shadow: inset -14px -18px 36px rgba(0,10,60,0.75), inset 10px 12px 28px rgba(160,200,255,0.55);
+    overflow: hidden;
+  }
+  .orb-core {
+    position: absolute; inset: -20%;
+    background: conic-gradient(from 0deg, transparent 0 20%, rgba(190,215,255,0.65) 28%, transparent 38% 62%, rgba(120,170,255,0.5) 72%, transparent 82%);
+    mix-blend-mode: screen; filter: blur(8px);
+    animation: orb-spin 14s linear infinite;
+  }
+  .orb-spec {
+    position: absolute; left: 18%; top: 12%; width: 38%; height: 22%;
+    border-radius: 50%;
+    background: radial-gradient(ellipse, rgba(255,255,255,0.75), transparent 70%);
+    filter: blur(2px); transform: rotate(-24deg);
+  }
+  @keyframes orb-morph {
+    0%, 100% { border-radius: 46% 54% 52% 48% / 52% 46% 54% 48%; transform: rotate(0deg); }
+    33%      { border-radius: 54% 46% 44% 56% / 46% 56% 44% 54%; transform: rotate(8deg); }
+    66%      { border-radius: 50% 50% 56% 44% / 58% 44% 56% 42%; transform: rotate(-6deg); }
+  }
+  @keyframes orb-spin { to { transform: rotate(360deg); } }
+  .hero-greet { font-size: 19px; font-weight: 650; letter-spacing: -0.02em; margin-bottom: 6px; }
+  .hero-text p { margin: 0 auto; font-size: 12.5px; line-height: 1.5; color: var(--text-secondary); max-width: 250px; }
+  .hero-text b { color: var(--text-primary); font-weight: 550; }
+  .hero-ask { display: flex; gap: 8px; width: 100%; margin-top: 18px; }
+  .hero-ask .text-field { min-width: 0; background: rgba(10,12,18,0.55); }
+  .chips { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; margin-top: auto; padding-top: 16px; }
+  .chip { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary);
+          padding: 4px 10px; border-radius: 999px; background: rgba(10,12,18,0.5); border: 1px solid var(--border-soft); }
+  .chip .status-dot { width: 6px; height: 6px; }
 
-  .action-row { display: flex; gap: 10px; }
+  /* activity + sparkline cards */
+  .activity { grid-column: 2 / span 2; grid-row: 1; display: flex; flex-direction: column; }
+  .spark-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; flex: 1; }
+  .spark-card {
+    --tint: 169,191,255;
+    background: var(--bg-elevated-2); border-radius: 16px; padding: 14px 14px 12px;
+    display: flex; flex-direction: column; min-width: 0;
+    transition: transform 200ms var(--ease-standard), background 200ms var(--ease-standard);
+  }
+  .spark-card:hover { transform: translateY(-2px); background: #24262d; }
+  .spark-card[data-tint="gold"] { --tint: 241,217,138; }
+  .spark-card[data-tint="mint"] { --tint: 140,225,195; }
+  .spark-title { font-size: 12.5px; font-weight: 550; margin-bottom: 4px; }
+  .spark { width: 100%; height: 76px; flex: 1; min-height: 76px; display: block; overflow: visible; }
+  .spark .area { fill: url(#sparkfade); }
+  .spark .line { fill: none; stroke: rgb(var(--tint)); stroke-width: 1.6; vector-effect: non-scaling-stroke;
+                 stroke-dasharray: 600; stroke-dashoffset: 600; animation: draw 1.4s var(--ease-out) forwards; }
+  .spark .avg { stroke: rgba(255,255,255,0.18); stroke-dasharray: 3 4; vector-effect: non-scaling-stroke; }
+  @keyframes draw { to { stroke-dashoffset: 0; } }
+  .spark-dot { position: absolute; width: 7px; height: 7px; border-radius: 50%; background: var(--bg-elevated-2);
+               border: 1.5px solid rgba(255,255,255,0.7); transform: translate(-50%, -50%); pointer-events: none; }
+  .spark-wrap { position: relative; }
+  .spark-value { font-size: 26px; font-weight: 500; letter-spacing: -0.03em; margin: 8px 0 8px; font-variant-numeric: tabular-nums; }
+  .spark-row { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary); padding: 2px 0; }
+  .spark-row i { flex: 1; border-bottom: 1px dotted rgba(255,255,255,0.16); transform: translateY(2px); }
+  .spark-row b { font-weight: 500; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+
+  /* progress strip */
+  .strip { grid-column: 2 / span 2; grid-row: 2; display: flex; align-items: center; gap: 18px; padding: 14px 20px; }
+  .strip-item { flex: 1; display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .strip-sep { width: 1px; align-self: stretch; background: var(--border); }
+  .strip-icon { width: 38px; height: 38px; border-radius: 11px; background: var(--bg-elevated-2); display: flex;
+                align-items: center; justify-content: center; color: var(--text-secondary); flex-shrink: 0; }
+  .strip-icon svg { width: 18px; height: 18px; }
+  .strip-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .strip-text small { font-size: 11px; color: var(--text-secondary); }
+  .strip-text span { font-size: 14px; font-weight: 550; white-space: nowrap; }
+  .bar { flex: 1; height: 5px; border-radius: 999px; background: rgba(255,255,255,0.12); overflow: hidden; min-width: 40px; }
+  .bar-fill { height: 100%; width: 0; border-radius: 999px; background: var(--accent-soft);
+              box-shadow: 0 0 10px rgba(169,191,255,0.6); transition: width 900ms var(--ease-out); }
+
+  /* table */
+  .table-card { grid-column: 1 / span 2; grid-row: 3; }
+  .link-btn { display: inline-flex; align-items: center; gap: 6px; background: none; border: none; color: var(--text-primary);
+              font-size: 12.5px; cursor: pointer; padding: 0; font-family: inherit; }
+  .link-btn svg { width: 20px; height: 20px; padding: 4px; border-radius: 50%; background: var(--bg-elevated-3); color: var(--text-secondary); }
+  .link-btn:hover svg { background: var(--accent-soft); color: #0b0c0f; }
+  .dtr { display: grid; grid-template-columns: minmax(0, 2.4fr) 0.9fr 0.8fr 0.9fr 1fr; gap: 10px; align-items: center;
+         padding: 13px 12px; font-size: 13px; border-bottom: 1px solid var(--border-soft); }
+  .dtr:last-child { border-bottom: none; }
+  .dth { background: var(--bg-elevated-2); border: none; border-radius: 10px; font-size: 11.5px; color: var(--text-secondary); padding: 8px 12px; }
+  .dtr > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dtr .t-name { font-weight: 500; }
+  .dtr .src { color: var(--text-secondary); text-transform: capitalize; }
+  .dtr.row-link { cursor: default; transition: background 150ms var(--ease-standard); }
+  .dtr.row-link:hover { background: rgba(255,255,255,0.03); }
+  .pill { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 500; }
+  .pill.good { color: #a8e8c4; } .pill.bad { color: #f3a5a0; } .pill.warn { color: var(--warn); } .pill.calm { color: var(--text-secondary); }
+  .table-empty { padding: 28px 10px; text-align: center; color: var(--text-secondary); font-size: 13px; }
+
+  /* readiness ring */
+  .score { grid-column: 3; grid-row: 3; display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+  .score-left { display: flex; flex-direction: column; gap: 6px; min-width: 0; align-self: stretch; }
+  .score-left p { margin: 0; font-size: 12px; color: var(--text-secondary); line-height: 1.45; }
+  .score-target { margin-top: auto; font-size: 12px; color: var(--text-secondary); }
+  .ring { position: relative; width: 104px; height: 104px; flex-shrink: 0; }
+  .ring svg { width: 100%; height: 100%; transform: rotate(135deg); }
+  .ring circle { fill: none; stroke-width: 9; stroke-linecap: round; }
+  .ring-bg { stroke: rgba(255,255,255,0.14); stroke-dasharray: 75 100; }
+  .ring-fg { stroke: var(--accent-soft); stroke-dasharray: 0 100; transition: stroke-dasharray 1.2s var(--ease-out);
+             filter: drop-shadow(0 0 6px rgba(169,191,255,0.55)); }
+  .ring-num { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 400; letter-spacing: -0.02em; }
+
+  /* quick actions */
+  .actions { grid-column: 1 / span 3; grid-row: 4; display: flex; gap: 12px; padding: 12px; }
   .action-btn {
-    flex: 1;
-    padding: 14px 16px;
-    border-radius: var(--radius-md);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    cursor: pointer;
-    transition: transform 100ms var(--ease-standard), border-color 200ms var(--ease-standard), background 200ms var(--ease-standard);
+    flex: 1; padding: 12px 14px; border-radius: var(--radius-md); display: flex; align-items: center; gap: 12px;
+    cursor: pointer; background: var(--bg-elevated-2);
+    transition: transform 100ms var(--ease-standard), background 200ms var(--ease-standard);
   }
-  .action-btn:hover { border-color: var(--border); background: var(--bg-elevated-2); }
+  .action-btn:hover { background: var(--bg-elevated-3); }
   .action-btn:active { transform: scale(0.98); }
-  .action-btn .icon-wrap {
-    width: 32px; height: 32px;
-    border-radius: 9px;
-    background: var(--accent-gradient);
-    display: flex; align-items: center; justify-content: center;
-    flex-shrink: 0;
-  }
-  .action-btn .icon-wrap svg { width: 16px; height: 16px; color: white; }
+  .action-btn .icon-wrap { width: 34px; height: 34px; border-radius: 10px; background: var(--accent-gradient);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 14px rgba(91,124,250,0.35); }
+  .action-btn .icon-wrap svg { width: 17px; height: 17px; color: white; }
   .action-btn .label { font-size: 13px; font-weight: 550; }
   .action-btn .sub { font-size: 11px; color: var(--text-tertiary); }
+
+  @media (max-width: 1020px) {
+    .dash { grid-template-columns: 1fr 1fr; }
+    .hero { grid-column: 1 / span 2; grid-row: auto; }
+    .activity, .strip, .table-card, .actions { grid-column: 1 / span 2; grid-row: auto; }
+    .score { grid-column: 1 / span 2; grid-row: auto; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .orb-shell, .orb-core, .dcard, .spark .line { animation: none !important; stroke-dashoffset: 0; }
+  }
 
   /* ---------- generic inputs / buttons ---------- */
   /* Pill-shaped controls are where Liquid Glass shows up most -- every
@@ -367,7 +494,7 @@
     box-shadow: inset 0 1px 0 var(--glass-highlight);
     transition: border-color 150ms var(--ease-standard), background 150ms var(--ease-standard), box-shadow 150ms var(--ease-standard);
   }
-  .text-field:focus { border-color: rgba(139,92,246,0.5); background: var(--bg-elevated-2); box-shadow: inset 0 1px 0 var(--glass-highlight), 0 0 0 3px rgba(139,92,246,0.16); }
+  .text-field:focus { border-color: rgba(125,150,255,0.5); background: var(--bg-elevated-2); box-shadow: inset 0 1px 0 var(--glass-highlight), 0 0 0 3px rgba(125,150,255,0.16); }
   .text-field::placeholder { color: var(--text-tertiary); }
 
   .btn-primary {
@@ -379,10 +506,10 @@
     flex-shrink: 0;
     display: flex; align-items: center; justify-content: center;
     cursor: pointer;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.4), 0 4px 14px rgba(139,92,246,0.35);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.4), 0 4px 14px rgba(125,150,255,0.35);
     transition: transform 100ms var(--ease-standard), filter 150ms var(--ease-standard), box-shadow 150ms var(--ease-standard);
   }
-  .btn-primary:hover { filter: brightness(1.12); box-shadow: inset 0 1px 0 rgba(255,255,255,0.4), 0 6px 18px rgba(139,92,246,0.45); }
+  .btn-primary:hover { filter: brightness(1.12); box-shadow: inset 0 1px 0 rgba(255,255,255,0.4), 0 6px 18px rgba(125,150,255,0.45); }
   .btn-primary:active { transform: scale(0.94); }
   .btn-primary svg { width: 15px; height: 15px; }
 
@@ -433,7 +560,7 @@
     left: 3px;
     border-radius: 999px;
     background: var(--accent-gradient);
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), 0 2px 8px rgba(139,92,246,0.3);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), 0 2px 8px rgba(125,150,255,0.3);
     z-index: 0;
   }
   .segmented button {
@@ -487,7 +614,7 @@
     background: var(--accent-gradient);
     color: white;
     border-bottom-right-radius: 6px;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.3), 0 4px 14px rgba(139,92,246,0.22);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.3), 0 4px 14px rgba(125,150,255,0.22);
   }
   .msg.assistant {
     align-self: flex-start;
@@ -529,7 +656,7 @@
     font-size: 12.5px;
     font-weight: 600;
     cursor: pointer;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), 0 3px 10px rgba(139,92,246,0.25);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.35), 0 3px 10px rgba(125,150,255,0.25);
     transition: transform 100ms var(--ease-standard), filter 150ms var(--ease-standard);
   }
   .full-btn:hover { filter: brightness(1.1); }
@@ -642,7 +769,7 @@
     color: var(--text-secondary);
     vertical-align: middle;
   }
-  .badge.due { background: rgba(139,92,246,0.18); color: #c4b5fd; }
+  .badge.due { background: rgba(125,150,255,0.18); color: #c4b5fd; }
   .badge.done { background: rgba(34,197,94,0.16); color: #86efac; }
   .badge.fail { background: rgba(240,68,56,0.16); color: #fca5a5; }
   .badge.unread { background: rgba(6,182,212,0.16); color: #67e8f9; }
@@ -708,7 +835,7 @@
     min-height: 130px;
     transition: border-color 150ms var(--ease-standard);
   }
-  .textarea-field:focus { border-color: rgba(139,92,246,0.5); }
+  .textarea-field:focus { border-color: rgba(125,150,255,0.5); }
   .textarea-field::placeholder { color: var(--text-tertiary); }
 
   /* action items inside a processed dump entry */
@@ -719,7 +846,7 @@
   }
   .action-item:first-child { border-top: none; }
   .action-item input[type=checkbox] {
-    margin-top: 2px; accent-color: #8b5cf6; cursor: pointer; flex-shrink: 0;
+    margin-top: 2px; accent-color: #7d96ff; cursor: pointer; flex-shrink: 0;
   }
   .action-item .ai-title { font-size: 12.5px; font-weight: 550; }
   .action-item .ai-note { font-size: 11.5px; color: var(--text-tertiary); margin-top: 2px; }
@@ -786,7 +913,7 @@
   .session-badge {
     font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
     padding: 2px 5px; border-radius: 4px; flex-shrink: 0;
-    background: rgba(139,92,246,0.18); color: #c4b5fd;
+    background: rgba(125,150,255,0.18); color: #c4b5fd;
   }
   .session-badge.voice { background: rgba(6,182,212,0.18); color: #67e8f9; }
 
@@ -953,7 +1080,7 @@
   .or-timeline { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
   .or-bubble { padding: 8px 10px; border-radius: 10px; font-size: 12px; line-height: 1.5; white-space: pre-wrap; max-width: 88%; }
   .or-bubble.out { background: var(--bg-elevated-2); align-self: flex-end; }
-  .or-bubble.in { background: rgba(139,92,246,0.14); align-self: flex-start; }
+  .or-bubble.in { background: rgba(125,150,255,0.14); align-self: flex-start; }
   .or-bubble .meta { font-size: 10px; color: var(--text-tertiary); margin-bottom: 3px; }
   .or-days { display: flex; gap: 5px; flex-wrap: wrap; }
   .or-days label { font-size: 11.5px; color: var(--text-secondary); display: flex; align-items: center; gap: 4px; }
@@ -1022,7 +1149,7 @@
     cursor: pointer;
     transition: border-color 150ms var(--ease-standard);
   }
-  select.text-field:focus, .dropdown-select:focus { border-color: rgba(139,92,246,0.5); }
+  select.text-field:focus, .dropdown-select:focus { border-color: rgba(125,150,255,0.5); }
 
   .rect-field {
     flex: 1;
@@ -1036,7 +1163,7 @@
     font-family: inherit;
     transition: border-color 150ms var(--ease-standard);
   }
-  .rect-field:focus { border-color: rgba(139,92,246,0.5); }
+  .rect-field:focus { border-color: rgba(125,150,255,0.5); }
   .rect-field::placeholder { color: var(--text-tertiary); }
 
   /* ---------- shared glass treatment for plain surfaces ---------- */
@@ -1060,7 +1187,7 @@
     background: var(--bg-elevated);
     border: 1px solid var(--border-soft);
   }
-  .model-row.selected { border-color: rgba(139,92,246,0.45); background: rgba(139,92,246,0.08); }
+  .model-row.selected { border-color: rgba(125,150,255,0.45); background: rgba(125,150,255,0.08); }
   .model-row .model-name { font-size: 12.5px; font-weight: 550; }
   .model-row .model-meta { font-size: 10.5px; color: var(--text-tertiary); margin-top: 1px; }
   .model-row .model-actions { display: flex; gap: 6px; align-items: center; }
@@ -1139,43 +1266,43 @@
 
       <div id="nav">
         <div id="nav-indicator"></div>
-        <div class="nav-item active" data-view="home">
+        <div class="nav-item active" data-view="home" data-label="Home">
           <svg viewBox="0 0 20 20" fill="none"><path d="M3 9.5L10 3l7 6.5M5 8.5V17h10V8.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <span>Home</span>
         </div>
-        <div class="nav-item" data-view="chat">
+        <div class="nav-item" data-view="chat" data-label="Chat">
           <svg viewBox="0 0 20 20" fill="none"><path d="M3 4.5h14v9H8l-3.5 3v-3H3v-9z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
           <span>Chat</span>
         </div>
-        <div class="nav-item" data-view="meetings">
+        <div class="nav-item" data-view="meetings" data-label="Meetings">
           <svg viewBox="0 0 20 20" fill="none"><rect x="3" y="5" width="10" height="10" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M13 8.5l4-2.2v7.4l-4-2.2" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
           <span>Meetings</span>
         </div>
-        <div class="nav-item" data-view="dumpbox">
+        <div class="nav-item" data-view="dumpbox" data-label="Dump Box">
           <svg viewBox="0 0 20 20" fill="none"><path d="M3 7l7-4 7 4-7 4-7-4z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M3 11l7 4 7-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <span>Dump Box</span>
         </div>
-        <div class="nav-item" data-view="google">
+        <div class="nav-item" data-view="google" data-label="Google">
           <svg viewBox="0 0 20 20" fill="none"><rect x="2.5" y="4.5" width="15" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M3 6l7 5 7-5" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
           <span>Google</span>
         </div>
-        <div class="nav-item" data-view="automations">
+        <div class="nav-item" data-view="automations" data-label="Automations">
           <svg viewBox="0 0 20 20" fill="none"><path d="M11 2.5L4.5 11H9l-1 6.5L15.5 9H11l1-6.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
           <span>Automations</span>
         </div>
-        <div class="nav-item" data-view="outreach">
+        <div class="nav-item" data-view="outreach" data-label="Outreach">
           <svg viewBox="0 0 20 20" fill="none"><path d="M17 3L3 9.2l5.6 2.2L10.8 17 17 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8.6 11.4L17 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           <span>Outreach</span>
         </div>
-        <div class="nav-item" data-view="tasks">
+        <div class="nav-item" data-view="tasks" data-label="Tasks">
           <svg viewBox="0 0 20 20" fill="none"><path d="M3.5 6l2 2 3.5-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M3.5 14l2 2 3.5-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M11.5 6.5h5M11.5 14.5h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           <span>Tasks</span>
         </div>
-        <div class="nav-item" data-view="memory">
+        <div class="nav-item" data-view="memory" data-label="Memory">
           <svg viewBox="0 0 20 20" fill="none"><path d="M10 3.5c-1.6 0-2.6 1-2.9 2.2C5.8 5.9 4.7 7 4.7 8.4c0 .6.2 1.1.5 1.5-.5.5-.8 1.1-.8 1.9 0 1.5 1.2 2.7 2.8 2.8.4 1 1.4 1.9 2.8 1.9s2.4-.9 2.8-1.9c1.6-.1 2.8-1.3 2.8-2.8 0-.8-.3-1.4-.8-1.9.3-.4.5-.9.5-1.5 0-1.4-1.1-2.5-2.4-2.7C12.6 4.5 11.6 3.5 10 3.5z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M10 6v10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
           <span>Memory</span>
         </div>
-        <div class="nav-item" data-view="settings">
+        <div class="nav-item" data-view="settings" data-label="Settings">
           <svg viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="2.6" stroke="currentColor" stroke-width="1.5"/><path d="M10 3v2M10 15v2M17 10h-2M5 10H3M14.9 5.1l-1.4 1.4M6.5 13.5l-1.4 1.4M14.9 14.9l-1.4-1.4M6.5 6.5L5.1 5.1" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           <span>Settings</span>
         </div>
@@ -1191,53 +1318,115 @@
 
       <!-- ---------- HOME ---------- -->
       <div class="view active" id="home-view">
-        <div class="view-header">
-          <h1 class="view-title" id="greeting">Hello, Prakhar</h1>
-          <p class="view-subtitle">Here's how Mira is doing right now.</p>
-        </div>
+        <div class="dash">
 
-        <div class="stat-grid">
-          <div class="card stat-card">
-            <div class="stat-top"><span class="stat-label">Daemon</span><div class="status-dot" id="home-daemon-dot"></div></div>
-            <div class="stat-value" id="home-daemon-value">Checking…</div>
-          </div>
-          <div class="card stat-card">
-            <div class="stat-top"><span class="stat-label">Wake Word</span><div class="status-dot" id="home-wake-dot"></div></div>
-            <div class="stat-value" id="home-wake-value">—</div>
-          </div>
-          <div class="card stat-card">
-            <div class="stat-top"><span class="stat-label">Voice Reply</span><div class="status-dot" id="home-voice-dot"></div></div>
-            <div class="stat-value" id="home-voice-value">—</div>
-          </div>
-          <div class="card stat-card">
-            <div class="stat-top"><span class="stat-label">Routing</span></div>
-            <div class="stat-value">Auto · Local / Cloud</div>
-          </div>
-        </div>
+          <!-- hero -->
+          <section class="dcard hero">
+            <div class="hero-glow"></div>
+            <div class="orb" id="hero-orb" title="Talk to Mira">
+              <div class="orb-shell"><div class="orb-core"></div><div class="orb-spec"></div></div>
+            </div>
+            <div class="hero-text">
+              <div class="hero-greet" id="greeting">Hello, Prakhar</div>
+              <p>Ask anything, or say <b>&ldquo;Hey Mira&rdquo;</b>. She can read your mail, run your calendar and operate your Mac.</p>
+            </div>
+            <div class="hero-ask">
+              <input class="text-field" id="quick-ask-input" type="text" placeholder="Ask Mira anything…" />
+              <button class="btn-primary" id="quick-ask-send" title="Send">
+                <svg viewBox="0 0 20 20" fill="none"><path d="M3 10h14M11 4l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+              </button>
+            </div>
+            <div class="chips">
+              <span class="chip"><i class="status-dot" id="home-daemon-dot"></i><span id="home-daemon-value">Checking…</span></span>
+              <span class="chip"><i class="status-dot" id="home-wake-dot"></i><span id="home-wake-value">—</span></span>
+              <span class="chip"><i class="status-dot" id="home-voice-dot"></i><span id="home-voice-value">—</span></span>
+            </div>
+          </section>
 
-        <div class="card quick-ask">
-          <div class="quick-ask-label">Ask Mira anything</div>
-          <div class="quick-ask-row">
-            <input class="text-field" id="quick-ask-input" type="text" placeholder="Type a question and press Enter…" />
-            <button class="btn-primary" id="quick-ask-send" title="Send">
-              <svg viewBox="0 0 20 20" fill="none"><path d="M3 10h14M11 4l6 6-6 6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-            </button>
-          </div>
-        </div>
+          <!-- activity -->
+          <section class="dcard activity">
+            <div class="dcard-head"><h2>Mira Activity</h2><span class="muted-pill">Last 14 days</span></div>
+            <div class="spark-grid">
+              <div class="spark-card" data-tint="blue">
+                <div class="spark-title">Conversations</div>
+                <svg class="spark" id="spark-chats" viewBox="0 0 200 76"></svg>
+                <div class="spark-value" id="sv-chats">—</div>
+                <div class="spark-row"><span>Today</span><i></i><b id="sv-chats-a">—</b></div>
+                <div class="spark-row"><span>Daily avg</span><i></i><b id="sv-chats-b">—</b></div>
+              </div>
+              <div class="spark-card" data-tint="gold">
+                <div class="spark-title">Open loops</div>
+                <svg class="spark" id="spark-loops" viewBox="0 0 200 76"></svg>
+                <div class="spark-value" id="sv-loops">—</div>
+                <div class="spark-row"><span>Overdue</span><i></i><b id="sv-loops-a">—</b></div>
+                <div class="spark-row"><span>Closed</span><i></i><b id="sv-loops-b">—</b></div>
+              </div>
+              <div class="spark-card" data-tint="mint">
+                <div class="spark-title">Memories</div>
+                <svg class="spark" id="spark-mem" viewBox="0 0 200 76"></svg>
+                <div class="spark-value" id="sv-mem">—</div>
+                <div class="spark-row"><span>Pinned</span><i></i><b id="sv-mem-a">—</b></div>
+                <div class="spark-row"><span>This week</span><i></i><b id="sv-mem-b">—</b></div>
+              </div>
+            </div>
+          </section>
 
-        <div class="action-row">
-          <div class="action-btn card" id="action-open-chat">
-            <div class="icon-wrap"><svg viewBox="0 0 20 20" fill="none"><path d="M3 4.5h14v9H8l-3.5 3v-3H3v-9z" stroke="white" stroke-width="1.6" stroke-linejoin="round"/></svg></div>
-            <div><div class="label">Open Chat</div><div class="sub">Full conversation</div></div>
-          </div>
-          <div class="action-btn card" id="action-start-meeting">
-            <div class="icon-wrap"><svg viewBox="0 0 20 20" fill="none"><rect x="3" y="5" width="10" height="10" rx="2" stroke="white" stroke-width="1.6"/><path d="M13 8.5l4-2.2v7.4l-4-2.2" stroke="white" stroke-width="1.6" stroke-linejoin="round"/></svg></div>
-            <div><div class="label">Record Meeting</div><div class="sub">Mic + system audio</div></div>
-          </div>
-          <div class="action-btn card" id="action-talk-now" title="Also works system-wide via ⌘⇧L">
-            <div class="icon-wrap"><svg viewBox="0 0 20 20" fill="none"><rect x="7" y="2.5" width="6" height="10" rx="3" stroke="white" stroke-width="1.6"/><path d="M4.5 9.5a5.5 5.5 0 0011 0M10 15v2.5" stroke="white" stroke-width="1.6" stroke-linecap="round"/></svg></div>
-            <div><div class="label">Talk to Mira</div><div class="sub">⌘⇧L, from anywhere</div></div>
-          </div>
+          <!-- progress strip -->
+          <section class="dcard strip">
+            <div class="strip-item">
+              <div class="strip-icon"><svg viewBox="0 0 20 20" fill="none"><path d="M3.5 10.5l4 4 9-9" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
+              <div class="strip-text"><small>Loops closed</small><span id="strip-loops-text">—</span></div>
+              <div class="bar"><div class="bar-fill" id="strip-loops-bar"></div></div>
+            </div>
+            <div class="strip-sep"></div>
+            <div class="strip-item">
+              <div class="strip-icon"><svg viewBox="0 0 20 20" fill="none"><path d="M10 2.5l1.9 4.6 5 .4-3.8 3.3 1.2 4.9L10 13l-4.3 2.7 1.2-4.9L3.1 7.5l5-.4L10 2.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg></div>
+              <div class="strip-text"><small>Pinned memories</small><span id="strip-mem-text">—</span></div>
+              <div class="bar"><div class="bar-fill" id="strip-mem-bar"></div></div>
+            </div>
+          </section>
+
+          <!-- open loops table -->
+          <section class="dcard table-card">
+            <div class="dcard-head"><h2>Open Loops</h2><button class="link-btn" id="home-view-all">View all <svg viewBox="0 0 20 20" fill="none"><path d="M7 4l6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
+            <div class="dtable">
+              <div class="dtr dth"><span>Commitment</span><span>From</span><span>Mentions</span><span>Due</span><span>Status</span></div>
+              <div id="home-loops"></div>
+            </div>
+          </section>
+
+          <!-- score -->
+          <section class="dcard score">
+            <div class="score-left">
+              <h2>Mira Readiness</h2>
+              <p id="score-note">Checking setup…</p>
+              <div class="score-target" id="score-target"></div>
+            </div>
+            <div class="ring">
+              <svg viewBox="0 0 120 120">
+                <circle class="ring-bg" cx="60" cy="60" r="50" pathLength="100"/>
+                <circle class="ring-fg" id="ring-fg" cx="60" cy="60" r="50" pathLength="100"/>
+              </svg>
+              <div class="ring-num" id="ring-num">–</div>
+            </div>
+          </section>
+
+          <!-- quick actions -->
+          <section class="dcard actions">
+            <div class="action-btn" id="action-open-chat">
+              <div class="icon-wrap"><svg viewBox="0 0 20 20" fill="none"><path d="M3 4.5h14v9H8l-3.5 3v-3H3v-9z" stroke="white" stroke-width="1.6" stroke-linejoin="round"/></svg></div>
+              <div><div class="label">Open Chat</div><div class="sub">Full conversation</div></div>
+            </div>
+            <div class="action-btn" id="action-start-meeting">
+              <div class="icon-wrap"><svg viewBox="0 0 20 20" fill="none"><rect x="3" y="5" width="10" height="10" rx="2" stroke="white" stroke-width="1.6"/><path d="M13 8.5l4-2.2v7.4l-4-2.2" stroke="white" stroke-width="1.6" stroke-linejoin="round"/></svg></div>
+              <div><div class="label">Record Meeting</div><div class="sub">Mic + system audio</div></div>
+            </div>
+            <div class="action-btn" id="action-talk-now" title="Also works system-wide via Control+A">
+              <div class="icon-wrap"><svg viewBox="0 0 20 20" fill="none"><rect x="7" y="2.5" width="6" height="10" rx="3" stroke="white" stroke-width="1.6"/><path d="M4.5 9.5a5.5 5.5 0 0011 0M10 15v2.5" stroke="white" stroke-width="1.6" stroke-linecap="round"/></svg></div>
+              <div><div class="label">Talk to Mira</div><div class="sub">Control+A, from anywhere</div></div>
+            </div>
+          </section>
+
         </div>
       </div>
 
@@ -2451,6 +2640,7 @@
     const activeItem = navItems.find(i => i.dataset.view === name);
     if (activeItem) positionIndicator(activeItem, animateNav);
     if (name === 'settings') { loadSettings(); refreshPredictiveStatus(); refreshOcrStatus(); refreshPermissions(); refreshLogo(); }
+    if (name === 'home') loadHome();
     if (name === 'memory') loadMemory();
     if (name === 'tasks') loadTasks();
     if (name === 'chat') { loadSessions(); document.getElementById('text-input').focus(); }
@@ -2496,7 +2686,7 @@
   // ---------- greeting ----------
   (function setGreeting() {
     const h = new Date().getHours();
-    const part = h < 5 ? 'up late' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : h < 21 ? 'Good evening' : 'Good evening';
+    const part = h < 5 ? 'Working late' : h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : h < 21 ? 'Good evening' : 'Good evening';
     document.getElementById('greeting').textContent = `${part}, Prakhar`;
   })();
 
@@ -2530,6 +2720,162 @@
   }
   pollStatus();
   setInterval(pollStatus, 8000);
+
+  // ---------- home dashboard ----------
+  const DAYS = 14;
+  function dayKeys() {
+    const out = [];
+    const d = new Date(); d.setHours(12, 0, 0, 0);
+    for (let i = DAYS - 1; i >= 0; i--) {
+      const x = new Date(d); x.setDate(d.getDate() - i);
+      out.push(`${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, '0')}-${String(x.getDate()).padStart(2, '0')}`);
+    }
+    return out;
+  }
+  function bucketByDay(isoList) {
+    const keys = dayKeys();
+    const counts = Object.fromEntries(keys.map(k => [k, 0]));
+    isoList.forEach(iso => { const k = String(iso || '').slice(0, 10); if (k in counts) counts[k]++; });
+    return keys.map(k => counts[k]);
+  }
+
+  // Smooth line through the points (Catmull-Rom -> cubic Bezier), with a faint
+  // fill underneath, a dashed average line and two marker dots like the reference.
+  function drawSpark(id, values) {
+    const svg = document.getElementById(id);
+    if (!svg) return;
+    const box = svg.getBoundingClientRect();
+    const w = Math.max(120, Math.round(box.width)), h = Math.max(76, Math.round(box.height)), pad = 6;
+    svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+    const max = Math.max(1, ...values), n = values.length;
+    const pts = values.map((v, i) => [i * (w / (n - 1)), h - pad - (v / max) * (h - pad * 2)]);
+    let d = `M${pts[0][0]},${pts[0][1]}`;
+    for (let i = 0; i < n - 1; i++) {
+      const p0 = pts[i - 1] || pts[i], p1 = pts[i], p2 = pts[i + 1], p3 = pts[i + 2] || p2;
+      const c1 = [p1[0] + (p2[0] - p0[0]) / 6, p1[1] + (p2[1] - p0[1]) / 6];
+      const c2 = [p2[0] - (p3[0] - p1[0]) / 6, p2[1] - (p3[1] - p1[1]) / 6];
+      d += ` C${c1[0]},${c1[1]} ${c2[0]},${c2[1]} ${p2[0]},${p2[1]}`;
+    }
+    const avg = values.reduce((a, b) => a + b, 0) / n;
+    const ay = h - pad - (avg / max) * (h - pad * 2);
+    const gid = id + '-g';
+    const hi = [Math.floor(n * 0.45), Math.floor(n * 0.8)];
+    svg.innerHTML = `
+      <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="rgb(var(--tint-rgb))" stop-opacity="0.22"/><stop offset="1" stop-color="rgb(var(--tint-rgb))" stop-opacity="0"/>
+      </linearGradient></defs>
+      <path d="${d} L${w},${h} L0,${h} Z" fill="url(#${gid})"/>
+      <line class="avg" x1="0" x2="${w}" y1="${ay}" y2="${ay}"/>
+      <path class="line" d="${d}"/>
+      ${hi.map(i => `<circle cx="${pts[i][0]}" cy="${pts[i][1]}" r="3.5" fill="#17181c" stroke="rgba(255,255,255,0.8)" stroke-width="1.4"/>`).join('')}`;
+    // stop colours can't read CSS vars with a comma list, so resolve the tint here
+    const tint = getComputedStyle(svg.closest('.spark-card')).getPropertyValue('--tint').trim();
+    svg.querySelectorAll('stop').forEach(st => st.setAttribute('stop-color', `rgb(${tint})`));
+  }
+
+  function setText(id, v) { const el = document.getElementById(id); if (el) el.textContent = v; }
+
+  async function loadHome() {
+    const getJSON = (path) => fetch(`${DAEMON_URL}${path}`).then(r => r.json());
+    const [sess, open, done, mem] = await Promise.all([
+      getJSON('/sessions').catch(() => null),
+      getJSON('/tasks?status=open').catch(() => null),
+      getJSON('/tasks?status=done').catch(() => null),
+      getJSON('/memory').catch(() => null),
+    ]);
+    const today = dayKeys()[DAYS - 1];
+
+    // conversations
+    const chats = ((sess && sess.sessions) || []).filter(x => x.kind !== 'system');
+    const chatDays = bucketByDay(chats.map(x => x.updated_at));
+    const chatTotal = chatDays.reduce((a, b) => a + b, 0);
+    drawSpark('spark-chats', chatDays);
+    setText('sv-chats', chats.length ? String(chats.length) : '0');
+    setText('sv-chats-a', String(chatDays[DAYS - 1]));
+    setText('sv-chats-b', (chatTotal / DAYS).toFixed(1));
+
+    // loops
+    const openT = (open && open.tasks) || [], doneT = (done && done.tasks) || [];
+    const loopDays = bucketByDay(openT.concat(doneT).map(t => t.created_at));
+    drawSpark('spark-loops', loopDays);
+    const overdue = openT.filter(t => { const l = dueLabel(t.due); return l && l.cls === 'overdue'; }).length;
+    setText('sv-loops', String(openT.length));
+    setText('sv-loops-a', String(overdue));
+    setText('sv-loops-b', String(doneT.length));
+    const allLoops = openT.length + doneT.length;
+    setText('strip-loops-text', allLoops ? `${doneT.length} of ${allLoops}` : 'Nothing yet');
+    document.getElementById('strip-loops-bar').style.width = allLoops ? `${Math.round(doneT.length / allLoops * 100)}%` : '0%';
+
+    // memory
+    const facts = (mem && mem.facts) || [];
+    const memDays = bucketByDay(facts.map(f => f.created_at));
+    drawSpark('spark-mem', memDays);
+    const pinned = facts.filter(f => f.pinned).length;
+    setText('sv-mem', String(facts.length));
+    setText('sv-mem-a', String(pinned));
+    setText('sv-mem-b', String(memDays.slice(-7).reduce((a, b) => a + b, 0)));
+    setText('strip-mem-text', facts.length ? `${pinned} of ${facts.length}` : 'Nothing yet');
+    document.getElementById('strip-mem-bar').style.width = facts.length ? `${Math.round(pinned / facts.length * 100)}%` : '0%';
+
+    // table
+    const rows = document.getElementById('home-loops');
+    if (!open) {
+      rows.innerHTML = '<div class="table-empty">Could not reach the Mira daemon.</div>';
+    } else if (!openT.length) {
+      rows.innerHTML = '<div class="table-empty">No open loops. Mention something you owe someone and it lands here.</div>';
+    } else {
+      rows.innerHTML = openT.slice(0, 5).map(t => {
+        const due = dueLabel(t.due);
+        const status = due && due.cls === 'overdue' ? '<span class="pill bad">&#8600; Overdue</span>'
+          : due && due.cls === 'today' ? '<span class="pill warn">&#9679; Due today</span>'
+          : t.mentions > 1 ? '<span class="pill warn">&#8599; Resurfacing</span>'
+          : '<span class="pill calm">Open</span>';
+        return `<div class="dtr row-link">
+          <span class="t-name" title="${esc(t.title)}">${esc(t.title)}</span>
+          <span class="src">${esc(t.surface || 'chat')}</span>
+          <span>${esc(String(t.mentions || 1))}&times;</span>
+          <span>${due ? esc(due.text) : '&mdash;'}</span>
+          <span>${status}</span>
+        </div>`;
+      }).join('');
+    }
+    refreshReadiness(facts.length);
+  }
+
+  // Readiness out of 10: a quick "is Mira fully wired up" read, weighted toward
+  // what makes her useful (a running daemon first, then the integrations).
+  async function refreshReadiness(factCount) {
+    const getJSON = (path) => fetch(`${DAEMON_URL}${path}`).then(r => r.json());
+    const [health, settings, google, tg, vision] = await Promise.all([
+      fetch(`${DAEMON_URL}/health`).then(r => r.ok).catch(() => false),
+      getJSON('/settings').catch(() => ({})),
+      getJSON('/google/status').catch(() => ({})),
+      getJSON('/telegram/status').catch(() => ({})),
+      getJSON('/vision/status').catch(() => ({})),
+    ]);
+    const checks = [
+      { w: 3, ok: health, todo: 'Start the daemon' },
+      { w: 1, ok: settings.wakeword_enabled !== false && health, todo: 'Turn on the wake word' },
+      { w: 1, ok: settings.voice_response_enabled !== false && health, todo: 'Enable voice replies' },
+      { w: 2, ok: !!google.connected, todo: 'Connect Google' },
+      { w: 1, ok: !!(tg.enabled && tg.linked), todo: 'Link Telegram' },
+      { w: 1, ok: (factCount || 0) > 0, todo: 'Teach Mira a few facts' },
+      { w: 1, ok: !!vision.local_ready, todo: 'Install the local vision model' },
+    ];
+    const score = checks.reduce((a, c) => a + (c.ok ? c.w : 0), 0);
+    const missing = checks.filter(c => !c.ok).sort((a, b) => b.w - a.w)[0];
+    setText('ring-num', score.toFixed(1));
+    document.getElementById('ring-fg').style.strokeDasharray = `${score / 10 * 75} 100`;
+    setText('score-note', score >= 9 ? 'Fully wired up and running smoothly.' : score >= 6 ? 'Mostly set up. A couple of things left.' : 'Getting started. Finish setup to unlock more.');
+    setText('score-target', missing ? `Next: ${missing.todo}` : 'Target met: 10.0');
+  }
+
+  document.getElementById('home-view-all').onclick = () => switchView('tasks');
+  document.getElementById('hero-orb').onclick = () => document.getElementById('action-talk-now').click();
+  loadHome();
+  setInterval(() => { if (document.getElementById('home-view').classList.contains('active')) loadHome(); }, 60000);
+  let homeResizeT;
+  window.addEventListener('resize', () => { clearTimeout(homeResizeT); homeResizeT = setTimeout(() => { if (document.getElementById('home-view').classList.contains('active')) loadHome(); }, 250); });
 
   // ---------- quick actions ----------
   document.getElementById('action-open-chat').onclick = () => switchView('chat');
