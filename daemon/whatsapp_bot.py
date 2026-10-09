@@ -70,6 +70,15 @@ def in_their_language(chat_msg, text, fallback):
     return out or fallback
 
 
+def compose_reply(question, note):
+    """The owner's #N text is a note to Mira, not a message to the customer. Turn it into a proper reply."""
+    return ask("You are Mira, answering a customer on WhatsApp for Krishi Verse. The OWNER gave you a short internal NOTE answering the "
+               "customer's QUESTION. Write the reply to the customer: warm, clear, 1-3 short sentences, in the same language and script "
+               "as the question (Hinglish stays in Roman letters). Use ONLY facts from the note and keep prices, numbers, names and the "
+               "\u20b9 symbol exact; do not add promises or details. Output only the message to send.",
+               [{"role": "user", "content": f"QUESTION: {question}\n\nNOTE: {note}"}])
+
+
 def tickets():
     p = STATE / "tickets.json"
     return json.loads(p.read_text()) if p.exists() else {}
@@ -104,11 +113,12 @@ def answer_ticket(tid, answer):
     whatsapp_inbox.mute(tk["chat"], False)  # bot resumes for this chat
     if answer.strip().lower() == "close":
         return f"Closed #{tid}; I'll answer {tk['name'] or 'them'} myself from now on."
-    send(tk["chat"], in_their_language(tk["q"], answer, answer))
+    final = compose_reply(tk["q"], answer) or in_their_language(tk["q"], answer, answer)
+    send(tk["chat"], final)
     with open(STATE / "learned.jsonl", "a") as f:
         f.write(json.dumps({"q": tk["q"], "a": answer, "t": time.strftime("%F")}, ensure_ascii=False) + "\n")
     log("ticket_answered", chat=tk["chat"], id=tid)
-    return f"Sent to {tk['name'] or tk['chat']} and saved to my knowledge. (#{tid})"
+    return f"Sent to {tk['name'] or tk['chat']} and saved to my knowledge. (#{tid})\n\nI wrote:\n{final}"
 
 
 def log(kind, **kw):
