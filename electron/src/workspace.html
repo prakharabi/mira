@@ -1064,6 +1064,30 @@
   .n8n-dot.off { background: rgba(240,68,56,0.85); }
   #n8n-actions { display: flex; gap: 6px; flex-shrink: 0; }
 
+
+  /* ---------- whatsapp view ---------- */
+  #whatsapp-view { padding-bottom: 20px; }
+  #wa-wrap { display: flex; flex: 1; min-height: 0; border: 1px solid var(--border-soft); border-radius: 16px; overflow: hidden; background: rgba(0,0,0,0.22); }
+  #wa-list { width: 300px; flex-shrink: 0; overflow-y: auto; border-right: 1px solid var(--border-soft); }
+  .wa-chat { display: flex; gap: 10px; align-items: center; padding: 11px 14px; cursor: pointer; border-bottom: 1px solid var(--border-soft); }
+  .wa-chat:hover { background: var(--bg-elevated); }
+  .wa-chat.active { background: var(--sidebar-selected); }
+  .wa-avatar { width: 38px; height: 38px; border-radius: 50%; background: #25d366; color: #06210f; display: grid; place-items: center; font-weight: 650; flex-shrink: 0; }
+  .wa-chat .nm { font-size: 13px; font-weight: 550; display: flex; justify-content: space-between; gap: 6px; }
+  .wa-chat .sub { font-size: 11.5px; color: var(--text-tertiary); }
+  .wa-badge { background: #25d366; color: #06210f; border-radius: 10px; font-size: 10.5px; font-weight: 650; padding: 1px 6px; }
+  #wa-thread { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  #wa-head { padding: 11px 16px; border-bottom: 1px solid var(--border-soft); display: flex; justify-content: space-between; align-items: center; gap: 10px; font-size: 13.5px; font-weight: 600; }
+  #wa-msgs { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 6px; }
+  .wa-b { max-width: 68%; padding: 7px 11px; border-radius: 10px; font-size: 13.5px; line-height: 1.45; white-space: pre-wrap; word-break: break-word; background: #202c33; align-self: flex-start; }
+  .wa-b.me { background: #005c4b; align-self: flex-end; }
+  .wa-b .tm { display: block; text-align: right; font-size: 10px; color: var(--text-tertiary); margin-top: 2px; }
+  #wa-compose { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--border-soft); }
+  #wa-input { flex: 1; background: var(--field-bg); border: 1px solid var(--border-soft); border-radius: 20px; padding: 9px 14px; color: var(--text-primary); font: inherit; font-size: 13.5px; outline: none; }
+  #wa-compose button, #wa-head button { background: #25d366; color: #06210f; border: 0; border-radius: 18px; padding: 0 16px; font-weight: 600; cursor: pointer; }
+  #wa-head button.ghost { background: var(--bg-elevated-2); color: var(--text-primary); height: 28px; font-size: 11.5px; }
+  #wa-empty { margin: auto; color: var(--text-tertiary); font-size: 13px; }
+
   /* ---------- outreach view ---------- */
   #outreach-panel {
     display: flex; align-items: center; gap: 12px;
@@ -1314,6 +1338,10 @@
         <div class="nav-item" data-view="outreach" data-label="Outreach">
           <svg viewBox="0 0 20 20" fill="none"><path d="M17 3L3 9.2l5.6 2.2L10.8 17 17 3z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M8.6 11.4L17 3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           <span>Outreach</span>
+        </div>
+        <div class="nav-item" data-view="whatsapp" data-label="WhatsApp">
+          <svg viewBox="0 0 20 20" fill="none"><path d="M10 2.5a7.5 7.5 0 00-6.4 11.4L2.5 17.5l3.7-1A7.5 7.5 0 1010 2.5z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>
+          <span>WhatsApp</span>
         </div>
         <div class="nav-item" data-view="tasks" data-label="Tasks">
           <svg viewBox="0 0 20 20" fill="none"><path d="M3.5 6l2 2 3.5-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M3.5 14l2 2 3.5-3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M11.5 6.5h5M11.5 14.5h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
@@ -2358,6 +2386,24 @@
         <div id="auto-list"></div>
       </div>
 
+      <!-- ---------- WHATSAPP ---------- -->
+      <div class="view" id="whatsapp-view">
+        <div class="view-header">
+          <h1 class="view-title">WhatsApp</h1>
+          <p class="view-subtitle" id="wa-sub">Chats on your linked number. Mira auto-replies to new senders; reply yourself any time.</p>
+        </div>
+        <div id="wa-wrap">
+          <div id="wa-list"></div>
+          <div id="wa-thread">
+            <div id="wa-head"><span id="wa-title">Select a chat</span><span style="display:flex;gap:8px;align-items:center">
+              <button class="ghost" id="wa-mute" hidden></button>
+              <button class="ghost" id="wa-auto"></button></span></div>
+            <div id="wa-msgs"><div id="wa-empty">Pick a conversation on the left.</div></div>
+            <form id="wa-compose"><input id="wa-input" placeholder="Type a message" autocomplete="off"><button>Send</button></form>
+          </div>
+        </div>
+      </div>
+
       <!-- ---------- OUTREACH ---------- -->
       <div class="view" id="outreach-view">
         <div class="view-header">
@@ -2669,6 +2715,7 @@
     if (name === 'google') refreshGoogleStatus();
     if (name === 'automations') { loadAutomations(); refreshN8n(); }
     if (name === 'outreach') loadOutreach();
+    if (name === 'whatsapp') waOpen();
   }
 
   navItems.forEach(item => item.addEventListener('click', () => switchView(item.dataset.view)));
@@ -5190,6 +5237,74 @@
     if (days === 1) return { text: 'tomorrow', cls: '' };
     return { text: d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }), cls: '' };
   }
+
+  // ==================== WhatsApp ====================
+  // Thin client over daemon/whatsapp_inbox.py (chats live in the open-wa gateway).
+  let waChat = null, waChats = [], waTimer = null;
+  const waGet = (p) => fetch(`${DAEMON_URL}/whatsapp${p}`).then(r => r.json());
+  const waPost = (p, body) => fetch(`${DAEMON_URL}/whatsapp${p}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(r => r.json());
+
+  async function waOpen() {
+    clearInterval(waTimer);
+    await waRefresh();
+    waTimer = setInterval(() => {
+      if (!document.getElementById('whatsapp-view').classList.contains('active')) return clearInterval(waTimer);
+      waRefresh();
+    }, 5000);
+  }
+
+  async function waRefresh() {
+    try {
+      const [st, chats] = await Promise.all([waGet('/status'), waGet('/chats')]);
+      waChats = chats;
+      document.getElementById('wa-auto').textContent = st.auto_reply ? 'Auto-reply: ON' : 'Auto-reply: OFF';
+      document.getElementById('wa-auto').dataset.on = st.auto_reply ? '1' : '';
+      document.getElementById('wa-sub').textContent = st.connected ? 'Chats on your linked number. Mira auto-replies to new senders; reply yourself any time.' : 'Gateway not connected (is pm2 running wa?).';
+      document.getElementById('wa-list').innerHTML = chats.map(c => `
+        <div class="wa-chat ${c.id === waChat ? 'active' : ''}" data-id="${esc(c.id)}">
+          <div class="wa-avatar">${esc((c.name.replace(/[^\p{L}\p{N}]/gu, '')[0] || '#').toUpperCase())}</div>
+          <div style="flex:1;min-width:0"><div class="nm"><span>${esc(c.name)}</span>${c.unread ? `<span class="wa-badge">${c.unread}</span>` : ''}</div>
+          <div class="sub">${c.muted ? 'Handed to you' : 'Mira auto-replies'}</div></div></div>`).join('') || '<div class="sub" style="padding:16px">No chats yet.</div>';
+      if (waChat) waThread(false);
+    } catch (e) { document.getElementById('wa-sub').textContent = 'Could not reach the Mira daemon.'; }
+  }
+
+  async function waThread(scroll) {
+    const box = document.getElementById('wa-msgs');
+    const c = waChats.find(x => x.id === waChat);
+    document.getElementById('wa-title').textContent = c ? c.name : '';
+    const mute = document.getElementById('wa-mute');
+    mute.hidden = !c; if (c) mute.textContent = c.muted ? 'Let Mira reply' : 'Take over';
+    const ms = await waGet('/messages?chat=' + encodeURIComponent(waChat));
+    const atEnd = scroll || box.scrollHeight - box.scrollTop - box.clientHeight < 60;
+    box.innerHTML = ms.map(m => `<div class="wa-b ${m.from_me ? 'me' : ''}">${esc(m.body)}<span class="tm">${m.t ? new Date(m.t * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''}</span></div>`).join('')
+      || '<div id="wa-empty">No readable messages.</div>';
+    if (atEnd) box.scrollTop = box.scrollHeight;
+  }
+
+  document.getElementById('wa-list').addEventListener('click', e => {
+    const el = e.target.closest('.wa-chat'); if (!el) return;
+    waChat = el.dataset.id;
+    document.querySelectorAll('.wa-chat').forEach(x => x.classList.toggle('active', x === el));
+    waThread(true);
+  });
+  document.getElementById('wa-compose').addEventListener('submit', async e => {
+    e.preventDefault();
+    const inp = document.getElementById('wa-input'), text = inp.value.trim();
+    if (!text || !waChat) return;
+    inp.value = '';
+    const r = await waPost('/send', { chat: waChat, text });
+    if (!r.ok) alert('Send failed: ' + (r.error || 'unknown'));
+    waThread(true);
+  });
+  document.getElementById('wa-auto').addEventListener('click', async () => {
+    await waPost('/auto-reply', { enabled: !document.getElementById('wa-auto').dataset.on });
+    waRefresh();
+  });
+  document.getElementById('wa-mute').addEventListener('click', async () => {
+    const c = waChats.find(x => x.id === waChat);
+    if (c) { await waPost('/mute', { chat: waChat, muted: !c.muted }); waRefresh(); }
+  });
 
   // ==================== Outreach ====================
   // Campaigns over a lead list, run by daemon/outreach.py. This view is a thin

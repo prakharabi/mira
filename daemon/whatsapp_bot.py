@@ -132,6 +132,7 @@ def handle(chat, mid, body):
     log("in", chat=chat, id=mid, text=body)
     if paused():
         return log("skipped_paused", chat=chat)
+    handed = load_set("handed.txt")  # re-read: the workspace tab can mute/unmute live
     if chat in handed:
         return log("skipped_handed_off", chat=chat)
     if not allowed_now(chat):
@@ -146,7 +147,7 @@ def handle(chat, mid, body):
         except Exception as e:
             log("model_error", chat=chat, text=str(e))
     if not reply or reply.strip(".! ").upper() == "HANDOFF":
-        mark("handed.txt", handed, chat)
+        mark("handed.txt", set(), chat)
         log("handoff", chat=chat, text=body)
         reply = HOLD_MSG
     else:
