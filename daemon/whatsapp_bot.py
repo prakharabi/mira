@@ -208,6 +208,8 @@ def handle(chat, mid, body):
         body = decrypted_body(chat, mid)
         if not body:
             return log("undecryptable", chat=chat, id=mid)
+    if chat in whatsapp_inbox.owner_ids():
+        return owner_command(chat, body)
     log("in", chat=chat, id=mid, text=body)
     if paused():
         return log("skipped_paused", chat=chat)
