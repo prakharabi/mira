@@ -254,9 +254,10 @@ def owner_command(chat, body):
     log("owner_out", chat=chat)
 
 
-DEBOUNCE = 6  # seconds of quiet before answering, so messages sent together are answered together
+DEBOUNCE = 4  # seconds of quiet before answering, so messages sent together are answered together
 pending = defaultdict(list)  # chat -> [(mid, body)]
 timers = {}
+limit_notice = {}  # chat -> when we last told them the limit was reached
 work = threading.Lock()  # one conversation is processed at a time
 
 
@@ -303,7 +304,12 @@ def process(chat, mids, body):
                 whatsapp_inbox.send_to_owner(f"Follow-up on #{tid} from {tk['name'] or chat.split('@')[0]}: \"{body}\"")
         return log("skipped_handed_off", chat=chat)
     if not allowed_now(chat):
-        return log("skipped_rate_limit", chat=chat)
+        log("skipped_rate_limit", chat=chat)
+        if time.time() - limit_notice.get(chat, 0) > 3600:  # tell them once an hour instead of going silent
+            limit_notice[chat] = time.time()
+            msg = "We've reached the message limit for this chat right now. Please send your message again in about an hour and ParthAI will reply."
+            send(chat, in_their_language(body, msg, msg))
+        return
 
     hist = chat_history(chat, mids, body)
     first = not any(m["role"] == "assistant" for m in hist)
