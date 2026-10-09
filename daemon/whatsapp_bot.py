@@ -30,7 +30,7 @@ HOLD_MSG = "Thanks for your message! I'm passing this to the team and someone wi
 
 SYSTEM = (
     "You are Mira, the AI assistant answering WhatsApp messages for Krishi Verse. Be warm, brief "
-    "(1-3 short sentences), and reply in the user's language (Hindi/Hinglish/English). Say you are an AI "
+    "(1-3 short sentences), and reply in the SAME language and script the customer wrote in (English, Hindi in Devanagari, Hinglish in Roman letters, or any other); the knowledge below may be in English only, so understand the question in any language, find the answer in the English data, and translate it, keeping prices, numbers, product names and the \u20b9 symbol exactly. Say you are an AI "
     "assistant if asked. Never invent prices, availability, promises, or facts you were not given; never "
     "share personal data or anything about the owner. If you are unsure, the user asks for a human, is "
     "upset, or the question needs a decision (pricing, orders, refunds, partnerships, legal, medical), "
@@ -52,6 +52,22 @@ def knowledge():
     if not parts:
         return SYSTEM
     return SYSTEM + "\n\nKnowledge you may use. Answer ONLY from this; if it does not cover the question, reply HANDOFF:\n\n" + "\n\n".join(parts)
+
+
+def ask(system, history):
+    try:
+        return requests.post(f"{MIRA}/public-chat", json={"system": system, "history": history}, timeout=90).json().get("response", "").strip()
+    except Exception as e:
+        log("model_error", text=str(e))
+        return ""
+
+
+def in_their_language(chat_msg, text, fallback):
+    """Rewrite `text` in the language/script of `chat_msg`. Falls back to the original on any failure."""
+    out = ask("Rewrite the TEXT in the same language and script as the CUSTOMER MESSAGE (Hinglish stays in Roman letters). "
+              "Keep all numbers, prices, names and the \u20b9 symbol exactly; add nothing. Output only the rewritten text.",
+              [{"role": "user", "content": f"CUSTOMER MESSAGE: {chat_msg}\n\nTEXT: {text}"}])
+    return out or fallback
 
 
 def tickets():
@@ -88,7 +104,7 @@ def answer_ticket(tid, answer):
     whatsapp_inbox.mute(tk["chat"], False)  # bot resumes for this chat
     if answer.strip().lower() == "close":
         return f"Closed #{tid}; I'll answer {tk['name'] or 'them'} myself from now on."
-    send(tk["chat"], answer)
+    send(tk["chat"], in_their_language(tk["q"], answer, answer))
     with open(STATE / "learned.jsonl", "a") as f:
         f.write(json.dumps({"q": tk["q"], "a": answer, "t": time.strftime("%F")}, ensure_ascii=False) + "\n")
     log("ticket_answered", chat=tk["chat"], id=tid)
@@ -234,7 +250,7 @@ def handle(chat, mid, body):
         mark("handed.txt", set(), chat)
         log("handoff", chat=chat, text=body)
         open_ticket(chat, body)
-        reply = HOLD_MSG
+        reply = in_their_language(body, HOLD_MSG, HOLD_MSG)
     else:
         history[chat].append({"role": "assistant", "content": reply})
     time.sleep(min(6, 1.5 + len(reply) / 40) + random.random())  # typing delay
@@ -249,6 +265,7 @@ def main():
     while True:
         try:
             with requests.get(f"{GATEWAY}/api/events?topics=*", headers=H, stream=True, timeout=(10, None)) as r:
+                r.encoding = "utf-8"  # SSE has no charset header; requests would guess Latin-1 and mangle ₹ / Hindi
                 for line in r.iter_lines(decode_unicode=True):
                     if line and line.startswith("data:"):
                         try:
