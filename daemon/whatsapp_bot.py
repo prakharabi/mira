@@ -38,6 +38,63 @@ SYSTEM = (
 )
 
 
+def knowledge():
+    """Owner-provided notes (kb.md, your shared database) + answers the owner gave to past handoffs (learned.jsonl)."""
+    parts = []
+    kb = STATE / "kb.md"
+    if kb.exists():
+        parts.append(kb.read_text()[:8000])
+    ln = STATE / "learned.jsonl"
+    if ln.exists():
+        for l in ln.read_text().splitlines()[-80:]:
+            e = json.loads(l)
+            parts.append(f"Q: {e['q']}\nA: {e['a']}")
+    if not parts:
+        return SYSTEM
+    return SYSTEM + "\n\nKnowledge you may use. Answer ONLY from this; if it does not cover the question, reply HANDOFF:\n\n" + "\n\n".join(parts)
+
+
+def tickets():
+    p = STATE / "tickets.json"
+    return json.loads(p.read_text()) if p.exists() else {}
+
+
+def save_tickets(t):
+    (STATE / "tickets.json").write_text(json.dumps(t, ensure_ascii=False, indent=1))
+
+
+names = {}  # chat -> WhatsApp display name, filled from inbound events
+
+
+def open_ticket(chat, question):
+    t = tickets()
+    tid = str(max([int(k) for k in t] + [0]) + 1)
+    t[tid] = {"chat": chat, "name": names.get(chat, ""), "q": question, "open": True}
+    save_tickets(t)
+    who = f"{names.get(chat) or 'Someone'} (+{chat.split('@')[0]})"
+    whatsapp_inbox.send_to_owner(
+        f"Handoff #{tid} from {who}:\n\n\"{question}\"\n\nReply with \"#{tid} your answer\" and I'll send it to them and learn it. "
+        f"\"#{tid} close\" lets me resume without replying.")
+    log("ticket_opened", chat=chat, id=tid, text=question)
+
+
+def answer_ticket(tid, answer):
+    t = tickets()
+    tk = t.get(tid)
+    if not tk or not tk["open"]:
+        return f"No open handoff #{tid}."
+    tk["open"] = False
+    save_tickets(t)
+    whatsapp_inbox.mute(tk["chat"], False)  # bot resumes for this chat
+    if answer.strip().lower() == "close":
+        return f"Closed #{tid}; I'll answer {tk['name'] or 'them'} myself from now on."
+    send(tk["chat"], answer)
+    with open(STATE / "learned.jsonl", "a") as f:
+        f.write(json.dumps({"q": tk["q"], "a": answer, "t": time.strftime("%F")}, ensure_ascii=False) + "\n")
+    log("ticket_answered", chat=tk["chat"], id=tid)
+    return f"Sent to {tk['name'] or tk['chat']} and saved to my knowledge. (#{tid})"
+
+
 def log(kind, **kw):
     STATE.mkdir(exist_ok=True)
     with open(STATE / "log.jsonl", "a") as f:
@@ -101,6 +158,8 @@ def inbound(ev):
         return None
     m = (ev.get("payload") or {}).get("message") or {}
     mid, chat, body = m.get("id", ""), m.get("from", ""), (m.get("body") or "").strip()
+    if m.get("notifyName"):
+        names[chat] = m["notifyName"]
     # ciphertext = not yet decrypted at event time (body empty); handle() fetches the text later
     if (not mid.startswith("false_") or m.get("fromMe") or m.get("type") not in ("chat", "ciphertext")
             or (m["type"] == "chat" and not body)
@@ -126,6 +185,10 @@ def decrypted_body(chat, mid):
 def owner_command(chat, body):
     """The owner's own number: full Mira (tools, memory) via /chat. Not subject to the public kill switch."""
     log("owner_in", chat=chat, text=body)
+    m = re.match(r"#(\d+)\s+(.+)", body, re.S)
+    if m:  # answer to a handoff ticket
+        send(chat, answer_ticket(m.group(1), m.group(2).strip()))
+        return log("owner_out", chat=chat)
     try:
         r = requests.post(f"{MIRA}/chat", json={"session_id": "whatsapp-owner", "message": body}, timeout=300).json()
         reply = r.get("response") or f"Sorry, something went wrong: {r.get('error', 'no reply')}"
@@ -150,6 +213,9 @@ def handle(chat, mid, body):
         return log("skipped_paused", chat=chat)
     handed = load_set("handed.txt")  # re-read: the workspace tab can mute/unmute live
     if chat in handed:
+        for tid, tk in tickets().items():  # pass follow-ups from a waiting person on to the owner
+            if tk["open"] and tk["chat"] == chat:
+                whatsapp_inbox.send_to_owner(f"Follow-up on #{tid} from {tk['name'] or chat.split('@')[0]}: \"{body}\"")
         return log("skipped_handed_off", chat=chat)
     if not allowed_now(chat):
         return log("skipped_rate_limit", chat=chat)
@@ -158,13 +224,14 @@ def handle(chat, mid, body):
     reply = None
     if not re.search(r"\b(human|agent|insaan|manager)\b", body, re.I):
         try:
-            reply = requests.post(f"{MIRA}/public-chat", json={"system": SYSTEM, "history": history[chat]},
+            reply = requests.post(f"{MIRA}/public-chat", json={"system": knowledge(), "history": history[chat]},
                                   timeout=90).json().get("response", "").strip()
         except Exception as e:
             log("model_error", chat=chat, text=str(e))
     if not reply or reply.strip(".! ").upper() == "HANDOFF":
         mark("handed.txt", set(), chat)
         log("handoff", chat=chat, text=body)
+        open_ticket(chat, body)
         reply = HOLD_MSG
     else:
         history[chat].append({"role": "assistant", "content": reply})
