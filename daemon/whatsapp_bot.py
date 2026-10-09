@@ -274,6 +274,34 @@ def handle(chat, mid, body):
     timers[chat].start()
 
 
+def queue_add(chat, mids, body):
+    q = load_queue()
+    q.setdefault(chat, []).append({"mids": mids, "body": body})
+    (STATE / "queue.json").write_text(json.dumps(q, ensure_ascii=False))
+    log("queued_rate_limit", chat=chat, text=body)
+
+
+def load_queue():
+    p = STATE / "queue.json"
+    return json.loads(p.read_text()) if p.exists() else {}
+
+
+def queue_worker():
+    """Answer messages that arrived while a chat was over its hourly cap, once the cap frees up."""
+    while True:
+        time.sleep(30)
+        try:
+            with work:
+                q = load_queue()
+                for chat in list(q):
+                    if allowed_now(chat) and not paused():
+                        items = q.pop(chat)
+                        (STATE / "queue.json").write_text(json.dumps(q, ensure_ascii=False))
+                        process(chat, [m for it in items for m in it["mids"]], "\n".join(it["body"] for it in items))
+        except Exception as e:
+            log("error", text="queue: " + repr(e))
+
+
 def flush(chat):
     with work:
         items, pending[chat] = pending[chat], []
@@ -304,10 +332,10 @@ def process(chat, mids, body):
                 whatsapp_inbox.send_to_owner(f"Follow-up on #{tid} from {tk['name'] or chat.split('@')[0]}: \"{body}\"")
         return log("skipped_handed_off", chat=chat)
     if not allowed_now(chat):
-        log("skipped_rate_limit", chat=chat)
+        queue_add(chat, mids, body)
         if time.time() - limit_notice.get(chat, 0) > 3600:  # tell them once an hour instead of going silent
             limit_notice[chat] = time.time()
-            msg = "We've reached the message limit for this chat right now. Please send your message again in about an hour and ParthAI will reply."
+            msg = "We've reached the message limit for this chat right now. I've saved your message and ParthAI will reply automatically in about an hour."
             send(chat, in_their_language(body, msg, msg))
         return
 
@@ -337,6 +365,7 @@ def process(chat, mids, body):
 def main():
     STATE.mkdir(exist_ok=True)
     log("start", text="paused" if paused() else "active")
+    threading.Thread(target=queue_worker, daemon=True).start()
     while True:
         try:
             with requests.get(f"{GATEWAY}/api/events?topics=*", headers=H, stream=True, timeout=(10, None)) as r:
