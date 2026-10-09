@@ -14,6 +14,7 @@ import os
 import random
 import threading
 import re
+import subprocess
 import time
 from collections import defaultdict, deque
 from pathlib import Path
@@ -302,6 +303,42 @@ def queue_worker():
             log("error", text="queue: " + repr(e))
 
 
+PM2_DIR = GATEWAY_ENV.parent
+
+
+def gateway_ok():
+    """getMe exercises the real browser page; /health stays 'ready' even when the page has crashed."""
+    try:
+        return bool(requests.get(f"{GATEWAY}/api/session/getMe", headers=H, timeout=20).json().get("success"))
+    except Exception:
+        return False
+
+
+def restart_gateway():
+    env = {**os.environ, "PATH": f"{Path(subprocess.check_output(['/bin/zsh', '-lc', 'command -v node'], text=True).strip()).parent}:{os.environ.get('PATH', '')}"}
+    subprocess.run([str(PM2_DIR / "node_modules/.bin/pm2"), "restart", "wa", "wa-hook"], cwd=PM2_DIR, env=env, capture_output=True, timeout=60)
+
+
+def watchdog():
+    """Restart the gateway after 3 failed checks in a row, then tell the owner on WhatsApp. At most one restart per 10 minutes."""
+    fails, last_restart = 0, 0
+    while True:
+        time.sleep(60)
+        fails = 0 if gateway_ok() else fails + 1
+        if fails >= 3 and time.time() - last_restart > 600:
+            log("watchdog_restart", text="gateway unresponsive; restarting wa")
+            try:
+                restart_gateway()
+            except Exception as e:
+                log("watchdog_error", text=repr(e))
+            last_restart, fails = time.time(), 0
+            time.sleep(120)  # let it log back in
+            ok = gateway_ok()
+            log("watchdog_result", text="recovered" if ok else "still down - may need a QR re-link")
+            if ok:
+                whatsapp_inbox.send_to_owner("Heads-up: the WhatsApp gateway had stopped responding; I restarted it and it is back. Messages sent while it was down may not have been answered.")
+
+
 def flush(chat):
     with work:
         items, pending[chat] = pending[chat], []
@@ -366,6 +403,7 @@ def main():
     STATE.mkdir(exist_ok=True)
     log("start", text="paused" if paused() else "active")
     threading.Thread(target=queue_worker, daemon=True).start()
+    threading.Thread(target=watchdog, daemon=True).start()
     while True:
         try:
             with requests.get(f"{GATEWAY}/api/events?topics=*", headers=H, stream=True, timeout=(10, None)) as r:
