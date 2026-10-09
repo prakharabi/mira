@@ -54,3 +54,4 @@ electron/electron.log
 
 # local marketing renders
 brag-output/
+daemon/whatsapp_state/

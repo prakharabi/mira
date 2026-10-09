@@ -267,3 +267,11 @@ anything needing Apple Events must be queued through `daemon/actions.py`.
 ## License
 
 [MIT](LICENSE).
+
+## WhatsApp auto-reply
+
+`daemon/whatsapp_bot.py` answers people who message first on a linked WhatsApp number, through the local open-wa gateway (`~/Developer/whatsapp-openwa`, run by pm2 as `wa-mira` alongside `wa`/`wa-hook`). It reads the gateway key from that folder's `.env` at runtime. Replies come from the tool-less `/public-chat` daemon endpoint, so senders never reach your tools, memory or chats.
+
+Guards: 1:1 text only (no groups, status or own messages), dedupe by message id, 12 replies/hour/chat and 60/hour overall, typing delay, full log in `daemon/whatsapp_state/log.jsonl`. Anything Mira is unsure about, or a request for a human, sends a holding message and mutes that chat (`handed.txt`; delete the line to unmute).
+
+Kill switch: `touch daemon/whatsapp_state/PAUSE` (remove to resume); no restart needed.
