@@ -12,6 +12,7 @@ Kill switch: `touch daemon/whatsapp_state/PAUSE` (or WA_AUTOREPLY=off) -- no res
 import json
 import os
 import random
+import threading
 import re
 import time
 from collections import defaultdict, deque
@@ -164,14 +165,14 @@ def load_set(name):
 
 
 seen, handed = load_set("seen.txt"), load_set("handed.txt")  # handed: chats muted until removed from file
-def chat_history(chat, mid, body, n=30):
+def chat_history(chat, mids, body, n=30):
     """The whole conversation, read from the gateway (survives restarts; includes replies Mira and the owner sent)."""
     out = []
     try:
         ms = requests.get(f"{GATEWAY}/api/messages/getAll", headers=H, params={"chatId": chat}, timeout=20).json().get("data") or []
         for m in sorted(ms, key=lambda m: m.get("t") or 0):
             t = (m.get("body") or "").strip()
-            if m.get("type") == "chat" and t and m.get("id") != mid:
+            if m.get("type") == "chat" and t and m.get("id") not in mids:
                 out.append({"role": "assistant" if m["id"].startswith("true_") else "user", "content": t})
     except Exception as e:
         log("history_error", chat=chat, text=repr(e))
@@ -191,11 +192,12 @@ def allowed_now(chat):
     for q in (sent_chat[chat], sent_all):
         while q and now - q[0] > 3600:
             q.popleft()
-    return (len(sent_chat[chat]) < PER_CHAT_HOUR and len(sent_all) < GLOBAL_HOUR
-            and not (sent_all and now - sent_all[-1] < MIN_GAP))
+    return len(sent_chat[chat]) < PER_CHAT_HOUR and len(sent_all) < GLOBAL_HOUR
 
 
 def send(chat, text):
+    if sent_all:  # keep a gap between sends by waiting, never by dropping the message
+        time.sleep(max(0, MIN_GAP - (time.time() - sent_all[-1])))
     r = requests.post(f"{GATEWAY}/api/messages/sendText", headers=H, json={"to": chat, "content": text}, timeout=30)
     ok = r.ok and r.json().get("success")
     now = time.time()
@@ -252,17 +254,46 @@ def owner_command(chat, body):
     log("owner_out", chat=chat)
 
 
+DEBOUNCE = 6  # seconds of quiet before answering, so messages sent together are answered together
+pending = defaultdict(list)  # chat -> [(mid, body)]
+timers = {}
+work = threading.Lock()  # one conversation is processed at a time
+
+
 def handle(chat, mid, body):
+    """Queue an inbound message; answer once the sender has paused (owner commands go right away)."""
     if mid in seen:
         return
     mark("seen.txt", seen, mid)
-    if not body:
-        body = decrypted_body(chat, mid)
-        if not body:
-            return log("undecryptable", chat=chat, id=mid)
+    pending[chat].append((mid, body))
+    if timers.get(chat):
+        timers[chat].cancel()
+    wait = 0 if chat in whatsapp_inbox.owner_ids() else DEBOUNCE
+    timers[chat] = threading.Timer(wait, flush, [chat])
+    timers[chat].start()
+
+
+def flush(chat):
+    with work:
+        items, pending[chat] = pending[chat], []
+        try:
+            bodies = []
+            for mid, body in items:
+                body = body or decrypted_body(chat, mid)
+                if body:
+                    bodies.append(body)
+                else:
+                    log("undecryptable", chat=chat, id=mid)
+            if bodies:
+                process(chat, [m for m, _ in items], "\n".join(bodies))
+        except Exception as e:
+            log("error", chat=chat, text=repr(e))
+
+
+def process(chat, mids, body):
     if chat in whatsapp_inbox.owner_ids():
         return owner_command(chat, body)
-    log("in", chat=chat, id=mid, text=body)
+    log("in", chat=chat, id=mids[-1], text=body)
     if paused():
         return log("skipped_paused", chat=chat)
     handed = load_set("handed.txt")  # re-read: the workspace tab can mute/unmute live
@@ -274,7 +305,7 @@ def handle(chat, mid, body):
     if not allowed_now(chat):
         return log("skipped_rate_limit", chat=chat)
 
-    hist = chat_history(chat, mid, body)
+    hist = chat_history(chat, mids, body)
     first = not any(m["role"] == "assistant" for m in hist)
     reply = None
     if not re.search(r"\b(human|agent|insaan|manager)\b", body, re.I):
