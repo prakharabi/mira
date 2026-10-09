@@ -641,6 +641,7 @@ function refreshTrayMenu() {
         else toggleChatWindow();
       } },
     go('Chat', 'chat'),
+    go('WhatsApp', 'whatsapp'),
     go('Tasks', 'tasks'),
     go('Meetings', 'meetings'),
     go('Dump Box', 'dumpbox'),
