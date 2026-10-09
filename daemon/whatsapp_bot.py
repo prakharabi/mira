@@ -99,16 +99,36 @@ def inbound(ev):
         return None
     m = (ev.get("payload") or {}).get("message") or {}
     mid, chat, body = m.get("id", ""), m.get("from", ""), (m.get("body") or "").strip()
-    if (not mid.startswith("false_") or m.get("fromMe") or m.get("type") != "chat" or not body
+    # ciphertext = not yet decrypted at event time (body empty); handle() fetches the text later
+    if (not mid.startswith("false_") or m.get("fromMe") or m.get("type") not in ("chat", "ciphertext")
+            or (m["type"] == "chat" and not body)
             or not chat.endswith(("@c.us", "@lid")) or m.get("isGroupMsg") or "broadcast" in chat):
         return None
     return chat, mid, body
+
+
+def decrypted_body(chat, mid):
+    """No event fires when WhatsApp finishes decrypting, so poll the chat for the text."""
+    for _ in range(10):
+        time.sleep(3)
+        try:
+            ms = requests.get(f"{GATEWAY}/api/messages/getAll", headers=H, params={"chatId": chat}, timeout=20).json().get("data") or []
+            for m in ms:
+                if m.get("id") == mid and m.get("type") == "chat" and (m.get("body") or "").strip():
+                    return m["body"].strip()
+        except Exception:
+            pass
+    return ""
 
 
 def handle(chat, mid, body):
     if mid in seen:
         return
     mark("seen.txt", seen, mid)
+    if not body:
+        body = decrypted_body(chat, mid)
+        if not body:
+            return log("undecryptable", chat=chat, id=mid)
     log("in", chat=chat, id=mid, text=body)
     if paused():
         return log("skipped_paused", chat=chat)
