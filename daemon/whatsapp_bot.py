@@ -26,11 +26,14 @@ GATEWAY_ENV = Path(os.environ.get("WA_GATEWAY_ENV", Path.home() / "Developer/wha
 MIRA = os.environ.get("MIRA_URL", "http://127.0.0.1:11200")
 STATE = Path(__file__).parent / "whatsapp_state"
 PER_CHAT_HOUR, GLOBAL_HOUR, MIN_GAP = 12, 60, 5  # replies/hour/chat, replies/hour, seconds between sends
+INTRO = "Welcome to KrishiVerse! My name is ParthAI, KrishiVerse's AI assistant."
 HOLD_MSG = "Thanks for your message! I'm passing this to the team and someone will get back to you soon."
+FIRST = ("This is your FIRST reply in this chat: begin with a short welcome and introduce yourself exactly in this spirit, in the "
+         f"customer's language: \"{INTRO}\" Then answer their question in the same message (unless you must reply HANDOFF, in which case reply only HANDOFF).")
 
 SYSTEM = (
-    "You are Mira, the AI assistant answering WhatsApp messages for Krishi Verse. Be warm, brief "
-    "(1-3 short sentences), and reply in the SAME language and script the customer wrote in (English, Hindi in Devanagari, Hinglish in Roman letters, or any other); the knowledge below may be in English only, so understand the question in any language, find the answer in the English data, and translate it, keeping prices, numbers, product names and the \u20b9 symbol exactly. Say you are an AI "
+    "You are ParthAI, the AI assistant of KrishiVerse, answering WhatsApp messages. Be warm, brief "
+    "(1-3 short sentences), and reply in the SAME language and script the customer wrote in (English; Hindi in Devanagari; Hinglish, i.e. Hindi written in Roman letters, must be answered in Roman letters and never Devanagari; or any other language); the knowledge below may be in English only, so understand the question in any language, find the answer in the English data, and translate it, keeping prices, numbers, product names and the \u20b9 symbol exactly. Say you are an AI "
     "assistant if asked. The earlier messages of this chat are included: remember what the customer already told you and do not ask again. Never invent prices, availability, promises, or facts you were not given; never "
     "share personal data or anything about the owner. If you are unsure, the user asks for a human, is "
     "upset, or the question needs a decision (pricing, orders, refunds, partnerships, legal, medical), "
@@ -43,7 +46,7 @@ def knowledge():
     parts = []
     kb = STATE / "kb.md"
     if kb.exists():
-        parts.append(kb.read_text()[:8000])
+        parts.append(kb.read_text()[:16000])
     ln = STATE / "learned.jsonl"
     if ln.exists():
         for l in ln.read_text().splitlines()[-80:]:
@@ -51,15 +54,20 @@ def knowledge():
             parts.append(f"Q: {e['q']}\nA: {e['a']}")
     if not parts:
         return SYSTEM
-    return SYSTEM + "\n\nKnowledge you may use. Answer ONLY from this; if it does not cover the question, reply HANDOFF:\n\n" + "\n\n".join(parts)
+    return SYSTEM + "\n\nKnowledge you may use. Answer ONLY from this. If entries conflict, the later Q/A pairs (given by the owner) win. If it does not cover the question, reply HANDOFF:\n\n" + "\n\n".join(parts)
 
 
 def ask(system, history):
-    try:
-        return requests.post(f"{MIRA}/public-chat", json={"system": system, "history": history}, timeout=90).json().get("response", "").strip()
-    except Exception as e:
-        log("model_error", text=str(e))
-        return ""
+    for attempt in range(3):  # Groq's per-minute token cap: wait it out rather than hand off
+        try:
+            r = requests.post(f"{MIRA}/public-chat", json={"system": system, "history": history}, timeout=90).json()
+            if r.get("response"):
+                return r["response"].strip()
+            log("model_error", text=str(r.get("error"))[:120])
+        except Exception as e:
+            log("model_error", text=str(e))
+        time.sleep(20)
+    return ""
 
 
 def in_their_language(chat_msg, text, fallback):
@@ -72,7 +80,7 @@ def in_their_language(chat_msg, text, fallback):
 
 def compose_reply(question, note):
     """The owner's #N text is a note to Mira, not a message to the customer. Turn it into a proper reply."""
-    return ask("You are Mira, answering a customer on WhatsApp for Krishi Verse. The OWNER gave you a short internal NOTE answering the "
+    return ask("You are ParthAI, KrishiVerse's AI assistant, answering a customer on WhatsApp. The OWNER gave you a short internal NOTE answering the "
                "customer's QUESTION. Write the reply to the customer: warm, clear, 1-3 short sentences, in the same language and script "
                "as the question (Hinglish stays in Roman letters), friendly and polite (a short greeting or thanks is fine). Use ONLY facts from the note; keep numbers and names exact and write rupee amounts with the \u20b9 symbol (never rs/Rs/INR); include EVERY fact the note gives (price, where to buy, delivery, etc.) and nothing it does not give. A stray '#' before an amount in the note means \u20b9. Output only the message to send.",
                [{"role": "user", "content": f"QUESTION: {question}\n\nNOTE: {note}"}])
@@ -259,18 +267,15 @@ def handle(chat, mid, body):
         return log("skipped_rate_limit", chat=chat)
 
     hist = chat_history(chat, mid, body)
+    first = not any(m["role"] == "assistant" for m in hist)
     reply = None
     if not re.search(r"\b(human|agent|insaan|manager)\b", body, re.I):
-        try:
-            reply = requests.post(f"{MIRA}/public-chat", json={"system": knowledge(), "history": hist},
-                                  timeout=90).json().get("response", "").strip()
-        except Exception as e:
-            log("model_error", chat=chat, text=str(e))
+        reply = ask(knowledge() + ("\n\n" + FIRST if first else ""), hist)
     if not reply or reply.strip(".! ").upper() == "HANDOFF":
         mark("handed.txt", set(), chat)
         log("handoff", chat=chat, text=body)
         open_ticket(chat, body)
-        reply = in_their_language(body, HOLD_MSG, HOLD_MSG)
+        reply = in_their_language(body, (INTRO + ' ' if first else '') + HOLD_MSG, (INTRO + ' ' if first else '') + HOLD_MSG)
     time.sleep(min(6, 1.5 + len(reply) / 40) + random.random())  # typing delay
     if paused():  # re-check: kill switch may flip during the model call
         return log("skipped_paused", chat=chat)

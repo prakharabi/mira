@@ -904,10 +904,17 @@ def chat(session_id: str = Body(...), message: str = Body(...), model: str = Bod
 # /chat it never touches the owner's tools, memory, tasks or saved history.
 @app.post("/public-chat")
 def public_chat(system: str = Body(...), history: list = Body(...)):
-    reply, err = call_cloud_model([{"role": "system", "content": system}] + history[-30:])
-    if reply is None:
-        return {"error": str(err)[:200]}
-    return {"response": reply}
+    msgs = [{"role": "system", "content": system}] + history[-30:]
+    try:
+        reply, err = call_cloud_model(msgs)
+    except Exception as e:  # network down etc.
+        reply, err = None, str(e)
+    if reply is None:  # Groq unavailable / rate-limited: fall back to the local Ollama model
+        try:
+            return {"response": call_local_model(msgs), "model_used": "local"}
+        except Exception as e:
+            return {"error": f"cloud: {str(err)[:100]}; local: {str(e)[:80]}"}
+    return {"response": reply, "model_used": "cloud"}
 
 
 # ---------- NEW: long-file transcription with local fallback ----------
