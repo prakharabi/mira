@@ -74,8 +74,7 @@ def compose_reply(question, note):
     """The owner's #N text is a note to Mira, not a message to the customer. Turn it into a proper reply."""
     return ask("You are Mira, answering a customer on WhatsApp for Krishi Verse. The OWNER gave you a short internal NOTE answering the "
                "customer's QUESTION. Write the reply to the customer: warm, clear, 1-3 short sentences, in the same language and script "
-               "as the question (Hinglish stays in Roman letters). Use ONLY facts from the note and keep prices, numbers, names and the "
-               "\u20b9 symbol exact; do not add promises or details. Output only the message to send.",
+               "as the question (Hinglish stays in Roman letters), friendly and polite (a short greeting or thanks is fine). Use ONLY facts from the note; keep numbers and names exact and write rupee amounts with the \u20b9 symbol (never rs/Rs/INR); do not add promises or details. Output only the message to send.",
                [{"role": "user", "content": f"QUESTION: {question}\n\nNOTE: {note}"}])
 
 

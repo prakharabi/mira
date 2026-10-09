@@ -84,6 +84,9 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+import whatsapp_inbox
+app.include_router(whatsapp_inbox.router)
+
 # ---------- Settings (voice_response_enabled toggle, model config, etc) ----------
 SETTINGS_PATH = Path.home() / "Mira" / "daemon" / "settings.json"
 
@@ -897,15 +900,28 @@ def chat(session_id: str = Body(...), message: str = Body(...), model: str = Bod
     }
 
 
+# Stateless, tool-less chat for untrusted third parties (WhatsApp users). Unlike
+# /chat it never touches the owner's tools, memory, tasks or saved history.
+@app.post("/public-chat")
+def public_chat(system: str = Body(...), history: list = Body(...)):
+    reply, err = call_cloud_model([{"role": "system", "content": system}] + history[-12:])
+    if reply is None:
+        return {"error": str(err)[:200]}
+    return {"response": reply}
+
+
 # ---------- NEW: long-file transcription with local fallback ----------
 def transcribe_with_groq(filepath: Path, mode: str = "translate"):
     # "translate" -> always English output; "native" -> transcribed in the spoken language
     endpoint = "translations" if mode == "translate" else "transcriptions"
+    # same key the chat/agent use: Settings key first, .env as fallback
+    s = load_settings()
+    api_key = (s.get("cloud_api_key") if s.get("cloud_provider", "groq") == "groq" else None) or GROQ_API_KEY
     try:
         with open(filepath, "rb") as f:
             response = requests.post(
                 f"https://api.groq.com/openai/v1/audio/{endpoint}",
-                headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
+                headers={"Authorization": f"Bearer {api_key}"},
                 files={"file": (filepath.name, f, "application/octet-stream")},
                 data={"model": "whisper-large-v3"},
                 timeout=120
@@ -2399,6 +2415,9 @@ def notify_blog_published(payload: dict = Body(...)):
         blog_log.record(title or topic, summary, url, url_hi, hindi_error)
     except OSError as e:
         print(f"[notify] could not record blog for the morning digest: {e}")
+
+    if whatsapp_inbox.send_to_owner(text):
+        return {"ok": True}
 
     status = _telegram.status()
     if not status.get("linked"):
