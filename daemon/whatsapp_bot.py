@@ -31,7 +31,7 @@ HOLD_MSG = "Thanks for your message! I'm passing this to the team and someone wi
 SYSTEM = (
     "You are Mira, the AI assistant answering WhatsApp messages for Krishi Verse. Be warm, brief "
     "(1-3 short sentences), and reply in the SAME language and script the customer wrote in (English, Hindi in Devanagari, Hinglish in Roman letters, or any other); the knowledge below may be in English only, so understand the question in any language, find the answer in the English data, and translate it, keeping prices, numbers, product names and the \u20b9 symbol exactly. Say you are an AI "
-    "assistant if asked. Never invent prices, availability, promises, or facts you were not given; never "
+    "assistant if asked. The earlier messages of this chat are included: remember what the customer already told you and do not ask again. Never invent prices, availability, promises, or facts you were not given; never "
     "share personal data or anything about the owner. If you are unsure, the user asks for a human, is "
     "upset, or the question needs a decision (pricing, orders, refunds, partnerships, legal, medical), "
     "reply with exactly the single word HANDOFF and nothing else."
@@ -148,7 +148,18 @@ def load_set(name):
 
 
 seen, handed = load_set("seen.txt"), load_set("handed.txt")  # handed: chats muted until removed from file
-history = defaultdict(list)
+def chat_history(chat, mid, body, n=30):
+    """The whole conversation, read from the gateway (survives restarts; includes replies Mira and the owner sent)."""
+    out = []
+    try:
+        ms = requests.get(f"{GATEWAY}/api/messages/getAll", headers=H, params={"chatId": chat}, timeout=20).json().get("data") or []
+        for m in sorted(ms, key=lambda m: m.get("t") or 0):
+            t = (m.get("body") or "").strip()
+            if m.get("type") == "chat" and t and m.get("id") != mid:
+                out.append({"role": "assistant" if m["id"].startswith("true_") else "user", "content": t})
+    except Exception as e:
+        log("history_error", chat=chat, text=repr(e))
+    return out[-n:] + [{"role": "user", "content": body}]
 sent_chat = defaultdict(deque)  # chat -> send timestamps
 sent_all = deque()
 
@@ -247,11 +258,11 @@ def handle(chat, mid, body):
     if not allowed_now(chat):
         return log("skipped_rate_limit", chat=chat)
 
-    history[chat] = (history[chat] + [{"role": "user", "content": body}])[-12:]
+    hist = chat_history(chat, mid, body)
     reply = None
     if not re.search(r"\b(human|agent|insaan|manager)\b", body, re.I):
         try:
-            reply = requests.post(f"{MIRA}/public-chat", json={"system": knowledge(), "history": history[chat]},
+            reply = requests.post(f"{MIRA}/public-chat", json={"system": knowledge(), "history": hist},
                                   timeout=90).json().get("response", "").strip()
         except Exception as e:
             log("model_error", chat=chat, text=str(e))
@@ -260,8 +271,6 @@ def handle(chat, mid, body):
         log("handoff", chat=chat, text=body)
         open_ticket(chat, body)
         reply = in_their_language(body, HOLD_MSG, HOLD_MSG)
-    else:
-        history[chat].append({"role": "assistant", "content": reply})
     time.sleep(min(6, 1.5 + len(reply) / 40) + random.random())  # typing delay
     if paused():  # re-check: kill switch may flip during the model call
         return log("skipped_paused", chat=chat)
