@@ -70,6 +70,14 @@ def ask(system, history):
     return ""
 
 
+def detect_language(text):
+    """One cheap call so the reply language is explicit instead of left to the model's guess."""
+    out = ask("Identify the language and script of the message. Answer with exactly one of: English | Hindi (Devanagari script) | "
+              "Hinglish (Hindi written in Roman letters) | or the language name with its script (e.g. Gujarati in Gujarati script). "
+              "No other words.", [{"role": "user", "content": text}]).strip()
+    return out.splitlines()[0][:60] if out else ""
+
+
 def in_their_language(chat_msg, text, fallback):
     """Rewrite `text` in the language/script of `chat_msg`. Falls back to the original on any failure."""
     out = ask("Rewrite the TEXT in the same language and script as the CUSTOMER MESSAGE (Hinglish stays in Roman letters). "
@@ -270,7 +278,14 @@ def handle(chat, mid, body):
     first = not any(m["role"] == "assistant" for m in hist)
     reply = None
     if not re.search(r"\b(human|agent|insaan|manager)\b", body, re.I):
-        reply = ask(knowledge() + ("\n\n" + FIRST if first else ""), hist)
+        lang = detect_language(body)
+        english = not lang or lang.lower().startswith("english")
+        # Answer from the English data in English (most reliable), then translate explicitly into the customer's language/script.
+        reply = ask(knowledge() + "\n\nWrite your reply in English only; it will be translated afterwards." + ("\n\n" + FIRST if first else ""), hist)
+        if reply and reply.strip(".! ").upper() != "HANDOFF" and not english:
+            reply = ask(f"Translate the text into {lang}. " + ("Hinglish means Hindi written in Roman letters: never use Devanagari. " if "inglish" in lang else "")
+                        + "Keep numbers, prices, names, URLs and the \u20b9 symbol exactly. Output only the translation.",
+                        [{"role": "user", "content": reply}]) or reply
     if not reply or reply.strip(".! ").upper() == "HANDOFF":
         mark("handed.txt", set(), chat)
         log("handoff", chat=chat, text=body)
