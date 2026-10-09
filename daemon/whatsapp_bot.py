@@ -19,6 +19,8 @@ from pathlib import Path
 
 import requests
 
+import whatsapp_inbox
+
 GATEWAY = os.environ.get("WA_GATEWAY", "http://127.0.0.1:8080")
 GATEWAY_ENV = Path(os.environ.get("WA_GATEWAY_ENV", Path.home() / "Developer/whatsapp-openwa/.env"))
 MIRA = os.environ.get("MIRA_URL", "http://127.0.0.1:11200")
@@ -119,6 +121,20 @@ def decrypted_body(chat, mid):
         except Exception:
             pass
     return ""
+
+
+def owner_command(chat, body):
+    """The owner's own number: full Mira (tools, memory) via /chat. Not subject to the public kill switch."""
+    log("owner_in", chat=chat, text=body)
+    try:
+        r = requests.post(f"{MIRA}/chat", json={"session_id": "whatsapp-owner", "message": body}, timeout=300).json()
+        reply = r.get("response") or f"Sorry, something went wrong: {r.get('error', 'no reply')}"
+    except Exception as e:
+        reply = f"Sorry, Mira couldn't be reached: {e}"
+    for i in range(0, len(reply), 3500):
+        send(chat, reply[i:i + 3500])
+        time.sleep(1)
+    log("owner_out", chat=chat)
 
 
 def handle(chat, mid, body):

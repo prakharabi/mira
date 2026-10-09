@@ -88,6 +88,10 @@ def _notify_mac(title: str, body: str):
 
 
 def _send_telegram(text: str) -> bool:
+    # owner channel is WhatsApp for now (see whatsapp_inbox.send_to_owner); Telegram is the fallback
+    import whatsapp_inbox
+    if whatsapp_inbox.send_to_owner(text):
+        return True
     try:
         import telegram_bot
         status = telegram_bot.status()

@@ -79,3 +79,37 @@ def mute(chat: str = Body(...), muted: bool = Body(...)):
     STATE.mkdir(exist_ok=True)
     (STATE / "handed.txt").write_text("".join(i + "\n" for i in sorted(ids)))
     return {"ok": True}
+
+
+# ---- owner channel: the one number Mira takes commands from and may message unprompted ----
+def owner_ids() -> set:
+    """Chat ids of the owner. The number comes from whatsapp_state/owner.txt (gitignored); WhatsApp's
+    own server maps it to a chat id, so a sender cannot claim to be the owner by name or profile."""
+    f = STATE / "owner.txt"
+    if not f.exists():
+        return set()
+    num = f.read_text().strip()
+    cache = STATE / "owner_lid.txt"
+    ids = {num + "@c.us"}
+    if cache.exists() and cache.read_text().split()[:1] == [num]:
+        ids.add(cache.read_text().split()[1])
+        return ids
+    try:
+        lid = _gw("GET", "/api/contacts/checkNumberStatus", params={"contactId": num + "@c.us"})["data"]["id"]
+        cache.write_text(f"{num} {lid}")
+        ids.add(lid)
+    except Exception:
+        pass
+    return ids
+
+
+def send_to_owner(text: str) -> bool:
+    """Used by proactive alerts / blog notices in place of Telegram. False -> caller falls back."""
+    if (STATE / "OWNER_OFF").exists():
+        return False
+    try:
+        ids = [i for i in owner_ids() if i.endswith("@lid")] or [i for i in owner_ids()]
+        r = _gw("POST", "/api/messages/sendText", json={"to": ids[0], "content": text[:3500]})
+        return bool(r.get("success"))
+    except Exception:
+        return False
