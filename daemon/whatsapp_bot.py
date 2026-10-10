@@ -29,6 +29,7 @@ MIRA = os.environ.get("MIRA_URL", "http://127.0.0.1:11200")
 STATE = Path(__file__).parent / "whatsapp_state"
 PER_CHAT_HOUR, GLOBAL_HOUR, MIN_GAP = 30, 150, 5  # replies/hour/chat, replies/hour, seconds between sends
 INTRO = "Welcome to KrishiVerse! My name is ParthAI, KrishiVerse's AI assistant."
+CATCHUP_GAP = (20, 40)  # seconds between chats when answering a backlog
 HOLD_MSG = "Thanks for your message! I'm passing this to the team and someone will get back to you soon."
 FIRST = ("This is your FIRST reply in this chat: begin with a short welcome and introduce yourself exactly in this spirit, in the "
          f"customer's language: \"{INTRO}\" Then answer their question in the same message (unless you must reply HANDOFF, in which case reply only HANDOFF).")
@@ -299,6 +300,7 @@ def queue_worker():
                         items = q.pop(chat)
                         (STATE / "queue.json").write_text(json.dumps(q, ensure_ascii=False))
                         process(chat, [m for it in items for m in it["mids"]], "\n".join(it["body"] for it in items))
+                        time.sleep(random.uniform(*CATCHUP_GAP))
         except Exception as e:
             log("error", text="queue: " + repr(e))
 
@@ -352,7 +354,7 @@ def heartbeat():
 
 def catch_up(since):
     """Answer people who wrote while the stream was down. Owner chat is skipped on purpose: never replay stale commands."""
-    skip, n = whatsapp_inbox.owner_ids(), 0
+    skip, todo = whatsapp_inbox.owner_ids(), []
     try:
         chats = requests.get(f"{GATEWAY}/api/chats/getAll", headers=H, timeout=30).json().get("data") or []
         for c in chats:
@@ -365,15 +367,21 @@ def catch_up(since):
             for m in ms:  # trailing run of customer messages after our last outgoing one
                 if m["id"].startswith("true_"):
                     tail = []
-                elif m.get("type") == "chat" and (m.get("body") or "").strip() and (m.get("t") or 0) >= since:
+                elif m.get("type") == "chat" and (m.get("body") or "").strip() and (m.get("t") or 0) >= since and m["id"] not in seen:
                     tail.append(m)
-            for m in tail:
-                if m["id"] not in seen:
-                    n += 1
-                    handle(cid, m["id"], m["body"].strip())
+            if tail:
+                todo.append((cid, tail))
     except Exception as e:
         log("error", text="catch_up: " + repr(e))
-    log("catch_up", text=f"{n} missed message(s) since {time.strftime('%F %T', time.localtime(since))}")
+    log("catch_up", text=f"{len(todo)} chat(s) with missed messages since {time.strftime('%F %T', time.localtime(since))}")
+    for i, (cid, tail) in enumerate(todo):  # one chat at a time, with a long random pause between chats, so a backlog never looks like a burst
+        if i:
+            time.sleep(random.uniform(*CATCHUP_GAP))
+        for m in tail:
+            handle(cid, m["id"], m["body"].strip())
+        time.sleep(DEBOUNCE + 1)
+        with work:  # wait until that chat's reply has actually been sent
+            pass
 
 
 def last_alive():
