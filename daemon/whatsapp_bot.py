@@ -339,6 +339,50 @@ def watchdog():
                 whatsapp_inbox.send_to_owner("Heads-up: the WhatsApp gateway had stopped responding; I restarted it and it is back. Messages sent while it was down may not have been answered.")
 
 
+stream_up = threading.Event()
+
+
+def heartbeat():
+    """alive.txt = last time the event stream was known to be connected; the gap since then is the downtime to catch up on."""
+    while True:
+        if stream_up.is_set():
+            (STATE / "alive.txt").write_text(str(int(time.time())))
+        time.sleep(20)
+
+
+def catch_up(since):
+    """Answer people who wrote while the stream was down. Owner chat is skipped on purpose: never replay stale commands."""
+    skip, n = whatsapp_inbox.owner_ids(), 0
+    try:
+        chats = requests.get(f"{GATEWAY}/api/chats/getAll", headers=H, timeout=30).json().get("data") or []
+        for c in chats:
+            cid = c["id"] if isinstance(c.get("id"), str) else (c.get("id") or {}).get("_serialized", "")
+            if not cid.endswith(("@c.us", "@lid")) or cid.startswith("0@") or cid in skip or (c.get("t") or 0) < since:
+                continue
+            ms = sorted(requests.get(f"{GATEWAY}/api/messages/getAll", headers=H, params={"chatId": cid}, timeout=30).json().get("data") or [],
+                        key=lambda m: m.get("t") or 0)
+            tail = []
+            for m in ms:  # trailing run of customer messages after our last outgoing one
+                if m["id"].startswith("true_"):
+                    tail = []
+                elif m.get("type") == "chat" and (m.get("body") or "").strip() and (m.get("t") or 0) >= since:
+                    tail.append(m)
+            for m in tail:
+                if m["id"] not in seen:
+                    n += 1
+                    handle(cid, m["id"], m["body"].strip())
+    except Exception as e:
+        log("error", text="catch_up: " + repr(e))
+    log("catch_up", text=f"{n} missed message(s) since {time.strftime('%F %T', time.localtime(since))}")
+
+
+def last_alive():
+    try:
+        return int((STATE / "alive.txt").read_text())
+    except Exception:
+        return None
+
+
 def flush(chat):
     with work:
         items, pending[chat] = pending[chat], []
@@ -404,9 +448,14 @@ def main():
     log("start", text="paused" if paused() else "active")
     threading.Thread(target=queue_worker, daemon=True).start()
     threading.Thread(target=watchdog, daemon=True).start()
+    threading.Thread(target=heartbeat, daemon=True).start()
     while True:
         try:
             with requests.get(f"{GATEWAY}/api/events?topics=*", headers=H, stream=True, timeout=(10, None)) as r:
+                since = last_alive()
+                stream_up.set()
+                if since:
+                    threading.Thread(target=catch_up, args=(since - 60,), daemon=True).start()
                 r.encoding = "utf-8"  # SSE has no charset header; requests would guess Latin-1 and mangle ₹ / Hindi
                 for line in r.iter_lines(decode_unicode=True):
                     if line and line.startswith("data:"):
@@ -418,6 +467,7 @@ def main():
                             log("error", text=repr(e))
         except Exception as e:
             log("stream_error", text=repr(e))
+        stream_up.clear()
         time.sleep(5)
 
 
