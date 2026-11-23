@@ -3,7 +3,14 @@
 Entries are grouped by date; releases from v1.1.0 onward are also tagged in
 git and published as GitHub Releases.
 
-## Unreleased
+## v1.3.0 — 2026-11-23
+
+### Added
+- **WhatsApp auto-reply for customers.** An open-wa gateway feeds a bot that answers in the customer's language, remembers the last 30 messages, debounces messages sent together and caps replies per hour (queued over the cap, never dropped).
+- **Owner channel and handoff tickets.** The owner can command Mira from their own number. Questions the bot can't answer become tickets forwarded to the owner; the answer (also from Telegram, `#7 the price is 3500`) is relayed to the customer and learned.
+- **WhatsApp tab** in the workspace: chat list, thread view, manual reply, mute and auto-reply toggles, and a live QR to link the number.
+- **Catch-up and self-healing.** Messages missed during downtime are answered one chat at a time with 20-40s gaps; a watchdog restarts the gateway and detects a logged-out session.
+- **Voltros and NeutronX blog notices** next to KrishiVerse, one digest block per brand; draft posts are announced as drafts with the Shopify admin link.
 
 ### Changed
 - **AI dashboard redesign** — the workspace moved from translucent Liquid Glass
