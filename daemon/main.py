@@ -2392,7 +2392,7 @@ def telegram_status():
 
 @app.post("/notify/blog-published")
 def notify_blog_published(payload: dict = Body(...)):
-    """Called locally by n8n (KrishiVerse Blog Automation) after a successful
+    """Called locally by n8n (KrishiVerse, NeutronX and Voltros blog automations) after a successful
     publish. n8n never touches the Telegram bot token -- it just hands Mira
     the raw facts, and Mira composes and sends the message itself, in the
     same summarized, forwardable style as its other Telegram notices."""
@@ -2400,16 +2400,22 @@ def notify_blog_published(payload: dict = Body(...)):
     title = (payload.get("title") or "").strip()
     summary = (payload.get("summary") or "").strip()
     url = (payload.get("url") or "").strip()
+    import blog_log
+    brand = blog_log.brand_key(payload.get("brand") or "", url)
+    brand_name = blog_log.BRANDS[brand][0]
     # The workflow only sends url_hi once the Hindi translation passed all its
     # checks, including a fetch of the live /hi/ page -- otherwise hindi_error
     # says why there is none.
     url_hi = (payload.get("url_hi") or "").strip()
     hindi_error = (payload.get("hindi_error") or "").strip()
 
-    lines = ["New KrishiVerse blog published: " + (title or topic or "(untitled)")]
+    if payload.get("draft"):  # saved unpublished for review: url is the Shopify admin page, not a live page
+        lines = [f"New {brand_name} blog saved as a DRAFT (not live yet, needs your review): " + (title or topic or "(untitled)")]
+    else:
+        lines = [f"New {brand_name} blog published: " + (title or topic or "(untitled)")]
     if summary:
         lines.append(summary)
-    links = ["English: " + (url or "(no Shopify URL was captured for this post)")]
+    links = [("English: " if url_hi or hindi_error else "") + (url or "(no URL was captured for this post)")]
     if url_hi:
         links.append("Hindi: " + url_hi)
     elif hindi_error:
@@ -2417,9 +2423,8 @@ def notify_blog_published(payload: dict = Body(...)):
     lines.append("\n".join(links))
     text = "\n\n".join(lines)
 
-    import blog_log
     try:
-        blog_log.record(title or topic, summary, url, url_hi, hindi_error)
+        blog_log.record(title or topic, summary, url, url_hi, hindi_error, brand)
     except OSError as e:
         print(f"[notify] could not record blog for the morning digest: {e}")
 

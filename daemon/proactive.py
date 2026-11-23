@@ -88,7 +88,7 @@ def _notify_mac(title: str, body: str):
 
 
 def _send_telegram(text: str) -> bool:
-    # owner channel is WhatsApp for now (see whatsapp_inbox.send_to_owner); Telegram is the fallback
+    # send_to_owner tries Telegram first and falls back to WhatsApp; the code below is a last resort
     import whatsapp_inbox
     if whatsapp_inbox.send_to_owner(text):
         return True
@@ -411,8 +411,8 @@ def _digest_entry(m: dict, index: int, g) -> str:
 
 
 def _blog_digest_section(state: dict) -> list:
-    """KrishiVerse blog posts published since the last digest, as one extra
-    digest block. Tracked by its own timestamp in the digest state rather than
+    """KrishiVerse, NeutronX and Voltros blog posts published since the last digest, one
+    digest block per brand. Tracked by its own timestamp in the digest state rather than
     tied to the mail half, so every post shows up exactly once even on days
     the mail digest bails out early (empty inbox, Google disconnected)."""
     import blog_log
@@ -422,22 +422,31 @@ def _blog_digest_section(state: dict) -> list:
     state["blog_last_ts"] = entries[-1]["published_at"]
     _save_digest_state(state)
 
-    lines = [f"🌾 KrishiVerse blog ({len(entries)} new)"]
-    for e in entries:
-        summary = (e.get("summary") or "").strip()
-        first = summary.split(". ")[0].rstrip(".")
-        if len(first) > 160:
-            first = first[:160].rsplit(" ", 1)[0] + "…"
-        lines.append("")
-        lines.append(f"• {e.get('title') or '(untitled)'}")
-        if first:
-            lines.append(f"  {first}.")
-        lines.append(f"  English: {e.get('url') or '(no link captured)'}")
-        if e.get("url_hi"):
-            lines.append(f"  Hindi: {e['url_hi']}")
-        elif e.get("hindi_error"):
-            lines.append(f"  Hindi: not published ({e['hindi_error']})")
-    return ["\n".join(lines)]
+    blocks = []
+    for key, (name, emoji) in blog_log.BRANDS.items():
+        mine = [e for e in entries if blog_log.brand_key(e.get("brand"), e.get("url")) == key]
+        if not mine:
+            continue
+        lines = [f"{emoji} {name} blog ({len(mine)} new)"]
+        for e in mine:
+            summary = (e.get("summary") or "").strip()
+            first = summary.split(". ")[0].rstrip(".")
+            if len(first) > 160:
+                first = first[:160].rsplit(" ", 1)[0] + "…"
+            lines.append("")
+            lines.append(f"• {e.get('title') or '(untitled)'}")
+            if first:
+                lines.append(f"  {first}.")
+            if e.get("url_hi") or e.get("hindi_error"):
+                lines.append(f"  English: {e.get('url') or '(no link captured)'}")
+            else:
+                lines.append(f"  {e.get('url') or '(no link captured)'}")
+            if e.get("url_hi"):
+                lines.append(f"  Hindi: {e['url_hi']}")
+            elif e.get("hindi_error"):
+                lines.append(f"  Hindi: not published ({e['hindi_error']})")
+        blocks.append("\n".join(lines))
+    return blocks
 
 
 def _check_email_digest(settings: dict, seen: set) -> list:

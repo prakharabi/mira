@@ -1,4 +1,4 @@
-"""Recently published KrishiVerse blog posts, as reported by the n8n blog
+"""Recently published blog posts (KrishiVerse, NeutronX, Voltros), as reported by the n8n blog
 automation through /notify/blog-published. Kept so the morning digest can
 mention what went out since the last one -- the Telegram notice at publish
 time is easy to miss by the next morning."""
@@ -8,6 +8,19 @@ from pathlib import Path
 
 BLOG_LOG_PATH = Path.home() / "Mira" / "daemon" / "memory_store" / "blog_log.json"
 MAX_ENTRIES = 30
+# n8n sends brand: "neutronx" / "voltros"; KrishiVerse's workflow sends none.
+BRANDS = {"krishiverse": ("KrishiVerse", "🌾"), "neutronx": ("NeutronX", "🧾"), "voltros": ("Voltros", "⚡")}
+
+
+def brand_key(brand: str = "", url: str = "") -> str:
+    """The brand's key; falls back to the post's site when a stored entry has no brand."""
+    brand = (brand or "").strip().lower()
+    if brand in BRANDS:
+        return brand
+    for key in ("neutronx", "voltros"):
+        if f"{key}.in" in (url or ""):
+            return key
+    return "krishiverse"
 
 
 def _load() -> list:
@@ -20,8 +33,9 @@ def _load() -> list:
         return []
 
 
-def record(title: str, summary: str, url: str, url_hi: str = "", hindi_error: str = "") -> dict:
+def record(title: str, summary: str, url: str, url_hi: str = "", hindi_error: str = "", brand: str = "") -> dict:
     entry = {
+        "brand": brand_key(brand, url),
         "title": title,
         "summary": summary,
         "url": url,
