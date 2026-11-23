@@ -242,6 +242,10 @@ def _handle_update(token: str, update: dict):
     with _TypingLoop(token, chat_id):
         if voice:
             reply = _handle_voice(token, voice)
+        elif re.match(r"#\d+\s+\S", text.strip()):  # answer to a WhatsApp handoff ticket: "#7 the price is 3500"
+            import whatsapp_bot
+            m = re.match(r"#(\d+)\s+(.+)", text.strip(), re.S)
+            reply = whatsapp_bot.answer_ticket(m.group(1), m.group(2).strip())
         elif text.strip().lower().startswith("/dump"):
             reply = _handle_dump(text[len("/dump"):].strip())
         elif text.strip():

@@ -1,7 +1,10 @@
 """Workspace "WhatsApp" tab backend: read chats from the open-wa gateway, send manual replies,
 mute/unmute the auto-reply bot per chat, and flip its kill switch. State files are shared
 with whatsapp_bot.py (daemon/whatsapp_state/)."""
+import json
 import os
+import subprocess
+import threading
 import time
 from pathlib import Path
 
@@ -12,6 +15,7 @@ router = APIRouter(prefix="/whatsapp")
 GATEWAY = os.environ.get("WA_GATEWAY", "http://127.0.0.1:8080")
 ENV = Path(os.environ.get("WA_GATEWAY_ENV", Path.home() / "Developer/whatsapp-openwa/.env"))
 STATE = Path(__file__).parent / "whatsapp_state"
+SETTINGS = Path(__file__).parent / "settings.json"
 
 
 def _gw(method, path, **kw):
@@ -32,6 +36,66 @@ def status():
     except Exception:
         connected = False
     return {"connected": connected, "auto_reply": not (STATE / "PAUSE").exists()}
+
+
+def restart_gateway():
+    """pm2-restart the open-wa gateway (the saved session survives; a logged-out one comes back showing a fresh QR)."""
+    pm2_dir = ENV.parent
+    node = subprocess.check_output(["/bin/zsh", "-lc", "command -v node"], text=True).strip()
+    env = {**os.environ, "PATH": f"{Path(node).parent}:{os.environ.get('PATH', '')}"}
+    subprocess.run([str(pm2_dir / "node_modules/.bin/pm2"), "restart", "wa", "wa-hook"], cwd=pm2_dir, env=env, capture_output=True, timeout=60)
+
+
+def live_qr():
+    """The QR drawn right now on the gateway's WhatsApp Web page (it rotates every ~20 s), read over Chrome's debug port. The gateway's
+    own /qr only ever holds the first QR, which WhatsApp invalidates after about a minute, so scanning it fails with "could not link"."""
+    import websocket
+    port = next(ENV.parent.glob("_IGNORE_*/DevToolsActivePort")).read_text().split("\n")[0]
+    page = next(t for t in requests.get(f"http://127.0.0.1:{port}/json/list", timeout=3).json()
+                if t["type"] == "page" and "web.whatsapp.com" in t["url"])
+    ws = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=5, suppress_origin=True)
+    try:
+        ws.send(json.dumps({"id": 1, "method": "Runtime.evaluate", "params": {"returnByValue": True,
+                "expression": "(document.querySelector('[data-ref]') || {getAttribute: () => null}).getAttribute('data-ref')"}}))
+        while True:
+            d = json.loads(ws.recv())
+            if d.get("id") == 1:
+                return d["result"]["result"].get("value")
+    finally:
+        ws.close()
+
+
+_qr_restart = 0.0  # when we last restarted the gateway to get a fresh QR
+
+
+@router.get("/qr")
+def qr():
+    """QR for linking the number (WhatsApp > Linked devices); the UI polls this. The gateway shows a QR for only ~3 minutes, then
+    goes DISCONNECTED and keeps serving the dead code. So a request in that state restarts it (at most every 2 minutes) for a new one."""
+    global _qr_restart
+    import segno
+    try:
+        health = requests.get(GATEWAY + "/health", timeout=3).json()
+    except Exception:
+        return {"connected": False, "svg": None, "state": "GATEWAY_DOWN"}
+    state = (health.get("session") or {}).get("state")
+    if health.get("connected"):
+        return {"connected": True, "svg": None, "state": state}
+    code = None
+    if state == "AUTHENTICATING":  # only then is the QR live
+        try:
+            code = live_qr()
+        except Exception:
+            try:
+                code = _gw("GET", "/qr").get("qr")  # fallback: only the first QR, valid for about a minute
+            except Exception:
+                pass
+    elif state == "DISCONNECTED" and time.time() - _qr_restart > 120:
+        _qr_restart = time.time()
+        threading.Thread(target=restart_gateway, daemon=True).start()
+        state = "REFRESHING"
+    svg = segno.make(code, error="l").svg_data_uri(scale=6, border=2, dark="#000", light="#fff") if code else None
+    return {"connected": False, "svg": svg, "state": state}
 
 
 @router.post("/auto-reply")
@@ -103,13 +167,28 @@ def owner_ids() -> set:
     return ids
 
 
-def send_to_owner(text: str) -> bool:
-    """Used by proactive alerts / blog notices in place of Telegram. False -> caller falls back."""
-    if (STATE / "OWNER_OFF").exists():
-        return False
+def _telegram_owner(text: str) -> bool:
+    """Telegram fallback. Reads settings.json directly: this module also runs inside the bot process, which must not import main."""
     try:
-        ids = [i for i in owner_ids() if i.endswith("@lid")] or [i for i in owner_ids()]
-        r = _gw("POST", "/api/messages/sendText", json={"to": ids[0], "content": text[:3500]})
-        return bool(r.get("success"))
+        s = json.loads(SETTINGS.read_text())
+        token, chat = s.get("telegram_bot_token"), s.get("telegram_owner_chat_id")
+        return bool(token and chat and requests.post(f"https://api.telegram.org/bot{token}/sendMessage",
+                                                     json={"chat_id": chat, "text": text[:4096]}, timeout=20).ok)
     except Exception:
         return False
+
+
+def send_to_owner(text: str) -> bool:
+    """Alerts / blog notices / handoffs to the owner: Telegram first (WhatsApp keeps getting logged out); WhatsApp only as a
+    fallback while it is connected. OWNER_OFF disables that fallback."""
+    if _telegram_owner(text):
+        return True
+    if not (STATE / "OWNER_OFF").exists():
+        try:
+            if requests.get(GATEWAY + "/health", timeout=3).json().get("connected"):
+                ids = [i for i in owner_ids() if i.endswith("@lid")] or [i for i in owner_ids()]
+                if _gw("POST", "/api/messages/sendText", json={"to": ids[0], "content": text[:3500]}).get("success"):
+                    return True
+        except Exception:
+            pass
+    return False

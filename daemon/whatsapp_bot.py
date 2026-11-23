@@ -14,7 +14,6 @@ import os
 import random
 import threading
 import re
-import subprocess
 import time
 from collections import defaultdict, deque
 from pathlib import Path
@@ -44,20 +43,40 @@ SYSTEM = (
 )
 
 
-def knowledge():
-    """Owner-provided notes (kb.md, your shared database) + answers the owner gave to past handoffs (learned.jsonl)."""
+STOP = set("the and for you your are what how can with this that have has from will about please tell kya hai hain ka ki ke ko me mein se hi aur or mujhe aap".split())
+
+
+def words(s):
+    return {w.rstrip("s") for w in re.findall(r"[a-z0-9\u0900-\u097f]{3,}", s.lower())} - STOP
+
+
+def top(items, query, n, key=str):
+    """The n items sharing the most words with the query (zero-overlap items are dropped), best first."""
+    qw = words(query)
+    scored = sorted(((len(qw & words(key(b))), i, b) for i, b in enumerate(items)), key=lambda t: (-t[0], -t[1]))
+    return [b for s, _, b in scored[:n] if s]
+
+
+def knowledge(query=""):
+    """Only the slice of the knowledge relevant to `query` (keeps each Groq request small): business info from kb.md,
+    best-matching FAQs, store products (products.md) and answers the owner gave to past handoffs (learned.jsonl)."""
     parts = []
     kb = STATE / "kb.md"
     if kb.exists():
-        parts.append(kb.read_text()[:16000])
+        head, *faqs = re.split(r"\n(?=Question:)", kb.read_text())
+        parts.append(head.strip()[:3000] + "\n\n" + "\n\n".join(top(faqs, query, 5)))
+    pr = STATE / "products.md"  # store catalogue, regenerated from the Shopify products.json
+    if pr.exists():
+        lines = pr.read_text().splitlines()
+        parts.append("\n".join([l for l in lines if l and not l.startswith("- ")] + [l[:1500] for l in top([l for l in lines if l.startswith("- ")], query, 3)]))
+    site = STATE / "site.md"  # ParthAI help/FAQ + store pages, blank-line separated blocks
+    if site.exists():
+        parts.append("\n\n".join(top(site.read_text().split("\n\n"), query, 3)))
     ln = STATE / "learned.jsonl"
     if ln.exists():
-        for l in ln.read_text().splitlines()[-80:]:
-            e = json.loads(l)
-            parts.append(f"Q: {e['q']}\nA: {e['a']}")
-    if not parts:
-        return SYSTEM
-    return SYSTEM + "\n\nKnowledge you may use. Answer ONLY from this. If entries conflict, the later Q/A pairs (given by the owner) win. If it does not cover the question, reply HANDOFF:\n\n" + "\n\n".join(parts)
+        es = [json.loads(l) for l in ln.read_text().splitlines()[-80:]]
+        parts.append("\n\n".join(f"Q: {e['q']}\nA: {e['a']}" for e in top(es, query, 4, key=lambda e: e["q"] + " " + e["a"])))
+    return SYSTEM + "\n\nKnowledge you may use. Answer ONLY from this. If entries conflict, the later Q/A pairs (given by the owner) win. If it does not cover the question, reply HANDOFF:\n\n" + "\n\n".join(p for p in parts if p.strip())
 
 
 def ask(system, history):
@@ -111,8 +130,13 @@ names = {}  # chat -> WhatsApp display name, filled from inbound events
 
 def open_ticket(chat, question):
     t = tickets()
-    tid = str(max([int(k) for k in t] + [0]) + 1)
-    t[tid] = {"chat": chat, "name": names.get(chat, ""), "q": question, "open": True}
+    today = time.strftime("%F")
+    t = {k: v for k, v in t.items() if v["open"] or v.get("d") == today}  # drop closed tickets from earlier days
+    n = max([int(k) for k, v in t.items() if v.get("d") == today] + [0]) + 1  # numbering restarts each day
+    while str(n) in t:  # an older still-open ticket may hold this number
+        n += 1
+    tid = str(n)
+    t[tid] = {"chat": chat, "name": names.get(chat, ""), "q": question, "open": True, "d": today, "ts": time.time()}
     save_tickets(t)
     who = f"{names.get(chat) or 'Someone'} (+{chat.split('@')[0]})"
     whatsapp_inbox.send_to_owner(
@@ -121,15 +145,34 @@ def open_ticket(chat, question):
     log("ticket_opened", chat=chat, id=tid, text=question)
 
 
+HANDOFF_MUTE = 2 * 3600  # seconds the bot stays silent in a chat while the owner has an unanswered handoff
+
+
+def is_muted(chat):
+    """A handoff mutes the chat only for HANDOFF_MUTE; if the owner never answers, the bot resumes (ticket stays open).
+    A mute with no open ticket (set by hand in the workspace tab) never expires."""
+    if chat not in load_set("handed.txt"):
+        return False
+    open_ = [tk for tk in tickets().values() if tk["open"] and tk["chat"] == chat]
+    if open_ and all(time.time() - tk.get("ts", 0) > HANDOFF_MUTE for tk in open_):
+        whatsapp_inbox.mute(chat, False)
+        log("mute_expired", chat=chat)
+        return False
+    return True
+
+
 def answer_ticket(tid, answer):
     t = tickets()
     tk = t.get(tid)
     if not tk or not tk["open"]:
         return f"No open handoff #{tid}."
+    closing = answer.strip().lower() == "close"
+    if not closing and not gateway_ok():  # the answer goes to the customer over WhatsApp: don't burn the ticket if it can't be delivered
+        return f"WhatsApp is not connected right now, so #{tid} was NOT sent. Reconnect WhatsApp (Mira > WhatsApp) and send it again."
     tk["open"] = False
     save_tickets(t)
     whatsapp_inbox.mute(tk["chat"], False)  # bot resumes for this chat
-    if answer.strip().lower() == "close":
+    if closing:
         return f"Closed #{tid}; I'll answer {tk['name'] or 'them'} myself from now on."
     final = compose_reply(tk["q"], answer) or in_their_language(tk["q"], answer, answer)
     send(tk["chat"], final)
@@ -305,9 +348,6 @@ def queue_worker():
             log("error", text="queue: " + repr(e))
 
 
-PM2_DIR = GATEWAY_ENV.parent
-
-
 def gateway_ok():
     """getMe exercises the real browser page; /health stays 'ready' even when the page has crashed."""
     try:
@@ -316,21 +356,41 @@ def gateway_ok():
         return False
 
 
-def restart_gateway():
-    env = {**os.environ, "PATH": f"{Path(subprocess.check_output(['/bin/zsh', '-lc', 'command -v node'], text=True).strip()).parent}:{os.environ.get('PATH', '')}"}
-    subprocess.run([str(PM2_DIR / "node_modules/.bin/pm2"), "restart", "wa", "wa-hook"], cwd=PM2_DIR, env=env, capture_output=True, timeout=60)
+def needs_qr():
+    """True when the gateway is logged out and showing a QR: a restart can't fix that, only a scan can."""
+    try:
+        return bool(requests.get(f"{GATEWAY}/qr", headers=H, timeout=10).json().get("qr"))
+    except Exception:
+        return False
 
 
 def watchdog():
-    """Restart the gateway after 3 failed checks in a row, then tell the owner on WhatsApp. At most one restart per 10 minutes."""
-    fails, last_restart = 0, 0
+    """After 3 failed checks in a row: if WhatsApp is logged out (QR showing) wait for a scan, else restart the gateway (at most one
+    restart per 10 minutes). Either way the owner is told once per outage; WhatsApp is down then, so send_to_owner uses Telegram."""
+    fails, last_restart, alerted = 0, 0, False
     while True:
         time.sleep(60)
-        fails = 0 if gateway_ok() else fails + 1
-        if fails >= 3 and time.time() - last_restart > 600:
+        if gateway_ok():
+            if alerted:
+                alerted = False
+                log("watchdog_result", text="back online")
+                whatsapp_inbox.send_to_owner("WhatsApp is connected again. Anyone who wrote while it was down is answered automatically.")
+            fails = 0
+            continue
+        fails += 1
+        if fails < 3:
+            continue
+        if needs_qr():
+            if not alerted:
+                alerted = True
+                log("watchdog_logged_out", text="waiting for a QR scan")
+                whatsapp_inbox.send_to_owner("WhatsApp is logged out and customers are not being answered. Open Mira > WhatsApp: the QR code shows up there. "
+                                             "On the Krishi Verse phone go to WhatsApp > Linked devices > Link a device and scan it.")
+            continue  # restarting now would only churn the browser while it waits for the scan
+        if time.time() - last_restart > 600:
             log("watchdog_restart", text="gateway unresponsive; restarting wa")
             try:
-                restart_gateway()
+                whatsapp_inbox.restart_gateway()
             except Exception as e:
                 log("watchdog_error", text=repr(e))
             last_restart, fails = time.time(), 0
@@ -339,6 +399,9 @@ def watchdog():
             log("watchdog_result", text="recovered" if ok else "still down - may need a QR re-link")
             if ok:
                 whatsapp_inbox.send_to_owner("Heads-up: the WhatsApp gateway had stopped responding; I restarted it and it is back. Messages sent while it was down may not have been answered.")
+            elif not alerted:
+                alerted = True
+                whatsapp_inbox.send_to_owner("WhatsApp is down: the gateway stopped responding and did not come back after a restart. I keep checking; open Mira > WhatsApp to see the status or scan a QR.")
 
 
 stream_up = threading.Event()
@@ -352,8 +415,9 @@ def heartbeat():
         time.sleep(20)
 
 
-def catch_up(since):
-    """Answer people who wrote while the stream was down. Owner chat is skipped on purpose: never replay stale commands."""
+def missed(since, skip_seen=True):
+    """[(chat, [customer messages after our last outgoing one])] for chats active since `since`. Owner chat is skipped on
+    purpose: never replay stale commands."""
     skip, todo = whatsapp_inbox.owner_ids(), []
     try:
         chats = requests.get(f"{GATEWAY}/api/chats/getAll", headers=H, timeout=30).json().get("data") or []
@@ -367,12 +431,18 @@ def catch_up(since):
             for m in ms:  # trailing run of customer messages after our last outgoing one
                 if m["id"].startswith("true_"):
                     tail = []
-                elif m.get("type") == "chat" and (m.get("body") or "").strip() and (m.get("t") or 0) >= since and m["id"] not in seen:
+                elif m.get("type") == "chat" and (m.get("body") or "").strip() and (m.get("t") or 0) >= since and not (skip_seen and m["id"] in seen):
                     tail.append(m)
             if tail:
                 todo.append((cid, tail))
     except Exception as e:
-        log("error", text="catch_up: " + repr(e))
+        log("error", text="missed: " + repr(e))
+    return todo
+
+
+def catch_up(since):
+    """Answer people who wrote while the stream was down."""
+    todo = missed(since)
     log("catch_up", text=f"{len(todo)} chat(s) with missed messages since {time.strftime('%F %T', time.localtime(since))}")
     for i, (cid, tail) in enumerate(todo):  # one chat at a time, with a long random pause between chats, so a backlog never looks like a burst
         if i:
@@ -382,6 +452,33 @@ def catch_up(since):
         time.sleep(DEBOUNCE + 1)
         with work:  # wait until that chat's reply has actually been sent
             pass
+
+
+RETRY_EVERY, RETRY_AFTER, RETRY_WINDOW, RETRY_MAX = 300, 180, 3 * 3600, 3  # seconds; tries per customer message
+tries = defaultdict(int)  # last customer message id -> attempts
+
+
+def retry_unanswered():
+    """Safety net for any failure (send error, model down, crash mid-reply): every few minutes, answer chats whose last word is a
+    customer's, even if that message was already seen. Skips muted/queued/in-flight chats and gives up after RETRY_MAX tries."""
+    while True:
+        time.sleep(RETRY_EVERY)
+        try:
+            if paused():
+                continue
+            queued = load_queue()
+            for cid, tail in missed(time.time() - RETRY_WINDOW, skip_seen=False):
+                last = tail[-1]
+                if (time.time() - (last.get("t") or 0) < RETRY_AFTER or is_muted(cid) or cid in queued or pending[cid]
+                        or tries[last["id"]] >= RETRY_MAX):
+                    continue
+                tries[last["id"]] += 1
+                log("retry", chat=cid, id=last["id"], text=f"try {tries[last['id']]}")
+                with work:
+                    process(cid, [m["id"] for m in tail], "\n".join(m["body"].strip() for m in tail))
+                time.sleep(random.uniform(*CATCHUP_GAP))
+        except Exception as e:
+            log("error", text="retry: " + repr(e))
 
 
 def last_alive():
@@ -408,14 +505,21 @@ def flush(chat):
             log("error", chat=chat, text=repr(e))
 
 
+def last_is_outgoing(chat):
+    try:
+        ms = requests.get(f"{GATEWAY}/api/messages/getAll", headers=H, params={"chatId": chat}, timeout=20).json().get("data") or []
+        return bool(ms) and max(ms, key=lambda m: m.get("t") or 0)["id"].startswith("true_")
+    except Exception:
+        return False  # can't tell: answer rather than leave the customer waiting
+
+
 def process(chat, mids, body):
     if chat in whatsapp_inbox.owner_ids():
         return owner_command(chat, body)
     log("in", chat=chat, id=mids[-1], text=body)
     if paused():
         return log("skipped_paused", chat=chat)
-    handed = load_set("handed.txt")  # re-read: the workspace tab can mute/unmute live
-    if chat in handed:
+    if is_muted(chat):  # re-read each time: the workspace tab can mute/unmute live
         for tid, tk in tickets().items():  # pass follow-ups from a waiting person on to the owner
             if tk["open"] and tk["chat"] == chat:
                 whatsapp_inbox.send_to_owner(f"Follow-up on #{tid} from {tk['name'] or chat.split('@')[0]}: \"{body}\"")
@@ -435,7 +539,12 @@ def process(chat, mids, body):
         lang = detect_language(body)
         english = not lang or lang.lower().startswith("english")
         # Answer from the English data in English (most reliable), then translate explicitly into the customer's language/script.
-        reply = ask(knowledge() + "\n\nWrite your reply in English only; it will be translated afterwards." + ("\n\n" + FIRST if first else ""), hist)
+        recent = " ".join(m["content"] for m in hist if m["role"] == "user")[-500:]
+        q = recent if english else recent + " " + ask("Translate to English. Output only the translation.", [{"role": "user", "content": body}])
+        reply = ask(knowledge(q) + "\n\nWrite your reply in English only; it will be translated afterwards." + ("\n\n" + FIRST if first else ""), hist)
+        if reply and english and re.search(r"[\u0900-\u097f]", reply):  # earlier Hindi turns in the history can leak into an English answer
+            reply = ask("Translate the text into English. Keep numbers, prices, names, URLs and the \u20b9 symbol exactly. Output only the translation.",
+                        [{"role": "user", "content": reply}]) or reply
         if reply and reply.strip(".! ").upper() != "HANDOFF" and not english:
             reply = ask(f"Translate the text into {lang}. " + ("Hinglish means Hindi written in Roman letters: never use Devanagari. " if "inglish" in lang else "")
                         + "Keep numbers, prices, names, URLs and the \u20b9 symbol exactly. Output only the translation.",
@@ -448,6 +557,8 @@ def process(chat, mids, body):
     time.sleep(min(6, 1.5 + len(reply) / 40) + random.random())  # typing delay
     if paused():  # re-check: kill switch may flip during the model call
         return log("skipped_paused", chat=chat)
+    if last_is_outgoing(chat):  # you (or the bot) already replied since the customer's last message: stay quiet
+        return log("skipped_already_replied", chat=chat, text=body)
     send(chat, reply[:1500])
 
 
@@ -457,6 +568,7 @@ def main():
     threading.Thread(target=queue_worker, daemon=True).start()
     threading.Thread(target=watchdog, daemon=True).start()
     threading.Thread(target=heartbeat, daemon=True).start()
+    threading.Thread(target=retry_unanswered, daemon=True).start()
     while True:
         try:
             with requests.get(f"{GATEWAY}/api/events?topics=*", headers=H, stream=True, timeout=(10, None)) as r:

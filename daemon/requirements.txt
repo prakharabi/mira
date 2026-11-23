@@ -4,6 +4,8 @@ uvicorn==0.51.0
 python-multipart==0.0.32
 python-dotenv==1.2.2
 requests==2.34.2
+websocket-client==1.9.2  # reads the live QR off the gateway's WhatsApp Web page
+segno==1.6.6  # QR image for linking WhatsApp from the workspace tab
 
 # Web search (DuckDuckGo; handles the anti-bot token handshake)
 ddgs==9.16.0
