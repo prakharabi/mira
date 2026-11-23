@@ -2389,8 +2389,16 @@
       <!-- ---------- WHATSAPP ---------- -->
       <div class="view" id="whatsapp-view">
         <div class="view-header">
-          <h1 class="view-title">WhatsApp</h1>
+          <h1 class="view-title">WhatsApp <button class="ghost" id="wa-qr-btn" style="font-size:12px;padding:4px 12px;border-radius:14px;vertical-align:middle;margin-left:8px;cursor:pointer">Link / re-link</button></h1>
           <p class="view-subtitle" id="wa-sub">Chats on your linked number. Mira auto-replies to new senders; reply yourself any time.</p>
+        </div>
+        <div id="wa-qr-box" hidden style="position:fixed;inset:0;z-index:50;background:rgba(0,0,0,0.6);display:none;place-items:center">
+          <div style="background:var(--bg-elevated);border:1px solid var(--border-soft);border-radius:16px;padding:24px;text-align:center;max-width:340px">
+            <div style="font-weight:600;margin-bottom:6px">Link WhatsApp</div>
+            <div class="sub" style="margin-bottom:12px;font-size:12px">On the phone: WhatsApp &gt; Linked devices &gt; Link a device, then scan.</div>
+            <div id="wa-qr-img" style="min-height:200px;display:grid;place-items:center"></div>
+            <button class="ghost" id="wa-qr-close" style="margin-top:14px;padding:6px 16px;border-radius:14px;cursor:pointer">Close</button>
+          </div>
         </div>
         <div id="wa-wrap">
           <div id="wa-list"></div>
@@ -5259,6 +5267,7 @@
       waChats = chats;
       document.getElementById('wa-auto').textContent = st.auto_reply ? 'Auto-reply: ON' : 'Auto-reply: OFF';
       document.getElementById('wa-auto').dataset.on = st.auto_reply ? '1' : '';
+      if (st.connected) waQrDismissed = false; else if (!waQrDismissed && document.getElementById('wa-qr-box').hidden) waAutoQr();
       document.getElementById('wa-sub').textContent = st.connected ? 'Chats on your linked number. Mira auto-replies to new senders; reply yourself any time.' : 'Gateway not connected (is pm2 running wa?).';
       document.getElementById('wa-list').innerHTML = chats.map(c => `
         <div class="wa-chat ${c.id === waChat ? 'active' : ''}" data-id="${esc(c.id)}">
@@ -5305,6 +5314,28 @@
     const c = waChats.find(x => x.id === waChat);
     if (c) { await waPost('/mute', { chat: waChat, muted: !c.muted }); waRefresh(); }
   });
+
+  // Link / re-link: the daemon hands out the current QR (rotates ~20 s); poll until the phone has scanned it.
+  let waQrTimer = null, waQrDismissed = false;   // dismissed = user closed the card while still logged out; re-arms once connected
+  async function waAutoQr() {   // logged out (a QR exists) -> show it without being asked
+    try { if ((await waGet('/qr')).svg) waQrOpen(); } catch (e) {}
+  }
+  function waQrOpen() {
+    const b = document.getElementById('wa-qr-box'); b.hidden = false; b.style.display = 'grid';
+    clearTimeout(waQrTimer); waQrTick();
+  }
+  async function waQrTick() {
+    const img = document.getElementById('wa-qr-img');
+    try {
+      const r = await waGet('/qr');
+      if (r.connected) { img.textContent = 'Linked \u2713'; setTimeout(waQrClose, 1500); waRefresh(); return; }
+      img.innerHTML = r.svg ? `<img src="${r.svg}" width="260" height="260" alt="WhatsApp QR">` : `<span class="sub">Waiting for a QR (${esc(r.state || 'starting')})\u2026</span>`;
+    } catch (e) { img.textContent = 'Could not reach the Mira daemon.'; }
+    waQrTimer = setTimeout(waQrTick, 3000);
+  }
+  function waQrClose() { clearTimeout(waQrTimer); const b = document.getElementById('wa-qr-box'); b.hidden = true; b.style.display = 'none'; }
+  document.getElementById('wa-qr-btn').addEventListener('click', waQrOpen);
+  document.getElementById('wa-qr-close').addEventListener('click', () => { waQrDismissed = true; waQrClose(); });
 
   // ==================== Outreach ====================
   // Campaigns over a lead list, run by daemon/outreach.py. This view is a thin
